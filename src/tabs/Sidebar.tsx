@@ -1,5 +1,5 @@
 import { createSignal, For, Show, onMount, type JSX } from "solid-js";
-import { displayTitle, visualOrder, type Drop, type Group } from "./layout";
+import { displayTitle, ownRowColor, visualOrder, type Drop, type Group } from "./layout";
 import { createMenu, type MenuItem } from "../ui/Menu";
 import type { Tab } from "./Tab";
 import { TabIcon } from "./icons";
@@ -105,11 +105,12 @@ export function Sidebar(props: SidebarProps) {
   function TabRow(p: { tab: Tab }) {
     const tab = p.tab;
     const title = () => displayTitle(tab);
+    const rowColor = () => ownRowColor(tab.color, groupOf(tab)?.color);
     return (
       <div
         class="tab-row"
-        classList={{ active: props.active === tab, colored: !!tab.color, "drop-before": dropTarget() === tab }}
-        style={tab.color ? { "--tab-color": tab.color } : {}}
+        classList={{ active: props.active === tab, colored: !!rowColor(), "drop-before": dropTarget() === tab }}
+        style={rowColor() ? { "--tab-color": rowColor() } : {}}
         title={tab.cwd ?? tab.title}
         draggable={editing() !== tab}
         onDragStart={(e) => dragStart(e, { tab })}

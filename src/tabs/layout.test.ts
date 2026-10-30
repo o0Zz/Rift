@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { displayTitle, folderName, moveGroup, moveTab, shouldNotify, visualOrder, type Group } from "./layout";
+import { displayTitle, folderName, moveGroup, moveTab, ownRowColor, shouldNotify, visualOrder, type Group } from "./layout";
 
 const g = (id: string, collapsed = false): Group => ({ id, name: id, collapsed });
 const t = (name: string, group?: string) => ({ name, group });
@@ -72,5 +72,17 @@ describe("shouldNotify", () => {
     expect(shouldNotify("done", true)).toBe(false);
     expect(shouldNotify("working", false)).toBe(false);
     expect(shouldNotify(undefined, false)).toBe(false);
+  });
+});
+
+describe("ownRowColor", () => {
+  it("lets a colored group override the tab color", () => {
+    expect(ownRowColor("#red", "#blue")).toBeUndefined();
+    expect(ownRowColor(undefined, "#blue")).toBeUndefined();
+  });
+
+  it("shows the tab color outside a group or in a colorless group", () => {
+    expect(ownRowColor("#red", undefined)).toBe("#red");
+    expect(ownRowColor(undefined, undefined)).toBeUndefined();
   });
 });

@@ -43,6 +43,15 @@ export function moveGroup(groups: Group[], id: string, before?: string): Group[]
   return rest;
 }
 
+/**
+ * The color a tab's own row shows. A colored group always wins: its tabs take the group color (the group
+ * block is tinted, rows stay plain). The tab's own color only shows outside a group or in a colorless one;
+ * it is kept, so it comes back when the tab leaves the colored group.
+ */
+export function ownRowColor(tabColor: string | undefined, groupColor: string | undefined): string | undefined {
+  return groupColor ? undefined : tabColor;
+}
+
 /** Title shown in the sidebar: the user's name, else the agent's title (Claude names the conversation), else the folder. */
 export function displayTitle(t: { name?: string; title: string; cwd?: string; status?: Status }): string {
   if (t.name) return t.name;
