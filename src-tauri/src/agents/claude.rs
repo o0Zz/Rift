@@ -124,6 +124,10 @@ impl AgentHarness for Claude {
         Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
     }
 
+    fn start_command(&self) -> String {
+        "claude".into()
+    }
+
     fn resume_command(&self, session_id: &str) -> Option<String> {
         // Session ids are UUIDs; anything else must not reach a shell command line.
         let valid = !session_id.is_empty()

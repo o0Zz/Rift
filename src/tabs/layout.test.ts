@@ -1,5 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { displayTitle, folderName, moveGroup, moveTab, ownRowColor, shouldNotify, visualOrder, type Group } from "./layout";
+import {
+  displayTitle,
+  folderName,
+  matchesFilter,
+  moveGroup,
+  moveTab,
+  needsAttention,
+  nextNeedingAttention,
+  ownRowColor,
+  shouldNotify,
+  statusAfterEscape,
+  visualOrder,
+  type Group,
+  type Status,
+} from "./layout";
 
 const g = (id: string, collapsed = false): Group => ({ id, name: id, collapsed });
 const t = (name: string, group?: string) => ({ name, group });
@@ -83,5 +97,42 @@ describe("ownRowColor", () => {
   it("shows the tab color outside a group or in a colorless group", () => {
     expect(ownRowColor("#red", undefined)).toBe("#red");
     expect(ownRowColor(undefined, undefined)).toBeUndefined();
+  });
+});
+
+describe("statusAfterEscape", () => {
+  it("returns a working or blocked agent to idle, leaves the rest", () => {
+    expect(statusAfterEscape("working")).toBe("idle");
+    expect(statusAfterEscape("blocked")).toBe("idle");
+    expect(statusAfterEscape("done")).toBe("done");
+    expect(statusAfterEscape(undefined)).toBeUndefined();
+  });
+});
+
+describe("attention", () => {
+  const tab = (name: string, status?: Status, unread = false) => ({ name, status, unread });
+
+  it("needs the user when blocked, or done and not seen", () => {
+    expect(needsAttention(tab("a", "blocked"))).toBe(true);
+    expect(needsAttention(tab("a", "done", true))).toBe(true);
+    expect(needsAttention(tab("a", "done", false))).toBe(false);
+    expect(needsAttention(tab("a", "working", true))).toBe(false);
+  });
+
+  it("filters the sidebar", () => {
+    const tabs = [tab("w", "working"), tab("b", "blocked"), tab("d", "done", true), tab("s")];
+    expect(tabs.filter((t) => matchesFilter(t, "attention")).map((t) => t.name)).toEqual(["b", "d"]);
+    expect(tabs.filter((t) => matchesFilter(t, "working")).map((t) => t.name)).toEqual(["w"]);
+    expect(tabs.filter((t) => matchesFilter(t, "all"))).toHaveLength(4);
+  });
+
+  it("goes to the next tab that needs the user, blocked first, wrapping", () => {
+    const [a, b, c, d] = [tab("a"), tab("b", "done", true), tab("c"), tab("d", "blocked")];
+    const order = [a, b, c, d];
+    expect(nextNeedingAttention(order, a)?.name).toBe("d"); // blocked wins over the nearer done
+    d.status = "working";
+    expect(nextNeedingAttention(order, c)?.name).toBe("b"); // wraps around
+    expect(nextNeedingAttention(order, b)).toBeUndefined(); // only itself
+    expect(nextNeedingAttention([], undefined)).toBeUndefined();
   });
 });

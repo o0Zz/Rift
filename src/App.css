@@ -944,3 +944,79 @@ body,
   color: #fff;
   font: inherit;
 }
+
+/* Sidebar filter: All / Needs me / Working */
+
+.filters {
+  display: flex;
+  gap: 4px;
+  padding: 0 8px 6px;
+}
+
+.filter {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: none;
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 11px;
+}
+
+.filter:hover {
+  color: var(--fg-bright);
+}
+
+.filter.on {
+  border-color: var(--accent);
+  background: var(--on-bg);
+  color: var(--fg-strong);
+}
+
+.filter-count {
+  color: var(--fg-faint);
+}
+
+.filter.hot .filter-count {
+  color: var(--s-m);
+  font-weight: 700;
+}
+
+/* Find bar, top-right of the terminal */
+
+.find-bar {
+  position: absolute;
+  z-index: 6;
+  top: 6px;
+  right: 18px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid var(--menu-line);
+  border-radius: 6px;
+  background: var(--menu-bg);
+  box-shadow: 0 4px 14px var(--shadow);
+}
+
+.find-bar input {
+  width: 200px;
+  padding: 3px 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  outline: none;
+  background: var(--input-bg);
+  color: var(--fg);
+  font: inherit;
+}
+
+.find-bar input:focus {
+  border-color: var(--accent);
+}
+
+.find-bar input.missing {
+  border-color: var(--err);
+}

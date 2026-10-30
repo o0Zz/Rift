@@ -138,6 +138,42 @@ pub fn commit(root: &Path, files: &[(String, bool)], message: &str) -> Result<St
     Ok(text.lines().next().unwrap_or_default().to_string())
 }
 
+/// Creates a git worktree for `branch` next to the repository, in `<repo>.worktrees/<branch>`, so
+/// parallel agents work on separate checkouts. Creates the branch from HEAD unless it exists.
+/// Returns the worktree folder.
+pub fn worktree_add(root: &Path, branch: &str) -> Result<PathBuf> {
+    check(git(root, &["check-ref-format", "--branch", branch])?).context("invalid branch name")?;
+    let repo = root
+        .file_name()
+        .context("repository has no folder name")?
+        .to_string_lossy();
+    let parent = root.parent().context("repository has no parent folder")?;
+    let path = parent
+        .join(format!("{repo}.worktrees"))
+        .join(branch.replace(['/', '\\'], "-"));
+    if path.exists() {
+        bail!("{} already exists", path.display());
+    }
+    let target = path.to_string_lossy().into_owned();
+    let exists = git(
+        root,
+        &[
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &format!("refs/heads/{branch}"),
+        ],
+    )?
+    .status
+    .success();
+    if exists {
+        check(git(root, &["worktree", "add", &target, branch])?)?;
+    } else {
+        check(git(root, &["worktree", "add", "-b", branch, &target])?)?;
+    }
+    Ok(path)
+}
+
 /// Diff of several files, for an AI commit message: capped at `max` bytes.
 pub fn diff_many(root: &Path, changes: &[(String, bool)], max: usize) -> Result<String> {
     let mut all = String::new();
@@ -380,6 +416,38 @@ mod tests {
             "{}",
             d.len()
         );
+    }
+
+    #[test]
+    fn worktree_add_creates_a_checkout_next_to_the_repo() {
+        let parent = tempfile::tempdir().unwrap();
+        let root = parent.path().join("app");
+        std::fs::create_dir(&root).unwrap();
+        run(&root, &["init", "-q", "-b", "main"]);
+        run(&root, &["config", "user.email", "t@t"]);
+        run(&root, &["config", "user.name", "t"]);
+        std::fs::write(root.join("a.txt"), "a\n").unwrap();
+        run(&root, &["add", "."]);
+        run(&root, &["commit", "-q", "-m", "init"]);
+
+        let wt = worktree_add(&root, "feature/login").unwrap();
+        assert_eq!(
+            wt,
+            parent.path().join("app.worktrees").join("feature-login")
+        );
+        assert!(wt.join("a.txt").exists());
+        assert_eq!(head(&wt).unwrap().branch, "feature/login");
+
+        // An existing branch is checked out as is; the same folder twice is refused.
+        run(&root, &["branch", "existing"]);
+        assert_eq!(
+            head(&worktree_add(&root, "existing").unwrap())
+                .unwrap()
+                .branch,
+            "existing"
+        );
+        assert!(worktree_add(&root, "feature/login").is_err());
+        assert!(worktree_add(&root, "bad..name").is_err());
     }
 
     #[test]

@@ -30,10 +30,16 @@ describe("actionFor with the default keys", () => {
     expect(actionFor(key("E", { shift: true }), DEFAULT_KEYS)).toBe("toggleFiles");
     expect(actionFor(key("G", { shift: true }), DEFAULT_KEYS)).toBe("toggleGit");
     expect(actionFor(key(","), DEFAULT_KEYS)).toBe("settings");
+    expect(actionFor(key("U", { shift: true }), DEFAULT_KEYS)).toBe("nextAttention");
+    expect(actionFor(key("F", { shift: true }), DEFAULT_KEYS)).toBe("find");
+    expect(actionFor(key("="), DEFAULT_KEYS)).toBe("zoomIn");
+    expect(actionFor(key("+"), DEFAULT_KEYS)).toBe("zoomIn"); // numeric keypad
+    expect(actionFor(key("-"), DEFAULT_KEYS)).toBe("zoomOut");
+    expect(actionFor(key("0"), DEFAULT_KEYS)).toBe("zoomReset");
   });
 
   it("leaves shell keys alone", () => {
-    for (const k of ["w", "t", "c", "v", "r"]) expect(actionFor(key(k), DEFAULT_KEYS)).toBeUndefined();
+    for (const k of ["w", "t", "c", "v", "r", "f", "u"]) expect(actionFor(key(k), DEFAULT_KEYS)).toBeUndefined();
     expect(actionFor(key("PageDown", { ctrl: false }), DEFAULT_KEYS)).toBeUndefined();
     expect(actionFor(key("PageDown", { alt: true }), DEFAULT_KEYS)).toBeUndefined();
   });

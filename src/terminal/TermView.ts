@@ -1,18 +1,28 @@
 import { Terminal, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import { SearchAddon } from "@xterm/addon-search";
+import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import "@xterm/xterm/css/xterm.css";
 import { cwdFromOsc7, cwdFromOsc9 } from "./osc";
+import { quotePath } from "./paths";
 
 export type AgentSession = { harness: string; session_id: string };
 
 /** Visual settings, applied at creation and live from the settings page. */
 export type TermLook = { theme: ITheme; fontSize: number; fontFamily: string };
 
+/** Drag type of a path dragged from Rift's files panel; dropped on a terminal, it is typed in. */
+export const PATH_DRAG_TYPE = "application/x-rift-path";
+
 export type TermEvents = {
   onTitle(title: string): void;
   /** From the shell's prompt (OSC 9;9, emitted by Rift's PowerShell init). */
   onCwd(cwd: string): void;
+  /** Whether an agent (Claude...) runs in this tab: Shift+Enter then inserts a new line. */
+  isAgent(): boolean;
+  /** Esc pressed: an agent is interrupted (no hook reports it). */
+  onEscape(): void;
 };
 
 /**
@@ -28,6 +38,7 @@ export class TermView {
   private attached!: (id: number) => void;
   readonly term: Terminal;
   private fit = new FitAddon();
+  private search = new SearchAddon();
 
   constructor(host: HTMLElement, events: TermEvents, look: TermLook) {
     this.term = new Terminal({ scrollback: 10000, ...look });
@@ -35,6 +46,9 @@ export class TermView {
     this.el.className = "term";
     host.appendChild(this.el);
     this.term.loadAddon(this.fit);
+    this.term.loadAddon(this.search);
+    // Ctrl+click opens a link, like VS Code and Windows Terminal: a plain click must not open pages by accident.
+    this.term.loadAddon(new WebLinksAddon((e, url) => e.ctrlKey && invoke("open_url", { url })));
     this.term.open(this.el);
     this.term.onTitleChange(events.onTitle);
     // Folder reports: OSC 9;9 from PowerShell, OSC 7 from bash/zsh.
@@ -48,10 +62,17 @@ export class TermView {
         return cwd !== undefined;
       });
     }
-    this.term.onData((data) => this.pty.then((id) => invoke("pty_write", { id, data })));
+    this.term.onData((data) => this.write(data));
     this.term.onResize(({ cols, rows }) => this.pty.then((id) => invoke("pty_resize", { id, cols, rows })));
     this.term.attachCustomKeyEventHandler((e) => {
-      if (e.type !== "keydown" || !e.ctrlKey || e.shiftKey || e.altKey) return true;
+      if (e.type !== "keydown") return true;
+      if (e.key === "Escape" && !e.ctrlKey && !e.altKey && !e.shiftKey) events.onEscape();
+      // Agents (Claude Code) take Esc+Enter as "new line"; a plain Enter would send the prompt.
+      if (e.key === "Enter" && e.shiftKey && !e.ctrlKey && !e.altKey && events.isAgent()) {
+        this.write("\x1b\r");
+        return false;
+      }
+      if (!e.ctrlKey || e.shiftKey || e.altKey) return true;
       if (e.key === "c" && this.term.hasSelection()) {
         navigator.clipboard.writeText(this.term.getSelection());
         this.term.clearSelection();
@@ -60,15 +81,51 @@ export class TermView {
       // Let the browser fire its paste event, which xterm turns into input.
       return e.key !== "v";
     });
+    // A path dragged from the files panel is typed in at the cursor (quoted when needed).
+    this.el.addEventListener("dragover", (e) => {
+      if (e.dataTransfer?.types.includes(PATH_DRAG_TYPE)) e.preventDefault();
+    });
+    this.el.addEventListener("drop", (e) => {
+      const path = e.dataTransfer?.getData(PATH_DRAG_TYPE);
+      if (!path) return;
+      e.preventDefault();
+      this.term.paste(quotePath(path) + " ");
+      this.term.focus();
+    });
   }
 
-  /** Opens the shell in `cwd`; with `agent`, the shell starts by resuming that agent session. */
-  async start(cwd?: string, agent?: AgentSession) {
+  private write(data: string) {
+    this.pty.then((id) => invoke("pty_write", { id, data }));
+  }
+
+  /**
+   * Opens the shell in `cwd`. With `agent`, the shell starts by resuming that agent session;
+   * with `startAgent` (harness id), by starting a new one.
+   */
+  async start(cwd?: string, agent?: AgentSession, startAgent?: string) {
     this.fit.fit();
     const onData = new Channel<ArrayBuffer>();
     onData.onmessage = (buf) => this.term.write(new Uint8Array(buf));
-    this.ptyId = await invoke<number>("pty_open", { cwd, agent, cols: this.term.cols, rows: this.term.rows, onData });
+    this.ptyId = await invoke<number>("pty_open", {
+      cwd,
+      agent,
+      startAgent,
+      cols: this.term.cols,
+      rows: this.term.rows,
+      onData,
+    });
     this.attached(this.ptyId);
+  }
+
+  /** Finds `text` in the scrollback; returns whether it was found. */
+  find(text: string, backwards = false): boolean {
+    return backwards ? this.search.findPrevious(text) : this.search.findNext(text);
+  }
+
+  endFind() {
+    this.search.clearDecorations();
+    this.term.clearSelection();
+    this.term.focus();
   }
 
   show() {

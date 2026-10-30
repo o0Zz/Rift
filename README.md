@@ -35,7 +35,12 @@ The tab-switch benchmark ships with the code (`npm run bench`) and fails when a 
 
 ### Made for Claude Code
 - **Status on every tab**: Claude's icon with a badge: working, done, or waiting for your permission.
-- **Notifications** when a session finishes or needs you while you are elsewhere. Click one to jump to its tab.
+- **Notifications** when a session finishes or needs you while you are elsewhere. Click one to jump to its tab;
+  the taskbar icon flashes too.
+- **Never lose track**: `Ctrl+Shift+U` jumps to the next tab that needs you, the sidebar filters *Needs me* /
+  *Working*, and the window title counts the sessions waiting for you.
+- **Parallel agents without conflicts**: *New Claude in a worktree…* creates a branch and a git worktree next to
+  the repo and starts Claude there, in one click.
 - **Each tab resumes its own session.** Close Rift, reopen it: every tab comes back in its folder, and each
   Claude session resumes where it was. Not the last one: the one that ran in that tab.
 - **AI commit messages**: select files, click ✨ Generate, get a Conventional Commit written from the diff.
@@ -46,6 +51,8 @@ The tab-switch benchmark ships with the code (`npm run bench`) and fails when a 
 - The tab shows what matters: Claude's conversation title, the **git branch**, the folder.
 - New tabs open **in the current tab's folder**, in its group.
 - Instant switching with `Ctrl+PgUp` / `Ctrl+PgDn`.
+- Find in the scrollback, `Ctrl`+click links, zoom, `Shift+Enter` for a new line in Claude, drag a file from
+  the files panel to type its path.
 
 ### Everything around the terminal
 - **Files panel** with file-type icons, opened only when you want it.
@@ -86,6 +93,9 @@ notifications and per-tab resume. Without Claude Code, Rift is simply a fast ter
 | Next / previous tab | `Ctrl+PgDn` / `Ctrl+PgUp`, `Ctrl+Tab` / `Ctrl+Shift+Tab` |
 | Files panel | `Ctrl+Shift+E` |
 | Git panel | `Ctrl+Shift+G` |
+| Next tab that needs you | `Ctrl+Shift+U` |
+| Find in terminal | `Ctrl+Shift+F` |
+| Zoom in / out / reset | `Ctrl+=` / `Ctrl+-` / `Ctrl+0` |
 | Settings | `Ctrl+,` |
 | Copy / paste | `Ctrl+C` (with a selection) / `Ctrl+V` |
 

@@ -9,6 +9,11 @@ export const ACTIONS = {
   prevTab: "Previous tab",
   toggleFiles: "Show / hide files panel",
   toggleGit: "Show / hide git panel",
+  nextAttention: "Next tab that needs me",
+  find: "Find in terminal",
+  zoomIn: "Zoom in",
+  zoomOut: "Zoom out",
+  zoomReset: "Reset zoom",
   settings: "Open settings",
 } as const;
 
@@ -30,6 +35,12 @@ export const DEFAULT_KEYS: Keymap = {
   prevTab: ["Ctrl+PageUp", "Ctrl+Shift+Tab"],
   toggleFiles: ["Ctrl+Shift+E"],
   toggleGit: ["Ctrl+Shift+G"],
+  nextAttention: ["Ctrl+Shift+U"],
+  // Ctrl+F is the shell's (bash: forward one character), like Ctrl+T/W.
+  find: ["Ctrl+Shift+F"],
+  zoomIn: ["Ctrl+=", "Ctrl++", "Ctrl+Shift++"],
+  zoomOut: ["Ctrl+-"],
+  zoomReset: ["Ctrl+0"],
   settings: ["Ctrl+,"],
 };
 

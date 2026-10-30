@@ -1,5 +1,5 @@
 import { createSignal, For, Show, onMount, type JSX } from "solid-js";
-import { displayTitle, ownRowColor, visualOrder, type Drop, type Group } from "./layout";
+import { displayTitle, matchesFilter, ownRowColor, visualOrder, type Drop, type Group, type TabFilter } from "./layout";
 import { createMenu, type MenuItem } from "../ui/Menu";
 import type { Tab } from "./Tab";
 import { TabIcon } from "./icons";
@@ -20,6 +20,10 @@ export type SidebarProps = {
   panels: { explorer: boolean; git: boolean };
   onTogglePanel(panel: "explorer" | "git"): void;
   onOpenSettings(): void;
+  /** Sidebar filter: all tabs, those that need the user, or those whose agent is working. */
+  filter: TabFilter;
+  onFilter(filter: TabFilter): void;
+  onNewWorktree(tab: Tab): void;
 };
 
 type Dragged = { tab: Tab } | { group: string };
@@ -31,8 +35,15 @@ export function Sidebar(props: SidebarProps) {
   const [dropTarget, setDropTarget] = createSignal<unknown>();
 
   const groupOf = (tab: Tab) => props.groups.find((g) => g.id === tab.group);
-  const inGroup = (g: Group) => visualOrder(props.tabs, props.groups).filter((t) => t.group === g.id);
-  const ungrouped = () => visualOrder(props.tabs, props.groups).filter((t) => !groupOf(t));
+  const shown = () => visualOrder(props.tabs, props.groups).filter((t) => matchesFilter(t, props.filter));
+  const inGroup = (g: Group) => shown().filter((t) => t.group === g.id);
+  const ungrouped = () => shown().filter((t) => !groupOf(t));
+  const count = (f: TabFilter) => props.tabs.filter((t) => matchesFilter(t, f)).length;
+  const filters: [TabFilter, string][] = [
+    ["all", "All"],
+    ["attention", "Needs me"],
+    ["working", "Working"],
+  ];
 
   const openMenu = (e: MouseEvent, items: MenuItem[]) => menu.open(e, items);
 
@@ -41,6 +52,7 @@ export function Sidebar(props: SidebarProps) {
       { label: "Rename", run: () => setEditing(tab) },
       { colors: (c) => (tab.color = c) },
       "separator",
+      ...(tab.root ? [{ label: "New Claude in a worktree…", run: () => props.onNewWorktree(tab) }] : []),
       { label: "New group from this tab", run: () => props.onNewGroup(tab) },
       ...props.groups
         .filter((g) => g.id !== tab.group)
@@ -183,12 +195,31 @@ export function Sidebar(props: SidebarProps) {
           </button>
         </span>
       </div>
+      {/* Shown once an agent runs somewhere (or while filtering): the counts are what matter. */}
+      <Show when={props.filter !== "all" || props.tabs.some((t) => t.agent)}>
+        <div class="filters">
+          <For each={filters}>
+            {([f, label]) => (
+              <button
+                class="filter"
+                classList={{ on: props.filter === f, hot: f === "attention" && count(f) > 0 }}
+                onClick={() => props.onFilter(f)}
+              >
+                {label}
+                <Show when={f !== "all"}>
+                  <span class="filter-count">{count(f)}</span>
+                </Show>
+              </button>
+            )}
+          </For>
+        </div>
+      </Show>
       <div
         class="sidebar-list"
         onDragOver={(e) => "tab" in (dragged() ?? {}) && dragOver(e, "ungrouped")}
         onDrop={(e) => drop(e, (d) => "tab" in d && props.onMoveTab(d.tab, { group: undefined }))}
       >
-        <For each={props.groups}>
+        <For each={props.groups.filter((g) => props.filter === "all" || inGroup(g).length > 0)}>
           {(g) => (
             <div class="group" classList={{ colored: !!g.color }} style={g.color ? { "--group-color": g.color } : {}}>
               <div
@@ -212,7 +243,8 @@ export function Sidebar(props: SidebarProps) {
                 </Show>
                 <span class="count">{inGroup(g).length}</span>
               </div>
-              <Show when={!g.collapsed}>
+              {/* While filtering, matching tabs show even in a collapsed group. */}
+              <Show when={!g.collapsed || props.filter !== "all"}>
                 <For each={inGroup(g)}>{(tab) => <TabRow tab={tab} />}</For>
               </Show>
             </div>

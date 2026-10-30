@@ -72,3 +72,28 @@ export function folderName(path: string): string {
 export function shouldNotify(status: Status | undefined, tabVisible: boolean): boolean {
   return (status === "done" || status === "blocked") && !tabVisible;
 }
+
+/** Esc interrupts the agent (or dismisses its prompt), and agents report no hook for that: back to idle. */
+export function statusAfterEscape(status: Status | undefined): Status | undefined {
+  return status === "working" || status === "blocked" ? "idle" : status;
+}
+
+/** A tab needs the user: its agent waits for an answer, or finished and the user has not looked yet. */
+export function needsAttention(t: { status?: Status; unread: boolean }): boolean {
+  return t.status === "blocked" || (t.status === "done" && t.unread);
+}
+
+export type TabFilter = "all" | "attention" | "working";
+
+export function matchesFilter(t: { status?: Status; unread: boolean }, filter: TabFilter): boolean {
+  if (filter === "attention") return needsAttention(t);
+  if (filter === "working") return t.status === "working";
+  return true;
+}
+
+/** The next tab that needs the user after `current`, in sidebar order, wrapping; blocked ones first. */
+export function nextNeedingAttention<T extends { status?: Status; unread: boolean }>(order: T[], current: T | undefined): T | undefined {
+  const start = current ? order.indexOf(current) : -1;
+  const after = [...order.slice(start + 1), ...order.slice(0, start + 1)].filter((t) => t !== current);
+  return after.find((t) => t.status === "blocked") ?? after.find(needsAttention);
+}

@@ -1,20 +1,35 @@
 import { batch, createEffect, createSignal, For, on, onCleanup, onMount, Show, untrack } from "solid-js";
 import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWindow, UserAttentionType } from "@tauri-apps/api/window";
+import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
 import { onAction, sendNotification } from "@tauri-apps/plugin-notification";
 import { TermView, type AgentSession, type TermLook } from "./terminal/TermView";
 import { TERMINAL_THEMES } from "./terminal/themes";
 import { neighbour } from "./tabs/nav";
-import { actionFor, DEFAULTS, mergeSettings, resolveTheme, type Settings } from "./settings/settings";
+import { actionFor, DEFAULTS, displayVersion, mergeSettings, resolveTheme, type Settings } from "./settings/settings";
 import { SettingsPage } from "./settings/SettingsPage";
-import { startUpdates } from "./update";
-import { displayTitle, moveGroup, moveTab, shouldNotify, visualOrder, type Drop, type Group, type Status } from "./tabs/layout";
+import { startUpdates, type Updater } from "./update";
+import {
+  displayTitle,
+  moveGroup,
+  moveTab,
+  needsAttention,
+  nextNeedingAttention,
+  shouldNotify,
+  statusAfterEscape,
+  visualOrder,
+  type Drop,
+  type Group,
+  type Status,
+  type TabFilter,
+} from "./tabs/layout";
 import { Tab } from "./tabs/Tab";
 import { Sidebar } from "./tabs/Sidebar";
 import { Explorer } from "./panels/Explorer";
 import { GitPanel } from "./panels/GitPanel";
 import { Resizer } from "./ui/Resizer";
+import { FindBar } from "./ui/FindBar";
 import "./App.css";
 
 type TabUi = { name?: string; color?: string; group?: string };
@@ -31,11 +46,24 @@ function App() {
   const [groups, setGroups] = createSignal<Group[]>([]);
   const [active, setActive] = createSignal<Tab>();
   const [missing, setMissing] = createSignal<Integration[]>([]);
+  const [agents, setAgents] = createSignal<Integration[]>([]);
   const [update, setUpdate] = createSignal<{ version: string; restart: () => Promise<void> }>();
   // From Tauri's window events: document.hasFocus() is not reliable in WebView2.
   const [windowFocused, setWindowFocused] = createSignal(true);
   const [settings, setSettings] = createSignal<Settings>(DEFAULTS);
   const [settingsOpen, setSettingsOpen] = createSignal(false);
+  const [finding, setFinding] = createSignal(false);
+  const [filter, setFilter] = createSignal<TabFilter>("all");
+  let updater: Updater | undefined;
+
+  // Window title: version, plus how many tabs need the user ("Rift 1.2.3.45 — 2 waiting").
+  const [version, setVersion] = createSignal("");
+  getVersion().then((v) => setVersion(displayVersion(v)));
+  createEffect(() => {
+    if (!version()) return;
+    const waiting = tabs().filter(needsAttention).length;
+    getCurrentWindow().setTitle(`Rift ${version()}${waiting ? ` — ${waiting} waiting` : ""}`);
+  });
   const systemDark = window.matchMedia("(prefers-color-scheme: dark)");
   const [systemIsDark, setSystemIsDark] = createSignal(systemDark.matches);
   const theme = () => resolveTheme(settings().theme, systemIsDark());
@@ -129,14 +157,17 @@ function App() {
   }
 
   /** New tabs open right after the active one, in its group and its folder. */
-  function newTab(saved?: SavedTab): Promise<void> {
+  function newTab(
+    saved?: SavedTab,
+    opts: { cwd?: string; name?: string; group?: string; startAgent?: string } = {},
+  ): Promise<void> {
     const tab = new Tab();
-    const cwd = saved ? saved.cwd : active()?.cwd;
+    const cwd = saved ? saved.cwd : (opts.cwd ?? active()?.cwd);
     tab.title = saved?.title ?? "shell";
     tab.cwd = cwd;
-    tab.name = saved?.ui?.name;
+    tab.name = saved?.ui?.name ?? opts.name;
     tab.color = saved?.ui?.color;
-    tab.group = saved ? saved.ui?.group : active()?.group;
+    tab.group = saved ? saved.ui?.group : (opts.group ?? active()?.group);
     const onCwd = (cwd: string) => {
       tab.cwd = cwd;
       // At every prompt: also catches `git checkout` (same cwd, new branch).
@@ -148,7 +179,16 @@ function App() {
       );
     };
     if (cwd) onCwd(cwd);
-    tab.view = new TermView(host, { onTitle: (v) => (tab.title = v), onCwd }, look());
+    tab.view = new TermView(
+      host,
+      {
+        onTitle: (v) => (tab.title = v),
+        onCwd,
+        isAgent: () => !!tab.agent,
+        onEscape: () => (tab.status = statusAfterEscape(tab.status)),
+      },
+      look(),
+    );
 
     const list = [...tabs()];
     const after = saved ? -1 : list.indexOf(active()!);
@@ -157,7 +197,7 @@ function App() {
     setTabs(list);
     activate(tab);
     return tab.view
-      .start(cwd, saved?.agent)
+      .start(cwd, saved?.agent, opts.startAgent)
       .then(save) // the pty id is not reactive
       .catch((e) => void (tab.title = `error: ${e}`));
   }
@@ -265,6 +305,7 @@ function App() {
     const visible = active() === tab && windowFocused();
     if (!shouldNotify(tab.status, visible)) return;
     tab.unread = true;
+    if (!windowFocused()) getCurrentWindow().requestUserAttention(UserAttentionType.Informational);
     sendNotification({
       id: ++notificationId,
       title: `${tab.status === "done" ? "✓" : "■"} ${displayTitle(tab)}`,
@@ -287,6 +328,7 @@ function App() {
 
   async function checkIntegrations() {
     const all = await invoke<Integration[]>("agent_integrations");
+    setAgents(all);
     setMissing(all.filter((i) => !i.installed));
   }
 
@@ -297,6 +339,24 @@ function App() {
     } catch (e) {
       alert(`Could not enable integration: ${e}`);
     }
+  }
+
+  /** A parallel agent: new branch + git worktree next to the repo, opened in a tab running a new Claude. */
+  async function newWorktree(from: Tab) {
+    const harness = from.agent ?? agents()[0]?.id;
+    const branch = prompt("Branch for the new worktree (created from the current commit):", "");
+    if (!branch?.trim() || !from.root) return;
+    try {
+      const dir = await invoke<string>("git_worktree_add", { root: from.root, branch });
+      newTab(undefined, { cwd: dir, name: branch.trim(), group: from.group, startAgent: harness });
+    } catch (e) {
+      alert(`Could not create the worktree: ${e}`);
+    }
+  }
+
+  function zoom(step: number) {
+    const fontSize = step === 0 ? DEFAULTS.fontSize : Math.min(32, Math.max(8, settings().fontSize + step));
+    if (fontSize !== settings().fontSize) changeSettings({ ...settings(), fontSize });
   }
 
   function onKey(e: KeyboardEvent) {
@@ -312,6 +372,14 @@ function App() {
     else if (action === "toggleFiles") togglePanel("explorer");
     else if (action === "toggleGit") togglePanel("git");
     else if (action === "settings") setSettingsOpen(true);
+    else if (action === "find") setFinding(true);
+    else if (action === "zoomIn") zoom(1);
+    else if (action === "zoomOut") zoom(-1);
+    else if (action === "zoomReset") zoom(0);
+    else if (action === "nextAttention") {
+      const next = nextNeedingAttention(visualOrder(tabs(), groups()), active());
+      if (next) activate(next);
+    }
   }
 
   onMount(() => {
@@ -331,6 +399,16 @@ function App() {
       // Another `rift.exe <dir>` was launched (Explorer menu): single-instance forwards the folder here.
       listen<string>("open-dir", (e) => newTab({ cwd: e.payload, title: "" })),
     ];
+    // Closing while agents work or wait would kill them: ask first. Then install a downloaded update.
+    const closeRequests = win.onCloseRequested(async (event) => {
+      const busy = tabs().filter((t) => t.status === "working" || t.status === "blocked").length;
+      const s = busy === 1 ? "" : "s";
+      if (busy && !confirm(`${busy} agent${s} still working or waiting for you. Close Rift anyway?`)) {
+        event.preventDefault();
+        return;
+      }
+      await updater?.installIfReady();
+    });
     // Registered at startup: notifications shown before a listener exists report no click.
     const notificationClicks = onAction((e) => openNotifiedTab(e.notification?.extra?.pty));
     let frame = 0;
@@ -353,7 +431,7 @@ function App() {
     invoke<string[] | null>("bench_dirs").then(async (dirs) => {
       if (!dirs) {
         // Not in dev (would offer the latest release over local work) nor in the bench.
-        if (!import.meta.env.DEV) startUpdates((version, restart) => setUpdate({ version, restart }));
+        if (!import.meta.env.DEV) updater = startUpdates((version, restart) => setUpdate({ version, restart }));
         return;
       }
       const bench = await import("./bench");
@@ -370,6 +448,7 @@ function App() {
       systemDark.removeEventListener("change", onSystemTheme);
       unlisten.forEach((u) => u.then((f) => f()));
       notificationClicks.then((l) => l.unregister());
+      closeRequests.then((f) => f());
       resize.disconnect();
     });
   });
@@ -393,6 +472,9 @@ function App() {
         panels={panels()}
         onTogglePanel={togglePanel}
         onOpenSettings={() => setSettingsOpen(true)}
+        filter={filter()}
+        onFilter={setFilter}
+        onNewWorktree={newWorktree}
       />
         <Resizer edge="right" width={widths().tabs} min={160} max={480} onResize={resizeWidth("tabs")} onDragging={onDragging} />
       </div>
@@ -439,7 +521,14 @@ function App() {
             </div>
           )}
         </For>
-        <div class="terms" ref={host} />
+        <div class="terms" ref={host}>
+          <Show when={finding() && active()}>
+            <FindBar
+              find={(text, backwards) => active()!.view.find(text, backwards)}
+              onClose={() => (setFinding(false), active()?.view.endFind())}
+            />
+          </Show>
+        </div>
       </main>
       <Show when={panels().git}>
         <div class="pane" style={{ width: `${widths().git}px` }}>

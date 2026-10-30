@@ -13,6 +13,8 @@
     "updater:default",
     "core:window:allow-set-focus",
     "core:window:allow-unminimize",
-    "core:window:allow-show"
+    "core:window:allow-show",
+    "core:window:allow-set-title",
+    "core:window:allow-request-user-attention"
   ]
 }

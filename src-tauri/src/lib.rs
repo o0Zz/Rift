@@ -44,13 +44,16 @@ fn pty_open(
     session: State<SessionStore>,
     cwd: Option<String>,
     agent: Option<AgentSession>,
+    start_agent: Option<String>,
     cols: u16,
     rows: u16,
     on_data: Channel<InvokeResponseBody>,
 ) -> Result<TabId, String> {
+    // Resume a saved session, or start a new one (`start_agent`: harness id, e.g. a new worktree tab).
     let startup = agent
         .as_ref()
-        .and_then(|a| harnesses.get(&a.harness)?.resume_command(&a.session_id));
+        .and_then(|a| harnesses.get(&a.harness)?.resume_command(&a.session_id))
+        .or_else(|| Some(harnesses.get(start_agent.as_deref()?)?.start_command()));
     let id = ptys
         .open(
             cwd.map(Into::into),
@@ -89,6 +92,23 @@ fn pty_prewarm(ptys: Ptys, cwd: Option<String>) {
 #[tauri::command]
 fn pty_close(ptys: Ptys, id: TabId) {
     ptys.close(id);
+}
+
+/// Opens a link from the terminal (Ctrl+click) in the browser. Web links only: a terminal can print anything.
+#[tauri::command]
+async fn open_url(url: String) -> Result<(), String> {
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return Err("only http(s) links are opened".into());
+    }
+    tauri_plugin_opener::open_url(url, None::<&str>).map_err(err)
+}
+
+/// New git worktree (and branch) next to the repository, for a parallel agent. Returns its folder.
+#[tauri::command]
+async fn git_worktree_add(root: String, branch: String) -> Result<String, String> {
+    git::worktree_add(root.as_ref(), branch.trim())
+        .map(|p| p.display().to_string())
+        .map_err(err)
 }
 
 /// Tabs saved by the previous run. Called once per page load: shells left over from a previous
@@ -397,8 +417,10 @@ pub fn run() {
             app.manage(ptys);
             Ok(())
         })
+        // Frozen when the window is really gone, not when closing is requested: the frontend may still
+        // cancel (agents working). After this the shells die, and their exit must not erase the session.
         .on_window_event(|window, event| {
-            if let WindowEvent::CloseRequested { .. } = event {
+            if let WindowEvent::Destroyed = event {
                 window.state::<SessionStore>().freeze();
             }
         })
@@ -420,6 +442,8 @@ pub fn run() {
             git_status,
             git_diff,
             git_commit,
+            git_worktree_add,
+            open_url,
             settings_load,
             startup_dir,
             explorer_menu_installed,

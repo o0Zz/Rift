@@ -54,6 +54,15 @@ src/                 Frontend
 
 Frontend tabs: `tabs/layout.ts` (pure logic: order, moves, titles, notify rule — unit-tested), `tabs/Tab.ts` (tab state as Solid signals behind getters), `tabs/Sidebar.tsx` (UI only), `App.tsx` (wiring: restore/save, keys, agent status).
 
+### Terminal conveniences and agent attention (decisions already made — keep them)
+- Find: Ctrl+Shift+F (Ctrl+F is the shell's), `FindBar` over the terminal, xterm search addon. Links: Ctrl+click only (web-links addon → `open_url`, http(s) only). Zoom: Ctrl+= / Ctrl+- / Ctrl+0 change the font size setting.
+- Shift+Enter in a tab running an agent sends ESC+CR (Claude Code's "new line"); in a plain shell it stays Enter.
+- Esc in a tab whose agent is working/blocked sets it back to idle (`statusAfterEscape`): agents fire no hook on interrupt.
+- Drag a file/folder from the files panel onto a terminal: its path is typed (`quotePath`). Drops from the OS file manager are not supported: they need Tauri's native drag-drop, which breaks HTML5 drag and drop on Windows (tabs).
+- Closing with agents working/blocked asks first (JS `onCloseRequested`, then a pending update installs). The session freezes on `WindowEvent::Destroyed`, not on close request, since the close can be cancelled.
+- Attention: `needsAttention` = blocked, or done and unread. Ctrl+Shift+U goes to the next one (blocked first). Sidebar filter All / Needs me / Working (shown once an agent runs). Window title `Rift <version> — N waiting`. Taskbar flashes (`requestUserAttention`) when a tab needs the user while Rift is in the background.
+- "New Claude in a worktree…" (tab menu, tabs in a repo): `git_worktree_add` creates the branch from HEAD (or checks out an existing one) in `<repo>.worktrees/<branch>` next to the repo, then a tab there starts the agent (`pty_open` `start_agent` → `AgentHarness::start_command`).
+
 ### Settings and themes (decisions already made — keep them)
 - Settings page: overlay opened by ⚙ (tabs header) or Ctrl+,; Esc closes. While it is open, Rift's shortcuts are off so keys can be recorded.
 - `settings.ts` is the single source: `ACTIONS`, `DEFAULT_KEYS`, `mergeSettings` (any saved shape → valid settings, defaults for the rest), `comboOf` ("Ctrl+Shift+T"), `actionFor`, `bind` (moves a combo taken from another action). App dispatches shortcuts only through `actionFor(e, settings().keys)`.

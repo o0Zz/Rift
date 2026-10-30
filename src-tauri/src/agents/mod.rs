@@ -58,6 +58,8 @@ pub trait AgentHarness: Send + Sync {
     fn install_hooks(&self, exe: &Path) -> Result<()>;
     /// Runs the agent non-interactively in `cwd`: `prompt` as instruction, `input` on stdin; returns its answer.
     fn one_shot(&self, cwd: &Path, prompt: &str, input: &str) -> Result<String>;
+    /// Shell command starting a new interactive session (e.g. `claude`).
+    fn start_command(&self) -> String;
 }
 
 pub struct Harnesses(pub Vec<Box<dyn AgentHarness>>);

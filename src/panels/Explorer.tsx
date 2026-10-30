@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { createMenu } from "../ui/Menu";
 import { folderName } from "../tabs/layout";
 import { fileBadge } from "./fileIcons";
+import { PATH_DRAG_TYPE } from "../terminal/TermView";
 
 type Entry = { name: string; dir: boolean };
 
@@ -94,6 +95,12 @@ export function Explorer(props: { root?: string; onClose(): void }) {
                       class="tree-row"
                       style={{ "padding-left": `${p.depth * 12 + 8}px` }}
                       title={path}
+                      draggable={true}
+                      onDragStart={(e) => {
+                        e.dataTransfer!.setData(PATH_DRAG_TYPE, path);
+                        e.dataTransfer!.setData("text/plain", path);
+                        e.dataTransfer!.effectAllowed = "copy";
+                      }}
                       onClick={() => (entry.dir ? toggle(path) : invoke("fs_open", { path }))}
                       onContextMenu={(e) => fileMenu(e, path)}
                     >
