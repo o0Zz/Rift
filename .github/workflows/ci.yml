@@ -1,14 +1,78 @@
 name: CI
 
-# Every push and PR: checks and tests on Windows, Linux and macOS.
-# Pushes to master also build the installers of each OS, downloadable from the run page (Artifacts).
+# Fast feedback first: lint once (Linux) and tests on each OS, in parallel (~2-3 min with a warm cache).
+# Then, on pushes to master only, the installers of each OS (slow: optimized release build), attached to
+# the run as artifacts. Nearly all CI time is Rust compilation, not the tests themselves.
 on:
   push:
     branches: ["**"]
   pull_request:
 
+# A new push on the same branch cancels the run still in progress.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  LINUX_DEPS: libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev patchelf
+
 jobs:
-  build:
+  # Formatting, clippy, typecheck and frontend tests give the same answer on every OS: run them once.
+  lint:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+      - run: sudo apt-get update && sudo apt-get install -y $LINUX_DEPS
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm test
+      - run: npm run build # the Tauri crate embeds dist/ at compile time
+      - name: cargo fmt
+        working-directory: src-tauri
+        run: cargo fmt --check
+      - name: cargo clippy
+        working-directory: src-tauri
+        run: cargo clippy --all-targets -- -D warnings
+
+  # Rust tests on each OS: real PTY shells (cmd/pwsh, sh/bash/zsh), git repos, hook pipes/sockets.
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-22.04, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y $LINUX_DEPS
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: npm ci
+      - run: npm run build
+      - name: cargo test
+        working-directory: src-tauri
+        run: cargo test
+
+  # Installers for testing (no updater signature: that is the release workflow's job).
+  installers:
+    needs: [lint, test]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     strategy:
       fail-fast: false
       matrix:
@@ -22,56 +86,26 @@ jobs:
             # One app for Apple Silicon and Intel Macs.
             build-args: --target universal-apple-darwin
             rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
-    name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
-
-      - name: Linux system libraries (WebKitGTK)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev patchelf
-
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y $LINUX_DEPS
       - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
-
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy, rustfmt
           targets: ${{ matrix.rust-targets }}
-
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-
       - run: npm ci
-      - run: npx tsc --noEmit
-      - run: npm test
-      # The Tauri crate embeds the built frontend (dist/) at compile time.
-      - run: npm run build
-
-      - name: cargo fmt
-        working-directory: src-tauri
-        run: cargo fmt --check
-      - name: cargo clippy
-        working-directory: src-tauri
-        run: cargo clippy --all-targets -- -D warnings
-      # Real PTY shells (cmd/pwsh on Windows, sh/bash/zsh elsewhere), git repos, hook sockets/pipes.
-      - name: cargo test
-        working-directory: src-tauri
-        run: cargo test
-
-      # Installers for testing, without updater signatures (those are made by the release workflow only).
       - name: Build installers
-        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
         shell: bash
         run: npx tauri build ${{ matrix.build-args }} --config '{"bundle":{"createUpdaterArtifacts":false}}'
-
       - uses: actions/upload-artifact@v4
-        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
         with:
           name: rift-${{ matrix.name }}
           if-no-files-found: error
