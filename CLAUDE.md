@@ -147,6 +147,14 @@ Blocks (actions, find, filter, sharing, sticky header), input editor (syntax hig
 - "New window" from Explorer: deliberately not offered until real multi-window exists (user's choice).
 - Notifications: Windows toast via `tauri-plugin-notification`.
 
+## Releases and auto-update
+- Repo: https://github.com/o0Zz/rift (public). CI (`.github/workflows/ci.yml`): tsc, vitest, fmt, clippy -D warnings, cargo test on windows-latest. The tab-switch bench stays local (needs a visible window).
+- Release: `npm version patch|minor|major` (bumps package.json — the single app version, tauri.conf.json points to it — commits and tags `vX.Y.Z`), then `git push --follow-tags`. `.github/workflows/release.yml` checks tag == package.json version, builds the NSIS installer with tauri-action and publishes it with `latest.json` on the GitHub Release.
+- Update signing key: `~/.tauri/rift.key` + `rift.key.password` (never in the repo). GitHub secrets `TAURI_SIGNING_PRIVATE_KEY` (key file content) and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. The public key is in tauri.conf.json `plugins.updater.pubkey`; losing the private key means installed copies can no longer update.
+- In-app (`src/update.ts`, not in dev/bench): checks `releases/latest/download/latest.json` at startup and every 6 h, downloads in the background, shows "Restart now"; otherwise installs when Rift closes. `session_freeze` runs first: the installer kills Rift, the session must stay as it was.
+- Local release build: `TAURI_SIGNING_PRIVATE_KEY="$(cat ~/.tauri/rift.key)" TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$(cat ~/.tauri/rift.key.password)" npx tauri build` (~10 min first time: LTO). Measured: installer 2.4 MB, exe 7.2 MB, hook call 11 ms, bench passes.
+- Installed path is per user and stable across updates, so the Claude hooks / Explorer menu registered from the installed exe keep working after updates.
+
 ## Conventions
 - Rust: `cargo fmt`, `cargo clippy -- -D warnings`. Frontend: `tsc --noEmit`, eslint.
 - Every feature ships with tests in the same change. Prefer end-to-end: real PTY spawn, real git repo in a temp dir, real hook JSON through the named pipe.

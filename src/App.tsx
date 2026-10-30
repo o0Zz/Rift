@@ -8,6 +8,7 @@ import { TERMINAL_THEMES } from "./terminal/themes";
 import { neighbour } from "./tabs/nav";
 import { actionFor, DEFAULTS, mergeSettings, resolveTheme, type Settings } from "./settings/settings";
 import { SettingsPage } from "./settings/SettingsPage";
+import { startUpdates } from "./update";
 import { displayTitle, moveGroup, moveTab, shouldNotify, visualOrder, type Drop, type Group, type Status } from "./tabs/layout";
 import { Tab } from "./tabs/Tab";
 import { Sidebar } from "./tabs/Sidebar";
@@ -30,6 +31,7 @@ function App() {
   const [groups, setGroups] = createSignal<Group[]>([]);
   const [active, setActive] = createSignal<Tab>();
   const [missing, setMissing] = createSignal<Integration[]>([]);
+  const [update, setUpdate] = createSignal<{ version: string; restart: () => Promise<void> }>();
   // From Tauri's window events: document.hasFocus() is not reliable in WebView2.
   const [windowFocused, setWindowFocused] = createSignal(true);
   const [settings, setSettings] = createSignal<Settings>(DEFAULTS);
@@ -318,7 +320,11 @@ function App() {
       .finally(restore);
     checkIntegrations();
     invoke<string[] | null>("bench_dirs").then(async (dirs) => {
-      if (!dirs) return;
+      if (!dirs) {
+        // Not in dev (would offer the latest release over local work) nor in the bench.
+        if (!import.meta.env.DEV) startUpdates((version, restart) => setUpdate({ version, restart }));
+        return;
+      }
       const bench = await import("./bench");
       bench.run({
         // Alternate between the bench repos so every switch changes repo (worst case for the panels).
@@ -378,6 +384,16 @@ function App() {
         />
       </Show>
       <main class="main">
+        <Show when={update()}>
+          {(u) => (
+            <div class="banner">
+              <span>
+                Rift <b>{u().version}</b> is ready. It installs when you close Rift, or now:
+              </span>
+              <button onClick={() => u().restart()}>Restart now</button>
+            </div>
+          )}
+        </Show>
         <For each={missing()}>
           {(i) => (
             <div class="banner">

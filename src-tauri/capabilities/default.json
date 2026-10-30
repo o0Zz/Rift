@@ -8,6 +8,8 @@
   "permissions": [
     "core:default",
     "core:window:allow-close",
-    "notification:default"
+    "notification:default",
+    "core:window:allow-destroy",
+    "updater:default"
   ]
 }

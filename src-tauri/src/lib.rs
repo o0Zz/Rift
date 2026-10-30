@@ -92,6 +92,12 @@ fn session_restore(session: State<SessionStore>, ptys: Ptys) -> Saved {
     session.load()
 }
 
+/// Before an update installs (the installer kills the app): keep the session as it is now.
+#[tauri::command]
+fn session_freeze(session: State<SessionStore>) {
+    session.freeze();
+}
+
 #[tauri::command]
 fn session_update(
     session: State<SessionStore>,
@@ -284,6 +290,7 @@ pub fn run() {
         }));
     }
     builder
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let home = app.path().home_dir()?;
@@ -354,6 +361,7 @@ pub fn run() {
             pty_close,
             session_restore,
             session_update,
+            session_freeze,
             agent_integrations,
             agent_install,
             fs_list,
