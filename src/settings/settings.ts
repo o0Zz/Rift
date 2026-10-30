@@ -27,6 +27,8 @@ export type Settings = {
   fontFamily: string;
   /** Default shell profile id; "" = the platform default (PowerShell 7 / $SHELL). */
   shell: string;
+  /** Opening a file: "single" replaces the shown document, "tabs" adds one each time. */
+  docs: "single" | "tabs";
   keys: Keymap;
 };
 
@@ -79,6 +81,7 @@ export const DEFAULTS: Settings = {
   // Windows, macOS, Linux defaults, then whatever monospace font the system has.
   fontFamily: "'Cascadia Mono', Consolas, Menlo, 'DejaVu Sans Mono', monospace",
   shell: "",
+  docs: "single",
   keys: DEFAULT_KEYS,
 };
 
@@ -95,6 +98,7 @@ export function mergeSettings(saved: unknown): Settings {
     fontSize: typeof s.fontSize === "number" && s.fontSize >= 8 && s.fontSize <= 32 ? s.fontSize : DEFAULTS.fontSize,
     fontFamily: typeof s.fontFamily === "string" && s.fontFamily.trim() ? s.fontFamily : DEFAULTS.fontFamily,
     shell: typeof s.shell === "string" ? s.shell : DEFAULTS.shell,
+    docs: s.docs === "tabs" ? "tabs" : DEFAULTS.docs,
     keys,
   };
 }

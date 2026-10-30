@@ -1,5 +1,6 @@
 import { createSignal } from "solid-js";
 import type { TermView } from "../terminal/TermView";
+import type { DocView } from "../docs/DocView";
 import type { Status } from "./layout";
 
 /** Lines changed against HEAD and commits ahead/behind upstream (git_stats). */
@@ -27,6 +28,8 @@ export class Tab {
     shell: field<string | undefined>(undefined),
     stats: field<GitStats | undefined>(undefined),
     snap: field<string>(crypto.randomUUID()),
+    docs: field<DocView[]>([]),
+    current: field(-1),
   };
 
   get title() { return this.f.title.get(); }
@@ -59,6 +62,13 @@ export class Tab {
   set snap(v) { this.f.snap.set(v); }
   get stats() { return this.f.stats.get(); }
   set stats(v) { this.f.stats.set(v); }
+  /** Files open in this tab, and the one shown instead of the terminal (-1 = the terminal). */
+  get docs() { return this.f.docs.get(); }
+  set docs(v) { this.f.docs.set(v); }
+  get current() { return this.f.current.get(); }
+  set current(v) { this.f.current.set(v); }
+  /** What the tab shows: its terminal or one of its documents. */
+  get shown(): TermView | DocView { return this.docs[this.current] ?? this.view; }
   get unread() { return this.f.unread.get(); }
   set unread(v) { this.f.unread.set(v); }
 }

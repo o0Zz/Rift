@@ -254,6 +254,22 @@ async fn fs_open(path: String) -> Result<(), String> {
     tauri_plugin_opener::open_path(path, None::<&str>).map_err(err)
 }
 
+/// A file to show in a document tab; None = not text (open it in the default app instead).
+#[tauri::command]
+async fn fs_read_text(path: String) -> Result<Option<files::Text>, String> {
+    files::read_text(path.as_ref()).map_err(err)
+}
+
+#[tauri::command]
+async fn fs_write_text(path: String, text: String) -> Result<u64, String> {
+    files::write_text(path.as_ref(), &text).map_err(err)
+}
+
+#[tauri::command]
+async fn fs_mtime(path: String) -> Result<u64, String> {
+    files::mtime(path.as_ref()).map_err(err)
+}
+
 #[tauri::command]
 async fn fs_reveal(path: String) -> Result<(), String> {
     tauri_plugin_opener::reveal_item_in_dir(path).map_err(err)
@@ -519,6 +535,9 @@ pub fn run() {
             agent_install,
             fs_list,
             fs_open,
+            fs_read_text,
+            fs_write_text,
+            fs_mtime,
             fs_reveal,
             git_head,
             git_status,

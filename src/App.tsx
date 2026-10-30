@@ -25,6 +25,8 @@ import {
   type TabFilter,
 } from "./tabs/layout";
 import { Tab, type GitStats } from "./tabs/Tab";
+import { DocView } from "./docs/DocView";
+import { afterClose, placeDoc } from "./docs/place";
 import { Sidebar } from "./tabs/Sidebar";
 import { GitStatsView } from "./tabs/GitStats";
 import { Icon } from "./ui/Icon";
@@ -35,7 +37,7 @@ import { FindBar } from "./ui/FindBar";
 import { PromptDialog } from "./ui/PromptDialog";
 import "./App.css";
 
-type TabUi = { name?: string; color?: string; group?: string; shell?: string; snap?: string };
+type TabUi = { name?: string; color?: string; group?: string; shell?: string; snap?: string; docs?: string[]; doc?: number };
 type SavedTab = { cwd?: string; title: string; agent?: AgentSession; ui?: TabUi };
 type Panels = { explorer: boolean; git: boolean };
 type Widths = { tabs: number; explorer: number; git: number };
@@ -88,6 +90,11 @@ function App() {
     fontFamily: settings().fontFamily,
   });
   createEffect(() => (document.documentElement.dataset.theme = theme()));
+  // The document editor uses the terminal font (CSS variables: no work per open document).
+  createEffect(() => {
+    document.documentElement.style.setProperty("--doc-mono", settings().fontFamily);
+    document.documentElement.style.setProperty("--doc-mono-size", `${settings().fontSize}px`);
+  });
   // Live: theme/font changes reach every terminal. A font change alters the cell size, so the
   // visible tab refits now and hidden ones in idle time (same path as a panel resize).
   // Tracks only the three values (editing a shortcut or adding a tab must not re-render every terminal).
@@ -150,7 +157,15 @@ function App() {
         pty: t.view.ptyId >= 0 ? t.view.ptyId : null,
         cwd: t.cwd ?? null,
         title: t.title,
-        ui: { name: t.name, color: t.color, group: t.group, shell: t.shell, snap: t.snap } satisfies TabUi,
+        ui: {
+          name: t.name,
+          color: t.color,
+          group: t.group,
+          shell: t.shell,
+          snap: t.snap,
+          docs: t.docs.map((d) => d.path),
+          doc: t.current,
+        } satisfies TabUi,
       })),
       active: Math.max(0, list.indexOf(active()!)),
       layout: { groups: groups(), panels: panels(), widths: widths() },
@@ -190,8 +205,8 @@ function App() {
 
   function activate(tab: Tab) {
     const t0 = performance.now();
-    if (active() !== tab) active()?.view.hide();
-    tab.view.show();
+    if (active() !== tab) active()?.shown.hide();
+    tab.shown.show();
     setActive(tab);
     tab.unread = false;
     fadeDoneWhenSeen(tab);
@@ -217,6 +232,11 @@ function App() {
     // Like the folder, a new tab keeps the shell of the tab it was opened from.
     tab.shell = saved ? saved.ui?.shell : (opts.shell ?? active()?.shell);
     if (saved?.ui?.snap) tab.snap = saved.ui.snap;
+    // Restored documents are read only when first shown.
+    if (saved?.ui?.docs?.length) {
+      tab.docs = saved.ui.docs.map((path) => makeDoc(tab, path));
+      tab.current = Math.min(saved.ui.doc ?? -1, tab.docs.length - 1);
+    }
     const onCwd = (cwd: string) => {
       tab.cwd = cwd;
       // At every prompt: also catches `git checkout` (same cwd, new branch).
@@ -239,11 +259,12 @@ function App() {
       },
       look(),
     );
+    if (tab.current >= 0) tab.view.hide(); // a restored document is shown instead
 
     const list = [...tabs()];
     const after = saved ? -1 : list.indexOf(active()!);
     list.splice(after < 0 ? list.length : after + 1, 0, tab);
-    active()?.view.hide();
+    active()?.shown.hide();
     setTabs(list);
     activate(tab);
     // A restored shell tab shows its previous history first. Not agent tabs: resuming redisplays the session.
@@ -274,10 +295,13 @@ function App() {
     if (dir) newTab({ cwd: dir, title: "" });
   }
 
-  function closeTab(tab: Tab) {
+  function closeTab(tab: Tab, force = false) {
     const order = visualOrder(tabs(), groups());
     const i = order.indexOf(tab);
     if (i < 0) return;
+    const unsaved = tab.docs.filter((d) => d.dirty).map((d) => d.name);
+    if (!force && unsaved.length && !confirm(`Discard unsaved changes to ${unsaved.join(", ")}?`)) return;
+    tab.docs.forEach((d) => d.dispose());
     tab.view.dispose();
     const rest = order.filter((t) => t !== tab);
     setTabs(tabs().filter((t) => t !== tab));
@@ -285,6 +309,56 @@ function App() {
       getCurrentWindow().close();
     } else if (active() === tab) {
       activate(rest[Math.min(i, rest.length - 1)]);
+    }
+  }
+
+  // Documents: files opened from the files panel, shown in the tab instead of its terminal (top bar sub-tabs).
+  function makeDoc(tab: Tab, path: string): DocView {
+    const doc: DocView = new DocView(host, path, {
+      // Not text (binary, too big): the default app opens it instead.
+      onNotText: () => {
+        invoke("fs_open", { path });
+        const i = tab.docs.indexOf(doc);
+        if (i >= 0) closeDoc(tab, i, true);
+      },
+      onOpenFile: (p) => openDoc(p, tab),
+    });
+    return doc;
+  }
+
+  /** Shows document `index` of the tab, or its terminal (-1). */
+  function showDoc(tab: Tab, index: number) {
+    const front = tab === active();
+    if (front) tab.shown.hide();
+    tab.current = index;
+    if (!front) return;
+    tab.shown.show();
+    tab.shown.focus();
+  }
+
+  function openDoc(path: string, tab = active()) {
+    if (!tab) return;
+    const { index, replace } = placeDoc(tab.docs, tab.current, path, settings().docs === "single");
+    if (index < tab.docs.length && !replace) return showDoc(tab, index);
+    const docs = [...tab.docs];
+    const [old] = docs.splice(index, replace ? 1 : 0, makeDoc(tab, path));
+    old?.dispose();
+    tab.docs = docs;
+    showDoc(tab, index);
+  }
+
+  function closeDoc(tab: Tab, index: number, force = false) {
+    const doc = tab.docs[index];
+    if (!force && doc.dirty && !confirm(`Discard unsaved changes to ${doc.name}?`)) return;
+    const shown = tab.current === index;
+    batch(() => {
+      tab.current = afterClose(tab.current, index);
+      tab.docs = tab.docs.filter((d) => d !== doc);
+    });
+    doc.dispose();
+    if (shown && tab === active()) {
+      tab.shown.show();
+      tab.shown.focus();
     }
   }
 
@@ -410,7 +484,7 @@ function App() {
       newTab(undefined, { cwd: dir, name: branch, group: from.group, startAgent: harness });
     } catch (e) {
       alert(`Could not create the worktree: ${e}`);
-      active()?.view.focus();
+      active()?.shown.focus();
     }
   }
 
@@ -457,7 +531,7 @@ function App() {
       }),
       listen<number>("pty-exit", (e) => {
         const tab = tabs().find((t) => t.view.ptyId === e.payload);
-        if (tab) closeTab(tab);
+        if (tab) closeTab(tab, true);
       }),
       listen<AgentStatus>("agent-status", (e) => onAgentStatus(e.payload)),
       // Another `rift.exe <dir>` was launched (Explorer menu): single-instance forwards the folder here.
@@ -468,6 +542,11 @@ function App() {
       const busy = tabs().filter((t) => t.status === "working" || t.status === "blocked").length;
       const s = busy === 1 ? "" : "s";
       if (busy && !confirm(`${busy} agent${s} still working or waiting for you. Close Rift anyway?`)) {
+        event.preventDefault();
+        return;
+      }
+      const unsaved = tabs().flatMap((t) => t.docs.filter((d) => d.dirty).map((d) => d.name));
+      if (unsaved.length && !confirm(`Discard unsaved changes to ${unsaved.join(", ")}?`)) {
         event.preventDefault();
         return;
       }
@@ -506,6 +585,8 @@ function App() {
         views: () => tabs().map((t) => t.view),
         activate: (i) => activate(tabs()[i]),
         setPanels: (open) => setPanels({ explorer: open, git: open }),
+        openDoc: (i, file) => openDoc(`${dirs[0]}/${file}`, tabs()[i]),
+        showsDoc: (i) => tabs()[i].current >= 0,
       });
     });
     onCleanup(() => {
@@ -542,13 +623,17 @@ function App() {
         onFilter={setFilter}
         onNewWorktree={setWorktreeFrom}
         rename={renameRequest()}
-        onFocusTerminal={() => active()?.view.focus()}
+        onFocusTerminal={() => active()?.shown.focus()}
       />
         <Resizer edge="right" width={widths().tabs} min={160} max={480} onResize={resizeWidth("tabs")} onDragging={onDragging} />
       </div>
       <Show when={panels().explorer}>
         <div class="pane" style={{ width: `${widths().explorer}px` }}>
-          <Explorer root={panelTab()?.root ?? panelTab()?.cwd} onClose={() => togglePanel("explorer")} />
+          <Explorer
+            root={panelTab()?.root ?? panelTab()?.cwd}
+            onOpenFile={(path) => openDoc(path)}
+            onClose={() => togglePanel("explorer")}
+          />
           <Resizer
             edge="right"
             width={widths().explorer}
@@ -567,7 +652,7 @@ function App() {
             hint={`A new branch from the current commit, checked out next to the repo in ${from().root?.split(/[\\/]/).pop()}.worktrees/, with a new agent session.`}
             confirm="Create"
             onSubmit={(branch) => newWorktree(from(), branch)}
-            onCancel={() => (setWorktreeFrom(undefined), active()?.view.focus())}
+            onCancel={() => (setWorktreeFrom(undefined), active()?.shown.focus())}
           />
         )}
       </Show>
@@ -575,13 +660,54 @@ function App() {
         <SettingsPage
           settings={settings()}
           onChange={changeSettings}
-          onClose={() => (setSettingsOpen(false), active()?.view.show())}
+          onClose={() => (setSettingsOpen(false), active()?.shown.show())}
         />
       </Show>
       <main class="main">
         {/* Like Warp: the active tab's branch and changes on the right, opening the git panel. */}
         <div class="topbar">
-          <span class="topbar-title">{barTab() ? displayTitle(barTab()!) : ""}</span>
+          <Show
+            when={barTab()?.docs.length ? barTab() : undefined}
+            fallback={<span class="topbar-title">{barTab() ? displayTitle(barTab()!) : ""}</span>}
+          >
+            {(tab) => (
+              <div class="doc-tabs">
+                <button class="doc-tab" classList={{ on: tab().current < 0 }} onClick={() => showDoc(tab(), -1)}>
+                  Terminal
+                </button>
+                <For each={tab().docs}>
+                  {(doc, i) => (
+                    <div
+                      class="doc-tab"
+                      classList={{ on: tab().current === i() }}
+                      title={doc.path}
+                      onClick={() => showDoc(tab(), i())}
+                      onAuxClick={(e) => e.button === 1 && closeDoc(tab(), i())}
+                    >
+                      <span class="doc-name">{doc.name}</span>
+                      <Show when={doc.dirty}>
+                        <span class="doc-dirty" title="Unsaved (Ctrl+S)" />
+                      </Show>
+                      <button
+                        class="doc-close"
+                        title="Close"
+                        onClick={(e) => (e.stopPropagation(), closeDoc(tab(), i()))}
+                      >
+                        <Icon name="close" size={10} />
+                      </button>
+                    </div>
+                  )}
+                </For>
+              </div>
+            )}
+          </Show>
+          <Show when={barTab()?.docs[barTab()!.current]?.markdown && barTab()!.docs[barTab()!.current]}>
+            {(doc) => (
+              <button class="doc-mode" onClick={() => doc().toggleEdit()}>
+                {doc().editing ? "Read" : "Edit"}
+              </button>
+            )}
+          </Show>
           <button
             class="git-button"
             classList={{ on: panels().git }}

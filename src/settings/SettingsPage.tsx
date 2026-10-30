@@ -79,6 +79,19 @@ export function SettingsPage(props: { settings: Settings; onChange(s: Settings):
             </select>
           </div>
 
+          <h3>Files</h3>
+          <div class="setting">
+            <label>Opening a file</label>
+            <div class="segmented">
+              <button classList={{ on: props.settings.docs === "single" }} onClick={() => set({ docs: "single" })}>
+                One at a time
+              </button>
+              <button classList={{ on: props.settings.docs === "tabs" }} onClick={() => set({ docs: "tabs" })}>
+                New tab each time
+              </button>
+            </div>
+          </div>
+
           <h3>Appearance</h3>
           <div class="setting">
             <label>Theme</label>

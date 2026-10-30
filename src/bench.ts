@@ -7,7 +7,18 @@ export type BenchApi = {
   setPanels(open: boolean): void;
   views(): TermView[];
   activate(index: number): void;
+  /** Opens a file of the bench repo (relative path) in tab `index`; it shows instead of the terminal. */
+  openDoc(index: number, file: string): void;
+  showsDoc(index: number): boolean;
 };
+
+// Tabs showing a document instead of their terminal: the Markdown reader and the code editor.
+const DOCS: [number, string][] = [
+  [3, "README.md"],
+  [7, "src/App.tsx"],
+  [11, "CLAUDE.md"],
+  [15, "src-tauri/src/pty.rs"],
+];
 
 const TABS = 20;
 const LINES = 10_000; // = scrollback, so every buffer is full
@@ -16,7 +27,7 @@ const BUDGET = { workP95: 16, latencyP95: 50 }; // ms
 // Heavy output: the window must stay responsive (a frame at least every OUTPUT_FRAME_P95 ms, p95).
 const OUTPUT_FRAME_P95 = 100;
 
-type Sample = { work: number; latency: number };
+type Sample = { work: number; latency: number; doc?: boolean };
 
 const frame = () => new Promise<number>((r) => requestAnimationFrame(r));
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -28,7 +39,21 @@ function fill(view: TermView): Promise<void> {
 }
 
 /** Switches tabs and resolves once xterm has rendered the new one (or after 4 frames if nothing needed rendering). */
-async function measure(view: TermView, doSwitch: () => void): Promise<Sample> {
+async function measure(api: BenchApi, i: number, doSwitch: () => void): Promise<Sample> {
+  if (api.showsDoc(i)) {
+    // A document is plain DOM: its cost is the style and layout of the next frame (forced and timed here,
+    // like the terminals' render time), and it is on screen once that frame is painted.
+    const t0 = performance.now();
+    doSwitch();
+    const sync = performance.now() - t0;
+    await frame();
+    const l0 = performance.now();
+    void document.body.offsetHeight;
+    const layout = performance.now() - l0;
+    await sleep(0);
+    return { work: sync + layout, latency: performance.now() - t0, doc: true };
+  }
+  const view = api.views()[i];
   let rendered: Sample | undefined;
   const t0 = performance.now();
   const sub = view.term.onRender(() => {
@@ -48,7 +73,7 @@ async function measure(view: TermView, doSwitch: () => void): Promise<Sample> {
 async function scenario(api: BenchApi, order: number[], gap = 30): Promise<Sample[]> {
   const samples: Sample[] = [];
   for (const i of order) {
-    samples.push(await measure(api.views()[i], () => api.activate(i)));
+    samples.push(await measure(api, i, () => api.activate(i)));
     await sleep(gap);
   }
   return samples;
@@ -64,7 +89,11 @@ function summarize(name: string, samples: Sample[]) {
   const latency = samples.map((s) => s.latency);
   const ok = pct(work, 95) < BUDGET.workP95 && pct(latency, 95) < BUDGET.latencyP95;
   const f = (v: number[]) => `p50 ${pct(v, 50).toFixed(1)}  p95 ${pct(v, 95).toFixed(1)}  max ${Math.max(...v).toFixed(1)}`;
-  return { ok, text: `${ok ? "PASS" : "FAIL"} ${name}\n  work    ${f(work)} ms\n  latency ${f(latency)} ms` };
+  const docs = samples.filter((s) => s.doc);
+  const split = docs.length
+    ? `\n  to a document tab (${docs.length}): work ${f(docs.map((s) => s.work))}, latency ${f(docs.map((s) => s.latency))} ms`
+    : "";
+  return { ok, text: `${ok ? "PASS" : "FAIL"} ${name}\n  work    ${f(work)} ms\n  latency ${f(latency)} ms${split}` };
 }
 
 /**
@@ -126,7 +155,9 @@ export async function run(api: BenchApi) {
 
   const cycle = Array.from({ length: SWITCHES }, (_, k) => k % TABS);
   const toggle = Array.from({ length: SWITCHES }, (_, k) => k % 2);
-  await scenario(api, cycle.slice(0, TABS)); // warm-up lap
+  for (const [i, file] of DOCS) api.openDoc(i, file);
+  await scenario(api, cycle.slice(0, TABS)); // warm-up lap (documents are read when first shown)
+  await sleep(1000);
   const results = [
     summarize(`cycle ${TABS} tabs (Ctrl+PgDn)`, await scenario(api, cycle)),
     summarize("toggle 2 tabs", await scenario(api, toggle)),
@@ -147,7 +178,7 @@ export async function run(api: BenchApi) {
     results.push(await heavyOutput(fresh, ...output));
   }
   const report = [
-    `Rift tab-switch bench: ${TABS} tabs x ${LINES} lines, ${SWITCHES} switches each`,
+    `Rift tab-switch bench: ${TABS} tabs x ${LINES} lines (${DOCS.length} of them showing a document), ${SWITCHES} switches each`,
     `budget (switching): work p95 < ${BUDGET.workP95} ms, latency p95 < ${BUDGET.latencyP95} ms`,
     ...results.map((r) => r.text),
   ].join("\n");

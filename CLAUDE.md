@@ -57,6 +57,7 @@ src/
   terminal/         TermView.ts (one xterm per tab), themes.ts, osc.ts, paths.ts
   panels/           Explorer, GitPanel, diff.ts, fileIcons.ts
   ui/               Menu, Resizer, Icon, PromptDialog, FindBar
+  docs/             DocView.ts (one open file), place.ts (pure; tested), editor.ts + markdown.ts (lazy chunks)
   settings/         settings.ts (pure + tested), SettingsPage.tsx
   update.ts, bench.ts
 ```
@@ -98,6 +99,15 @@ Frontend ↔ backend: Tauri commands, the PTY `Channel`, and events (`pty-exit`,
 - Commit: checkboxes, message, Ctrl+Enter. `git::commit` commits exactly the checked files (`git add` for untracked, then `git commit --only`; renames via `Change.orig`); pathspecs NUL-separated on stdin with `--literal-pathspecs`.
 - ✨ Generate: the checked files' diff (capped 60 KB) → first harness's `one_shot` (Claude: `claude -p --model haiku --tools "" --no-session-persistence`, ~10 s). Conventional Commits, no co-author line (`COMMIT_PROMPT`).
 
+### Documents (files opened in a tab)
+- A click in the files panel opens the file **in the tab**, shown instead of its terminal; the top bar becomes sub-tabs `Terminal | file × | ...` (the bar's height never changes, so terminals never refit for it). "Open with default app" is in the file's menu. Not text (binary, not UTF-8, > 5 MB, `files::read_text`) → default app.
+- Setting "Opening a file": one at a time (default; replaces the shown or last document, never one with unsaved changes, `placeDoc`) or a new sub-tab each time.
+- `DocView` (`docs/`) is like `TermView`: mounted for the tab's life, `display` toggle. It reads the file only once shown and still visible (a restore activates every tab), and re-checks the mtime 150 ms after being shown (changed outside + no unsaved edits → reloaded). No watcher.
+- Editor: **CodeMirror 6**, not Monaco (MBs, slow start). `docs/editor.ts` is a lazy chunk (~114 KB gz), languages load per file (`@codemirror/language-data`). Highlighting, search, undo, Ctrl+S; no LSP/autocomplete. The file's line endings are kept (`lineSeparator`). Font = terminal font via CSS variables.
+- Markdown opens in the reader (`docs/markdown.ts`, lazy, marked + **DOMPurify**: the page can call Rift's commands, so files never bring scripts, handlers, forms or `style`), with Edit/Read in the top bar. Links: http(s) → browser, relative → opened in Rift, never navigate the app. Relative images are not shown yet.
+- Unsaved changes: confirm before closing the document, its tab or Rift. Open documents are saved per tab (`ui.docs`, `ui.doc`).
+- Measured: switching to a tab showing a document = 1.5-1.9 ms of work (style + layout), less than a terminal.
+
 ### Settings and themes
 - Overlay (⚙ or Ctrl+,; Esc closes); Rift's shortcuts are off while it is open.
 - `settings.ts` is the single source: `ACTIONS`, `defaultKeys(mac)`, `mergeSettings` (any saved shape → valid), `comboOf`, `actionFor`, `bind`. Shortcuts dispatch only through `actionFor`. A shortcut needs Ctrl, Alt or Cmd, or is F1-F12 (`isValidShortcut`). macOS defaults use Cmd.
@@ -131,9 +141,9 @@ Frontend ↔ backend: Tauri commands, the PTY `Channel`, and events (`pty-exit`,
 - Measured release: installer 2.4 MB, exe 7.2 MB, hook call 11 ms.
 
 ## Scope
-- Done: tabs, spare shell, shell profiles, session + per-tab Claude resume, scrollback restore, grouped vertical tabs, agent status + notifications + attention tools, files and git panels (diff, commit selected files, AI message, stats, top bar), worktrees, settings (themes, fonts, shortcuts, Cmd on macOS), Explorer menu, auto-update, benches.
+- Done: tabs, spare shell, shell profiles, session + per-tab Claude resume, scrollback restore, grouped vertical tabs, agent status + notifications + attention tools, files and git panels (diff, commit selected files, AI message, stats, top bar), worktrees, documents in tabs (editor + Markdown reader), settings (themes, fonts, shortcuts, Cmd on macOS), Explorer menu, auto-update, benches.
 - Next: multi-window, split panes, command palette (Ctrl+Shift+P), launch configurations, global hotkey, stage hunks, review comments sent to the tab's agent.
-- Out of scope (cost speed or not the product): Warp blocks / rewritten input editor (fights PSReadLine), built-in AI agent, Warp Drive / notebooks / team or session sharing, cloud agents, built-in code editor with LSP, accounts. Revisit only if asked.
+- Out of scope (cost speed or not the product): Warp blocks / rewritten input editor (fights PSReadLine), built-in AI agent, Warp Drive / notebooks / team or session sharing, cloud agents, IDE features in the editor (LSP, autocomplete, project search), accounts. Revisit only if asked.
 
 ## Conventions
 - Rust: `cargo fmt`, `cargo clippy -- -D warnings`. Frontend: `tsc --noEmit`, vitest.

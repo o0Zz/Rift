@@ -36,7 +36,8 @@ const join = (dir: string, name: string) =>
   `${dir.replace(/[\\/]+$/, "")}${dir.includes("\\") ? "\\" : "/"}${name}`;
 
 /** File tree of `root`. Each folder is listed once, when first expanded (cached until ⟳). */
-export function Explorer(props: { root?: string; onClose(): void }) {
+/** Files of the tab's repo (or folder). A click opens a file in the tab (`onOpenFile`), not in another app. */
+export function Explorer(props: { root?: string; onOpenFile(path: string): void; onClose(): void }) {
   const [listings, setListings] = createSignal(new Map<string, Entry[] | string>());
   const [expanded, setExpanded] = createSignal(new Set<string>());
   const menu = createMenu();
@@ -72,7 +73,8 @@ export function Explorer(props: { root?: string; onClose(): void }) {
 
   function fileMenu(e: MouseEvent, path: string) {
     menu.open(e, [
-      { label: "Open", run: () => invoke("fs_open", { path }) },
+      { label: "Open", run: () => props.onOpenFile(path) },
+      { label: "Open with default app", run: () => invoke("fs_open", { path }) },
       { label: "Reveal in File Explorer", run: () => invoke("fs_reveal", { path }) },
       { label: "Copy path", run: () => navigator.clipboard.writeText(path) },
     ]);
@@ -102,7 +104,7 @@ export function Explorer(props: { root?: string; onClose(): void }) {
                         e.dataTransfer!.setData("text/plain", path);
                         e.dataTransfer!.effectAllowed = "copy";
                       }}
-                      onClick={() => (entry.dir ? toggle(path) : invoke("fs_open", { path }))}
+                      onClick={() => (entry.dir ? toggle(path) : props.onOpenFile(path))}
                       onContextMenu={(e) => fileMenu(e, path)}
                     >
                       <span class="tree-chev">{entry.dir && <Icon name={open() ? "down" : "right"} size={12} />}</span>

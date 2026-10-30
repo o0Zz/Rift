@@ -24,6 +24,49 @@ pub fn list(dir: &Path) -> std::io::Result<Vec<Entry>> {
     Ok(entries)
 }
 
+/// Bigger files open in the default app: the editor would hold them all in memory.
+const MAX_TEXT: u64 = 5_000_000;
+
+#[derive(Debug, PartialEq, Serialize)]
+pub struct Text {
+    pub text: String,
+    /// Last modification (ms since the epoch), to notice changes made outside Rift.
+    pub mtime: u64,
+}
+
+/// A text file to show in Rift, or None when it is not one (binary, not UTF-8, too big).
+pub fn read_text(path: &Path) -> std::io::Result<Option<Text>> {
+    let meta = std::fs::metadata(path)?;
+    if meta.len() > MAX_TEXT {
+        return Ok(None);
+    }
+    let bytes = std::fs::read(path)?;
+    if bytes[..bytes.len().min(8000)].contains(&0) {
+        return Ok(None);
+    }
+    Ok(String::from_utf8(bytes).ok().map(|text| Text {
+        text,
+        mtime: millis(&meta),
+    }))
+}
+
+/// Writes `text` as is (the caller keeps the file's line endings) and returns the new mtime.
+pub fn write_text(path: &Path, text: &str) -> std::io::Result<u64> {
+    std::fs::write(path, text)?;
+    mtime(path)
+}
+
+pub fn mtime(path: &Path) -> std::io::Result<u64> {
+    Ok(millis(&std::fs::metadata(path)?))
+}
+
+fn millis(meta: &std::fs::Metadata) -> u64 {
+    meta.modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map_or(0, |d| d.as_millis() as u64)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -51,5 +94,34 @@ mod tests {
                 ("b.txt".into(), false)
             ]
         );
+    }
+
+    #[test]
+    fn reads_and_writes_text_keeping_line_endings() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.cpp");
+        std::fs::write(&path, "int a;\r\nint b; // é\r\n").unwrap();
+        let read = read_text(&path).unwrap().unwrap();
+        assert_eq!(read.text, "int a;\r\nint b; // é\r\n");
+        assert!(read.mtime > 0);
+        let mtime = write_text(&path, "x\r\n").unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"x\r\n");
+        assert_eq!(mtime, super::mtime(&path).unwrap());
+    }
+
+    #[test]
+    fn binary_latin1_and_huge_files_are_not_text() {
+        let dir = tempfile::tempdir().unwrap();
+        let cases: [(&str, Vec<u8>); 3] = [
+            ("a.png", b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec()),
+            ("latin1.cs", b"// caf\xe9".to_vec()),
+            ("huge.log", vec![b'x'; MAX_TEXT as usize + 1]),
+        ];
+        for (name, bytes) in cases {
+            let path = dir.path().join(name);
+            std::fs::write(&path, bytes).unwrap();
+            assert_eq!(read_text(&path).unwrap(), None, "{name}");
+        }
+        assert!(read_text(&dir.path().join("missing.txt")).is_err());
     }
 }
