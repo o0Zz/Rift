@@ -79,6 +79,11 @@ export class TermView {
     this.fit.fit();
   }
 
+  /** For hidden tabs (they cannot measure themselves): take the visible tab's size. */
+  resizeTo(cols: number, rows: number) {
+    if (this.term.cols !== cols || this.term.rows !== rows) this.term.resize(cols, rows);
+  }
+
   dispose() {
     if (this.ptyId >= 0) invoke("pty_close", { id: this.ptyId });
     this.term.dispose();

@@ -1,4 +1,6 @@
 mod agents;
+mod files;
+mod git;
 pub mod hook;
 mod pty;
 mod session;
@@ -139,13 +141,54 @@ fn agent_install(harnesses: State<Harnesses>, id: String) -> Result<(), String> 
         .map_err(err)
 }
 
+// Explorer and git panel. All async: they run off the main thread and never delay a tab switch.
+
+#[tauri::command]
+async fn fs_list(dir: String) -> Result<Vec<files::Entry>, String> {
+    files::list(dir.as_ref()).map_err(err)
+}
+
+#[tauri::command]
+async fn fs_open(path: String) -> Result<(), String> {
+    tauri_plugin_opener::open_path(path, None::<&str>).map_err(err)
+}
+
+#[tauri::command]
+async fn fs_reveal(path: String) -> Result<(), String> {
+    tauri_plugin_opener::reveal_item_in_dir(path).map_err(err)
+}
+
+#[tauri::command]
+async fn git_head(cwd: String) -> Option<git::Head> {
+    git::head(cwd.as_ref())
+}
+
+#[tauri::command]
+async fn git_status(root: String) -> Result<Vec<git::Change>, String> {
+    git::status(root.as_ref()).map_err(err)
+}
+
+#[tauri::command]
+async fn git_diff(root: String, path: String, untracked: bool) -> Result<String, String> {
+    git::diff(root.as_ref(), &path, untracked).map_err(err)
+}
+
 fn bench_mode() -> bool {
     std::env::var_os("RIFT_BENCH").is_some()
 }
 
+/// In bench mode, the folders the bench opens its tabs in (RIFT_BENCH_DIRS, `;`-separated): git repos,
+/// so the panels do real work when switching. `None` outside bench mode.
 #[tauri::command]
-fn bench_enabled() -> bool {
-    bench_mode()
+fn bench_dirs() -> Option<Vec<String>> {
+    bench_mode().then(|| {
+        std::env::var("RIFT_BENCH_DIRS")
+            .unwrap_or_default()
+            .split(';')
+            .filter(|d| !d.is_empty())
+            .map(String::from)
+            .collect()
+    })
 }
 
 #[tauri::command]
@@ -223,7 +266,13 @@ pub fn run() {
             session_update,
             agent_integrations,
             agent_install,
-            bench_enabled,
+            fs_list,
+            fs_open,
+            fs_reveal,
+            git_head,
+            git_status,
+            git_diff,
+            bench_dirs,
             bench_done
         ])
         .run(tauri::generate_context!())

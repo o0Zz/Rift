@@ -41,15 +41,23 @@ src-tauri/src/       Rust
   session.rs ✅      what to restore: tabs (cwd, title) + agent session per tab
   hook.rs ✅         hook client (`rift.exe hook`) + named-pipe server
   agents/ ✅         AgentHarness trait + adapters (claude.rs ✅, later codex, gemini...)
-  git/               status, diff, stage/unstage, commit
-  fs/                file tree + watcher
+  git.rs ✅          branch from .git/HEAD (no process); status/diff via git CLI (CREATE_NO_WINDOW)
+  files.rs ✅        one directory level per call (explorer is lazy, never walks recursively)
   notify/            Windows toast notifications
   shell_integration/ Explorer context menu (un)registration
 src/                 Frontend
-  tabs/ ✅  terminal/ ✅  panels/filetree/  panels/git/  settings/
+  tabs/ ✅  terminal/ ✅  panels/ ✅ (Explorer, GitPanel, diff.ts)  ui/Menu.tsx ✅  settings/
 ```
 
 Frontend tabs: `tabs/layout.ts` (pure logic: order, moves, titles, notify rule — unit-tested), `tabs/Tab.ts` (tab state as Solid signals behind getters), `tabs/Sidebar.tsx` (UI only), `App.tsx` (wiring: restore/save, keys, agent status).
+
+### Side panels (decisions already made — keep them)
+- Files panel (left, Ctrl+Shift+E) and git panel (right, Ctrl+Shift+G), toggled from the sidebar header; open/closed state saved in `layout.panels`.
+- **Not live** (user's choice, for speed): panels load when shown, when the shown tab changes, or on ⟳. No file watcher.
+- Panels follow `panelTab`, which trails the active tab by 150 ms: holding Ctrl+PgDn never loads every tab it passes. All panel commands are `async` (off the main thread); stale answers are dropped.
+- Explorer root = the tab's repo root, else its cwd. Folders are listed when first expanded and cached until ⟳.
+- Each tab knows its repo root + branch: `git_head` reads `.git/HEAD` (worktrees too) at every prompt (OSC 9;9), so `git checkout` updates the branch shown under the tab.
+- Width changes (panel toggle, window resize) make xterm re-wrap 10k lines of scrollback per terminal (~100-150 ms each). Hidden tabs are therefore resized in idle time, nearest first (`resizeHiddenTabs`), not on their next switch. Measured: without it, cycling tabs after opening a panel was ~149 ms p95.
 
 ### Sidebar (decisions already made — keep them)
 - Vertical tabs on the left (240px). Named groups (collapsible, colored, drag to reorder); tabs have an optional color and an optional user name. Colors fill the whole row / whole group block (Warp-style, `color-mix`); a tab's own color wins inside a colored group. Right-click menus; double-click renames.
@@ -127,12 +135,12 @@ Blocks (actions, find, filter, sharing, sticky header), input editor (syntax hig
 ## Conventions
 - Rust: `cargo fmt`, `cargo clippy -- -D warnings`. Frontend: `tsc --noEmit`, eslint.
 - Every feature ships with tests in the same change. Prefer end-to-end: real PTY spawn, real git repo in a temp dir, real hook JSON through the named pipe.
-- Perf budget has a benchmark (`src/bench.ts`: 20 tabs x 10k lines, cycle + toggle). Run it after any change to tabs, terminal or rendering; it exits non-zero over budget.
+- Perf budget has a benchmark (`src/bench.ts`: 20 tabs x 10k lines; cycle, toggle, and cycle with both panels open while tabs alternate between two git repos — `scripts/bench.mjs` creates the second repo). Run it after any change to tabs, terminal, panels or rendering; it exits non-zero over budget.
 - Keep it small: no abstraction until a second user of it exists — except `AgentHarness`, which is a stated requirement.
 - Commits: one short subject line, no sign-off trailers.
 
 ## Status
-Done: tabs + PTY + spare shell + shortcuts + copy/paste + tab-switch bench + session restore (tabs, cwd, per-tab Claude resume) + left sidebar with groups/colors/rename/drag + agent status badges + notifications. Next: git panel (right), file tree (left, alongside the tabs sidebar), Explorer menu.
+Done: tabs + PTY + spare shell + shortcuts + copy/paste + tab-switch bench + session restore (tabs, cwd, per-tab Claude resume) + left sidebar with groups/colors/rename/drag + agent status badges + notifications + files panel + read-only git panel (branch, changes, diff). Next: commit from the git panel (file checkboxes, AI commit message), Explorer right-click menu.
 
 Dev loop: keep `npm run tauri dev` running (the user watches changes live). Run tests with `CARGO_TARGET_DIR=src-tauri/target/test` so they don't fight the running app over `target/debug/rift.exe`.
 

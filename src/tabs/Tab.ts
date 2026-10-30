@@ -18,6 +18,8 @@ export class Tab {
     group: field<string | undefined>(undefined),
     status: field<Status | undefined>(undefined),
     agent: field<string | undefined>(undefined),
+    root: field<string | undefined>(undefined),
+    branch: field<string | undefined>(undefined),
     unread: field(false),
   };
 
@@ -38,6 +40,11 @@ export class Tab {
   /** Harness id of the running agent (e.g. "claude"), for its icon. */
   get agent() { return this.f.agent.get(); }
   set agent(v) { this.f.agent.set(v); }
+  /** Git repository root containing cwd, and its branch (read from .git/HEAD at each prompt). */
+  get root() { return this.f.root.get(); }
+  set root(v) { this.f.root.set(v); }
+  get branch() { return this.f.branch.get(); }
+  set branch(v) { this.f.branch.set(v); }
   get unread() { return this.f.unread.get(); }
   set unread(v) { this.f.unread.set(v); }
 }

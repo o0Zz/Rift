@@ -1,5 +1,6 @@
-import { createSignal, For, Show, onCleanup, onMount, type JSX } from "solid-js";
-import { COLORS, displayTitle, visualOrder, type Drop, type Group } from "./layout";
+import { createSignal, For, Show, onMount, type JSX } from "solid-js";
+import { displayTitle, visualOrder, type Drop, type Group } from "./layout";
+import { createMenu, type MenuItem } from "../ui/Menu";
 import type { Tab } from "./Tab";
 import { TabIcon } from "./icons";
 
@@ -15,14 +16,14 @@ export type SidebarProps = {
   onNewGroup(tab: Tab): void;
   onUpdateGroup(id: string, patch: Partial<Group>): void;
   onDeleteGroup(id: string): void;
+  panels: { explorer: boolean; git: boolean };
+  onTogglePanel(panel: "explorer" | "git"): void;
 };
 
-type MenuItem = { label: string; run(): void } | { colors(color: string | undefined): void } | "separator";
-type Menu = { x: number; y: number; items: MenuItem[] };
 type Dragged = { tab: Tab } | { group: string };
 
 export function Sidebar(props: SidebarProps) {
-  const [menu, setMenu] = createSignal<Menu>();
+  const menu = createMenu();
   const [editing, setEditing] = createSignal<Tab | Group>();
   const [dragged, setDragged] = createSignal<Dragged>();
   const [dropTarget, setDropTarget] = createSignal<unknown>();
@@ -31,23 +32,7 @@ export function Sidebar(props: SidebarProps) {
   const inGroup = (g: Group) => visualOrder(props.tabs, props.groups).filter((t) => t.group === g.id);
   const ungrouped = () => visualOrder(props.tabs, props.groups).filter((t) => !groupOf(t));
 
-  const closeMenu = () => setMenu(undefined);
-  onMount(() => {
-    const onDown = (e: MouseEvent) => !(e.target as Element).closest(".menu") && closeMenu();
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && closeMenu();
-    window.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKey);
-    onCleanup(() => {
-      window.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKey);
-    });
-  });
-
-  function openMenu(e: MouseEvent, items: MenuItem[]) {
-    e.preventDefault();
-    e.stopPropagation();
-    setMenu({ x: e.clientX, y: e.clientY, items });
-  }
+  const openMenu = (e: MouseEvent, items: MenuItem[]) => menu.open(e, items);
 
   function tabMenu(e: MouseEvent, tab: Tab) {
     openMenu(e, [
@@ -146,7 +131,12 @@ export function Sidebar(props: SidebarProps) {
           </Show>
           <Show when={tab.cwd}>
             <span class="tab-sub">
-              <bdo dir="ltr">{tab.cwd}</bdo>
+              <Show when={tab.branch}>
+                <span class="tab-branch">⎇ {tab.branch}</span>
+              </Show>
+              <span class="tab-path">
+                <bdo dir="ltr">{tab.cwd}</bdo>
+              </span>
             </span>
           </Show>
         </span>
@@ -164,9 +154,27 @@ export function Sidebar(props: SidebarProps) {
     <aside class="sidebar" onContextMenu={(e) => e.preventDefault()}>
       <div class="sidebar-head">
         <span>Tabs</span>
-        <button class="icon-btn" onClick={() => props.onNewTab()} title="New tab (Ctrl+Shift+T)">
-          +
-        </button>
+        <span class="head-buttons">
+          <button
+            class="icon-btn"
+            classList={{ on: props.panels.explorer }}
+            onClick={() => props.onTogglePanel("explorer")}
+            title="Files (Ctrl+Shift+E)"
+          >
+            🗀
+          </button>
+          <button
+            class="icon-btn"
+            classList={{ on: props.panels.git }}
+            onClick={() => props.onTogglePanel("git")}
+            title="Git changes (Ctrl+Shift+G)"
+          >
+            ⎇
+          </button>
+          <button class="icon-btn" onClick={() => props.onNewTab()} title="New tab (Ctrl+Shift+T)">
+            +
+          </button>
+        </span>
       </div>
       <div
         class="sidebar-list"
@@ -207,32 +215,7 @@ export function Sidebar(props: SidebarProps) {
         <div class="drop-zone" classList={{ active: dropTarget() === "ungrouped" }} />
       </div>
 
-      <Show when={menu()}>
-        {(m) => (
-          <div class="menu" style={{ left: `${m().x}px`, top: `${m().y}px` }}>
-            <For each={m().items}>
-              {(item) =>
-                item === "separator" ? (
-                  <div class="menu-sep" />
-                ) : "colors" in item ? (
-                  <div class="menu-colors">
-                    <For each={COLORS}>
-                      {(c) => <span class="swatch" style={{ background: c }} onClick={() => (item.colors(c), closeMenu())} />}
-                    </For>
-                    <span class="swatch none" title="No color" onClick={() => (item.colors(undefined), closeMenu())}>
-                      ×
-                    </span>
-                  </div>
-                ) : (
-                  <div class="menu-item" onClick={() => (closeMenu(), item.run())}>
-                    {item.label}
-                  </div>
-                )
-              }
-            </For>
-          </div>
-        )}
-      </Show>
+      <menu.Menu />
     </aside>
   );
 }

@@ -30,6 +30,12 @@ describe("tabAction", () => {
     expect(tabAction(key("W", { shift: true }))).toBe("close");
   });
 
+  it("toggles panels with Ctrl+Shift+E/G", () => {
+    expect(tabAction(key("E", { shift: true }))).toBe("explorer");
+    expect(tabAction(key("G", { shift: true }))).toBe("git");
+    expect(tabAction(key("g"))).toBeUndefined();
+  });
+
   it("leaves shell keys alone", () => {
     expect(tabAction(key("w"))).toBeUndefined();
     expect(tabAction(key("t"))).toBeUndefined();

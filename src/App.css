@@ -74,6 +74,16 @@ body,
   color: #fff;
 }
 
+.icon-btn.on {
+  background: #2f3a4a;
+  color: #8fb8e8;
+}
+
+.head-buttons {
+  display: flex;
+  gap: 2px;
+}
+
 .sidebar-list {
   display: flex;
   flex: 1;
@@ -242,8 +252,27 @@ body,
 }
 
 .tab-sub {
+  display: flex;
+  gap: 6px;
   color: #777;
   font-size: 11px;
+}
+
+.tab-branch {
+  flex: none;
+  max-width: 50%;
+  overflow: hidden;
+  color: #8fb8e8;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.tab-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
   /* Ellipsis on the left: the end of a long path is the useful part. */
   direction: rtl;
   text-align: left;
@@ -363,3 +392,145 @@ body,
   color: #fff;
   font: inherit;
 }
+
+/* Side panels (files on the left, git on the right) */
+
+.panel {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  background: #1a1a1a;
+  user-select: none;
+}
+
+.panel.explorer {
+  width: 240px;
+  border-right: 1px solid #2a2a2a;
+}
+
+.panel.git {
+  width: 440px;
+  border-left: 1px solid #2a2a2a;
+}
+
+.panel-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  height: 34px;
+  padding: 0 6px 0 12px;
+  border-bottom: 1px solid #252525;
+}
+
+.panel-title {
+  overflow: hidden;
+  color: #bbb;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.branch {
+  color: #8fb8e8;
+}
+
+.panel-body {
+  flex: 1;
+  overflow: auto;
+  padding: 4px 0;
+}
+
+.tree-row {
+  display: flex;
+  gap: 4px;
+  padding-top: 2px;
+  padding-bottom: 2px;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.tree-row:hover,
+.git-file:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.tree-chev {
+  flex: none;
+  width: 10px;
+  color: #777;
+  font-size: 10px;
+}
+
+.tree-dir {
+  color: #ddd;
+}
+
+.tree-note {
+  padding: 6px 12px;
+  color: #777;
+}
+
+.tree-note.error {
+  color: #e5534b;
+  white-space: pre-wrap;
+}
+
+.git-files {
+  flex: none;
+  max-height: 35%;
+  overflow: auto;
+  padding: 4px 0;
+  border-bottom: 1px solid #252525;
+}
+
+.git-file {
+  display: flex;
+  gap: 8px;
+  padding: 3px 12px;
+}
+
+.git-file.active {
+  background: #2a2d2e;
+  color: #fff;
+}
+
+.git-status {
+  flex: none;
+  width: 12px;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-weight: 700;
+}
+
+.s-M { color: #d4a72c; }
+.s-A, .s-u { color: #57ab5a; }
+.s-D { color: #e5534b; }
+.s-R { color: #539bf5; }
+.s-U { color: #e275ad; }
+
+.git-path {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: left;
+}
+
+.diff {
+  flex: 1;
+  overflow: auto;
+  padding: 4px 0;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 12px;
+  user-select: text;
+}
+
+.diff-line {
+  padding: 0 10px;
+  white-space: pre;
+}
+
+.diff-line.add { background: rgba(87, 171, 90, 0.15); color: #8ddb8c; }
+.diff-line.del { background: rgba(229, 83, 75, 0.15); color: #f47067; }
+.diff-line.hunk { color: #6cb6ff; }
+.diff-line.meta { color: #777; }

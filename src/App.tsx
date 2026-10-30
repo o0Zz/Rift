@@ -1,4 +1,4 @@
-import { batch, createEffect, createSignal, For, onCleanup, onMount } from "solid-js";
+import { batch, createEffect, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
@@ -8,11 +8,14 @@ import { neighbour, tabAction } from "./tabs/nav";
 import { displayTitle, moveGroup, moveTab, shouldNotify, visualOrder, type Drop, type Group, type Status } from "./tabs/layout";
 import { Tab } from "./tabs/Tab";
 import { Sidebar } from "./tabs/Sidebar";
+import { Explorer } from "./panels/Explorer";
+import { GitPanel } from "./panels/GitPanel";
 import "./App.css";
 
 type TabUi = { name?: string; color?: string; group?: string };
 type SavedTab = { cwd?: string; title: string; agent?: AgentSession; ui?: TabUi };
-type Saved = { tabs: SavedTab[]; active: number; layout?: { groups?: Group[] } };
+type Panels = { explorer: boolean; git: boolean };
+type Saved = { tabs: SavedTab[]; active: number; layout?: { groups?: Group[]; panels?: Panels } };
 type Integration = { id: string; name: string; installed: boolean };
 type AgentStatus = { pty: number; harness: string; status: Status | null; message: string | null };
 
@@ -24,6 +27,16 @@ function App() {
   const [missing, setMissing] = createSignal<Integration[]>([]);
   // From Tauri's window events: document.hasFocus() is not reliable in WebView2.
   const [windowFocused, setWindowFocused] = createSignal(true);
+  const [panels, setPanels] = createSignal<Panels>({ explorer: false, git: false });
+  // The tab the side panels show. Follows the active tab only once it stays put for a moment,
+  // so holding Ctrl+PgDn never makes the panels load each tab it passes.
+  const [panelTab, setPanelTab] = createSignal<Tab>();
+  let panelTimer = 0;
+  createEffect(() => {
+    const tab = active();
+    clearTimeout(panelTimer);
+    panelTimer = setTimeout(() => setPanelTab(tab), 150);
+  });
   // Saving starts once restored tabs have their shells, so a half-restored state is never written.
   const [restored, setRestored] = createSignal(false);
 
@@ -38,7 +51,7 @@ function App() {
         ui: { name: t.name, color: t.color, group: t.group } satisfies TabUi,
       })),
       active: Math.max(0, list.indexOf(active()!)),
-      layout: { groups: groups() },
+      layout: { groups: groups(), panels: panels() },
     });
   }
   createEffect(save);
@@ -64,7 +77,18 @@ function App() {
     tab.name = saved?.ui?.name;
     tab.color = saved?.ui?.color;
     tab.group = saved ? saved.ui?.group : active()?.group;
-    tab.view = new TermView(host, { onTitle: (v) => (tab.title = v), onCwd: (v) => (tab.cwd = v) });
+    const onCwd = (cwd: string) => {
+      tab.cwd = cwd;
+      // At every prompt: also catches `git checkout` (same cwd, new branch).
+      invoke<{ root: string; branch: string } | null>("git_head", { cwd }).then((head) =>
+        batch(() => {
+          tab.root = head?.root;
+          tab.branch = head?.branch;
+        }),
+      );
+    };
+    if (saved?.cwd) onCwd(saved.cwd);
+    tab.view = new TermView(host, { onTitle: (v) => (tab.title = v), onCwd });
 
     const list = [...tabs()];
     const after = saved ? -1 : list.indexOf(active()!);
@@ -81,6 +105,7 @@ function App() {
   async function restore() {
     const saved = await invoke<Saved>("session_restore");
     setGroups(saved.layout?.groups ?? []);
+    if (saved.layout?.panels) setPanels(saved.layout.panels);
     const starts = batch(() => (saved.tabs.length ? saved.tabs : [undefined]).map(newTab));
     const list = tabs();
     activate(list[Math.min(saved.active, list.length - 1)]);
@@ -136,6 +161,30 @@ function App() {
     });
   }
 
+  // Re-wrapping a terminal's scrollback to a new width costs ~100+ ms. After a width change (panel toggle,
+  // window resize), hidden tabs are resized in idle time, nearest first, instead of on their next switch.
+  let idleJob = 0;
+  function resizeHiddenTabs() {
+    cancelIdleCallback(idleJob);
+    const cur = active();
+    if (!cur) return;
+    const { cols, rows } = cur.view.term;
+    const order = visualOrder(tabs(), groups());
+    const at = order.indexOf(cur);
+    const pending = order
+      .filter((t) => t !== cur)
+      .sort((a, b) => Math.abs(order.indexOf(a) - at) - Math.abs(order.indexOf(b) - at));
+    const step = () => {
+      pending.shift()?.view.resizeTo(cols, rows);
+      if (pending.length) idleJob = requestIdleCallback(step);
+    };
+    idleJob = requestIdleCallback(step);
+  }
+
+  function togglePanel(panel: keyof Panels) {
+    setPanels({ ...panels(), [panel]: !panels()[panel] });
+  }
+
   function onAgentStatus({ pty, harness, status, message }: AgentStatus) {
     const tab = tabs().find((t) => t.view.ptyId === pty);
     if (!tab) return;
@@ -174,6 +223,7 @@ function App() {
     e.stopPropagation();
     if (action === "new") newTab();
     else if (action === "close") active() && closeTab(active()!);
+    else if (action === "explorer" || action === "git") togglePanel(action);
     else step(action === "next" ? 1 : -1);
   }
 
@@ -195,15 +245,24 @@ function App() {
     let frame = 0;
     const resize = new ResizeObserver(() => {
       cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => active()?.view.refit());
+      frame = requestAnimationFrame(() => {
+        active()?.view.refit();
+        resizeHiddenTabs();
+      });
     });
     resize.observe(host);
     restore();
     checkIntegrations();
-    invoke<boolean>("bench_enabled").then(async (on) => {
-      if (!on) return;
+    invoke<string[] | null>("bench_dirs").then(async (dirs) => {
+      if (!dirs) return;
       const bench = await import("./bench");
-      bench.run({ newTab: () => newTab(), views: () => tabs().map((t) => t.view), activate: (i) => activate(tabs()[i]) });
+      bench.run({
+        // Alternate between the bench repos so every switch changes repo (worst case for the panels).
+        newTab: () => newTab(dirs.length ? { cwd: dirs[tabs().length % dirs.length], title: "" } : undefined),
+        views: () => tabs().map((t) => t.view),
+        activate: (i) => activate(tabs()[i]),
+        setPanels: (open) => setPanels({ explorer: open, git: open }),
+      });
     });
     onCleanup(() => {
       window.removeEventListener("keydown", onKey, true);
@@ -226,7 +285,12 @@ function App() {
         onNewGroup={newGroup}
         onUpdateGroup={updateGroup}
         onDeleteGroup={deleteGroup}
+        panels={panels()}
+        onTogglePanel={togglePanel}
       />
+      <Show when={panels().explorer}>
+        <Explorer root={panelTab()?.root ?? panelTab()?.cwd} />
+      </Show>
       <main class="main">
         <For each={missing()}>
           {(i) => (
@@ -242,6 +306,9 @@ function App() {
         </For>
         <div class="terms" ref={host} />
       </main>
+      <Show when={panels().git}>
+        <GitPanel root={panelTab()?.root} branch={panelTab()?.branch} />
+      </Show>
     </div>
   );
 }

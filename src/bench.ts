@@ -4,6 +4,7 @@ import type { TermView } from "./terminal/TermView";
 
 export type BenchApi = {
   newTab(): void;
+  setPanels(open: boolean): void;
   views(): TermView[];
   activate(index: number): void;
 };
@@ -42,11 +43,11 @@ async function measure(view: TermView, doSwitch: () => void): Promise<Sample> {
     : { work: sync, latency: performance.now() - t0 };
 }
 
-async function scenario(api: BenchApi, order: number[]): Promise<Sample[]> {
+async function scenario(api: BenchApi, order: number[], gap = 30): Promise<Sample[]> {
   const samples: Sample[] = [];
   for (const i of order) {
     samples.push(await measure(api.views()[i], () => api.activate(i)));
-    await sleep(30);
+    await sleep(gap);
   }
   return samples;
 }
@@ -76,6 +77,11 @@ export async function run(api: BenchApi) {
     summarize(`cycle ${TABS} tabs (Ctrl+PgDn)`, await scenario(api, cycle)),
     summarize("toggle 2 tabs", await scenario(api, toggle)),
   ];
+  // Panels open; the 250 ms gap lets each panel load (150 ms debounce) between switches, so their work shows up.
+  // Opening them narrows every terminal: wait for the idle-time resize of the hidden tabs first.
+  api.setPanels(true);
+  await sleep(5000);
+  results.push(summarize("cycle with files + git panels open", await scenario(api, cycle.slice(0, 40), 250)));
   const report = [
     `Rift tab-switch bench: ${TABS} tabs x ${LINES} lines, ${SWITCHES} switches each`,
     `budget: work p95 < ${BUDGET.workP95} ms, latency p95 < ${BUDGET.latencyP95} ms`,
