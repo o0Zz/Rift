@@ -225,6 +225,12 @@ function App() {
     });
   }
 
+  /** Closes every tab of the group, then the group (the window closes if no tab is left, as for a last tab). */
+  function closeGroup(id: string) {
+    for (const t of tabs().filter((t) => t.group === id)) closeTab(t);
+    setGroups(groups().filter((g) => g.id !== id));
+  }
+
   // Re-wrapping a terminal's scrollback to a new width costs ~100+ ms. After a width change (panel toggle,
   // window resize), hidden tabs are resized in idle time, nearest first, instead of on their next switch.
   let idleJob = 0;
@@ -383,6 +389,7 @@ function App() {
         onNewGroup={newGroup}
         onUpdateGroup={updateGroup}
         onDeleteGroup={deleteGroup}
+        onCloseGroup={closeGroup}
         panels={panels()}
         onTogglePanel={togglePanel}
         onOpenSettings={() => setSettingsOpen(true)}

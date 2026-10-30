@@ -16,6 +16,7 @@ export type SidebarProps = {
   onNewGroup(tab: Tab): void;
   onUpdateGroup(id: string, patch: Partial<Group>): void;
   onDeleteGroup(id: string): void;
+  onCloseGroup(id: string): void;
   panels: { explorer: boolean; git: boolean };
   onTogglePanel(panel: "explorer" | "git"): void;
   onOpenSettings(): void;
@@ -56,6 +57,7 @@ export function Sidebar(props: SidebarProps) {
       { colors: (c) => props.onUpdateGroup(g.id, { color: c }) },
       "separator",
       { label: "Delete group (keep tabs)", run: () => props.onDeleteGroup(g.id) },
+      { label: `Close group and its ${inGroup(g).length} tab${inGroup(g).length === 1 ? "" : "s"}`, run: () => props.onCloseGroup(g.id) },
     ]);
   }
 
