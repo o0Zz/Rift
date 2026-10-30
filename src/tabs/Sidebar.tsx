@@ -1,4 +1,4 @@
-import { createSignal, For, Show, onMount, type JSX } from "solid-js";
+import { createEffect, createSignal, For, Show, onMount, type JSX } from "solid-js";
 import { displayTitle, matchesFilter, ownRowColor, visualOrder, type Drop, type Group, type TabFilter } from "./layout";
 import { createMenu, type MenuItem } from "../ui/Menu";
 import type { Tab } from "./Tab";
@@ -27,12 +27,19 @@ export type SidebarProps = {
   onNewWorktree(tab: Tab): void;
   /** Gives the keyboard back to the active terminal. */
   onFocusTerminal(): void;
+  /** Set to start renaming a tab (F2); a new object each time. */
+  rename?: { tab: Tab };
 };
 
 type Dragged = { tab: Tab } | { group: string };
 
 export function Sidebar(props: SidebarProps) {
-  const menu = createMenu();
+  // After a keyboard choice in a menu, the keyboard goes back to the terminal.
+  const menu = createMenu(() => requestAnimationFrame(() => props.onFocusTerminal()));
+  createEffect(() => {
+    const r = props.rename;
+    if (r) setEditing(r.tab);
+  });
   const [editing, setEditing] = createSignal<Tab | Group>();
   const [dragged, setDragged] = createSignal<Dragged>();
   const [dropTarget, setDropTarget] = createSignal<unknown>();
@@ -113,6 +120,7 @@ export function Sidebar(props: SidebarProps) {
           e.stopPropagation();
           if (e.key === "Enter") done(input.value.trim() || undefined);
           if (e.key === "Escape") setEditing(undefined);
+          if (e.key === "Enter" || e.key === "Escape") requestAnimationFrame(() => props.onFocusTerminal());
         }}
         onBlur={() => editing() && done(input.value.trim() || undefined)}
       />

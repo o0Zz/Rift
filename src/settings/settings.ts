@@ -14,6 +14,7 @@ export const ACTIONS = {
   zoomIn: "Zoom in",
   zoomOut: "Zoom out",
   zoomReset: "Reset zoom",
+  renameTab: "Rename tab",
   settings: "Open settings",
 } as const;
 
@@ -27,22 +28,48 @@ export type Settings = {
   keys: Keymap;
 };
 
-// Ctrl+T/W are left to the shell (Ctrl+W deletes a word), hence the Shift variants.
-export const DEFAULT_KEYS: Keymap = {
-  newTab: ["Ctrl+Shift+T"],
-  closeTab: ["Ctrl+Shift+W"],
-  nextTab: ["Ctrl+PageDown", "Ctrl+Tab"],
-  prevTab: ["Ctrl+PageUp", "Ctrl+Shift+Tab"],
-  toggleFiles: ["Ctrl+Shift+E"],
-  toggleGit: ["Ctrl+Shift+G"],
-  nextAttention: ["Ctrl+Shift+U"],
-  // Ctrl+F is the shell's (bash: forward one character), like Ctrl+T/W.
-  find: ["Ctrl+Shift+F"],
-  zoomIn: ["Ctrl+=", "Ctrl++", "Ctrl+Shift++"],
-  zoomOut: ["Ctrl+-"],
-  zoomReset: ["Ctrl+0"],
-  settings: ["Ctrl+,"],
-};
+export const IS_MAC = typeof navigator !== "undefined" && /Mac/i.test(navigator.platform);
+
+/**
+ * Default shortcuts. Windows/Linux: Ctrl+T/W/F belong to the shell (Ctrl+W deletes a word), hence the
+ * Shift variants. macOS: Cmd never reaches the shell, so the native Cmd+T/W/F are free.
+ */
+export function defaultKeys(mac: boolean): Keymap {
+  if (mac) {
+    return {
+      newTab: ["Cmd+T"],
+      closeTab: ["Cmd+W"],
+      nextTab: ["Cmd+Shift+}", "Cmd+Alt+ArrowRight", "Ctrl+Tab"],
+      prevTab: ["Cmd+Shift+{", "Cmd+Alt+ArrowLeft", "Ctrl+Shift+Tab"],
+      toggleFiles: ["Cmd+Shift+E"],
+      toggleGit: ["Cmd+Shift+G"],
+      nextAttention: ["Cmd+Shift+U"],
+      find: ["Cmd+F"],
+      zoomIn: ["Cmd+=", "Cmd++", "Cmd+Shift++"],
+      zoomOut: ["Cmd+-"],
+      zoomReset: ["Cmd+0"],
+      renameTab: ["F2"],
+      settings: ["Cmd+,"],
+    };
+  }
+  return {
+    newTab: ["Ctrl+Shift+T"],
+    closeTab: ["Ctrl+Shift+W"],
+    nextTab: ["Ctrl+PageDown", "Ctrl+Tab"],
+    prevTab: ["Ctrl+PageUp", "Ctrl+Shift+Tab"],
+    toggleFiles: ["Ctrl+Shift+E"],
+    toggleGit: ["Ctrl+Shift+G"],
+    nextAttention: ["Ctrl+Shift+U"],
+    find: ["Ctrl+Shift+F"], // Ctrl+F is the shell's (bash: forward one character)
+    zoomIn: ["Ctrl+=", "Ctrl++", "Ctrl+Shift++"],
+    zoomOut: ["Ctrl+-"],
+    zoomReset: ["Ctrl+0"],
+    renameTab: ["F2"], // note: PowerShell 7 uses F2 to switch its prediction view; rebindable
+    settings: ["Ctrl+,"],
+  };
+}
+
+export const DEFAULT_KEYS: Keymap = defaultKeys(IS_MAC);
 
 export const DEFAULTS: Settings = {
   theme: "dark",
@@ -70,21 +97,26 @@ export function mergeSettings(saved: unknown): Settings {
 
 type KeyLike = Pick<KeyboardEvent, "key" | "ctrlKey" | "shiftKey" | "altKey" | "metaKey">;
 
-/** "Ctrl+Shift+T" for a keydown, or undefined for a lone modifier. */
-export function comboOf(e: KeyLike): string | undefined {
+/** "Ctrl+Shift+T" for a keydown, or undefined for a lone modifier. The Meta key is "Cmd" on macOS. */
+export function comboOf(e: KeyLike, mac = IS_MAC): string | undefined {
   if (["Control", "Shift", "Alt", "Meta", "AltGraph"].includes(e.key)) return;
-  const mods = [e.ctrlKey && "Ctrl", e.altKey && "Alt", e.shiftKey && "Shift", e.metaKey && "Win"].filter(Boolean);
+  const meta = mac ? "Cmd" : "Win";
+  const mods = [e.metaKey && mac && meta, e.ctrlKey && "Ctrl", e.altKey && "Alt", e.shiftKey && "Shift", e.metaKey && !mac && meta].filter(Boolean);
   const key = e.key === " " ? "Space" : e.key.length === 1 ? e.key.toUpperCase() : e.key;
   return [...mods, key].join("+");
 }
 
-/** A shortcut must use Ctrl or Alt, otherwise it would steal normal typing from the terminal. */
+/**
+ * A shortcut must use Ctrl, Alt or Cmd, otherwise it would steal normal typing from the terminal.
+ * Function keys (F1-F12) type nothing, so they may stand alone or with Shift.
+ */
 export function isValidShortcut(combo: string): boolean {
-  return /^(Ctrl|Alt)\+/.test(combo) && !/\+(Control|Shift|Alt)$/.test(combo);
+  if (/^(Shift\+)?F([1-9]|1[0-2])$/.test(combo)) return true;
+  return /^(Cmd|Ctrl|Alt)\+/.test(combo) && !/\+(Control|Shift|Alt|Meta)$/.test(combo);
 }
 
-export function actionFor(e: KeyLike, keys: Keymap): Action | undefined {
-  const combo = comboOf(e)?.toLowerCase();
+export function actionFor(e: KeyLike, keys: Keymap, mac = IS_MAC): Action | undefined {
+  const combo = comboOf(e, mac)?.toLowerCase();
   if (!combo) return;
   return (Object.keys(keys) as Action[]).find((a) => keys[a].some((c) => c.toLowerCase() === combo));
 }

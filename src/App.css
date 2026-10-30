@@ -1050,3 +1050,74 @@ body,
   display: flex;
   align-items: center;
 }
+
+/* Menu keyboard highlight */
+
+.menu:focus {
+  outline: none;
+}
+
+.menu-item.active {
+  background: var(--menu-hover);
+  color: var(--fg-strong);
+}
+
+/* Small modal (PromptDialog) */
+
+.dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(460px, 90vw);
+  padding: 16px 18px;
+  border: 1px solid var(--menu-line);
+  border-radius: 8px;
+  background: var(--menu-bg);
+  box-shadow: 0 10px 40px var(--shadow);
+}
+
+.dialog-title {
+  color: var(--fg-strong);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.dialog input {
+  padding: 6px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  outline: none;
+  background: var(--input-bg);
+  color: var(--fg);
+  font: inherit;
+}
+
+.dialog input:focus {
+  border-color: var(--accent);
+}
+
+.dialog-hint {
+  color: var(--fg-dim);
+  font-size: 12px;
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.dialog-actions button {
+  padding: 4px 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  background: var(--chip);
+  color: var(--fg);
+  font: inherit;
+}
+
+.dialog-actions button.primary {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: #fff;
+}

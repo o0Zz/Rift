@@ -30,6 +30,7 @@ import { Explorer } from "./panels/Explorer";
 import { GitPanel } from "./panels/GitPanel";
 import { Resizer } from "./ui/Resizer";
 import { FindBar } from "./ui/FindBar";
+import { PromptDialog } from "./ui/PromptDialog";
 import "./App.css";
 
 type TabUi = { name?: string; color?: string; group?: string };
@@ -54,6 +55,8 @@ function App() {
   const [settingsOpen, setSettingsOpen] = createSignal(false);
   const [finding, setFinding] = createSignal(false);
   const [filter, setFilter] = createSignal<TabFilter>("all");
+  const [renameRequest, setRenameRequest] = createSignal<{ tab: Tab }>();
+  const [worktreeFrom, setWorktreeFrom] = createSignal<Tab>();
   let updater: Updater | undefined;
 
   // Window title: version, plus how many tabs need the user ("Rift 1.2.3.45 — 2 waiting").
@@ -143,12 +146,21 @@ function App() {
   }
   createEffect(save);
 
+  /** A finished agent the user has now seen goes back to the plain agent icon after a moment. */
+  function fadeDoneWhenSeen(tab: Tab) {
+    if (tab.status !== "done") return;
+    setTimeout(() => {
+      if (tab.status === "done" && active() === tab && windowFocused()) tab.status = "idle";
+    }, 3000);
+  }
+
   function activate(tab: Tab) {
     const t0 = performance.now();
     if (active() !== tab) active()?.view.hide();
     tab.view.show();
     setActive(tab);
     tab.unread = false;
+    fadeDoneWhenSeen(tab);
     const g = groups().find((g) => g.id === tab.group);
     if (g?.collapsed) updateGroup(g.id, { collapsed: false });
     if (import.meta.env.DEV) {
@@ -303,6 +315,7 @@ function App() {
       tab.agent = status ? harness : undefined;
     });
     const visible = active() === tab && windowFocused();
+    if (visible) fadeDoneWhenSeen(tab);
     if (!shouldNotify(tab.status, visible)) return;
     tab.unread = true;
     if (!windowFocused()) getCurrentWindow().requestUserAttention(UserAttentionType.Informational);
@@ -342,15 +355,16 @@ function App() {
   }
 
   /** A parallel agent: new branch + git worktree next to the repo, opened in a tab running a new Claude. */
-  async function newWorktree(from: Tab) {
+  async function newWorktree(from: Tab, branch: string) {
+    setWorktreeFrom(undefined);
+    if (!from.root) return;
     const harness = from.agent ?? agents()[0]?.id;
-    const branch = prompt("Branch for the new worktree (created from the current commit):", "");
-    if (!branch?.trim() || !from.root) return;
     try {
       const dir = await invoke<string>("git_worktree_add", { root: from.root, branch });
-      newTab(undefined, { cwd: dir, name: branch.trim(), group: from.group, startAgent: harness });
+      newTab(undefined, { cwd: dir, name: branch, group: from.group, startAgent: harness });
     } catch (e) {
       alert(`Could not create the worktree: ${e}`);
+      active()?.view.focus();
     }
   }
 
@@ -373,6 +387,7 @@ function App() {
     else if (action === "toggleGit") togglePanel("git");
     else if (action === "settings") setSettingsOpen(true);
     else if (action === "find") setFinding(true);
+    else if (action === "renameTab") active() && setRenameRequest({ tab: active()! });
     else if (action === "zoomIn") zoom(1);
     else if (action === "zoomOut") zoom(-1);
     else if (action === "zoomReset") zoom(0);
@@ -389,7 +404,10 @@ function App() {
     const unlisten = [
       win.onFocusChanged(({ payload: focused }) => {
         setWindowFocused(focused);
-        if (focused && active()) active()!.unread = false;
+        if (focused && active()) {
+          active()!.unread = false;
+          fadeDoneWhenSeen(active()!);
+        }
       }),
       listen<number>("pty-exit", (e) => {
         const tab = tabs().find((t) => t.view.ptyId === e.payload);
@@ -474,7 +492,8 @@ function App() {
         onOpenSettings={() => setSettingsOpen(true)}
         filter={filter()}
         onFilter={setFilter}
-        onNewWorktree={newWorktree}
+        onNewWorktree={setWorktreeFrom}
+        rename={renameRequest()}
         onFocusTerminal={() => active()?.view.focus()}
       />
         <Resizer edge="right" width={widths().tabs} min={160} max={480} onResize={resizeWidth("tabs")} onDragging={onDragging} />
@@ -491,6 +510,18 @@ function App() {
             onDragging={onDragging}
           />
         </div>
+      </Show>
+      <Show when={worktreeFrom()}>
+        {(from) => (
+          <PromptDialog
+            title="New Claude in a worktree"
+            placeholder="Branch name, e.g. feature/login"
+            hint={`A new branch from the current commit, checked out next to the repo in ${from().root?.split(/[\\/]/).pop()}.worktrees/, with a new agent session.`}
+            confirm="Create"
+            onSubmit={(branch) => newWorktree(from(), branch)}
+            onCancel={() => (setWorktreeFrom(undefined), active()?.view.focus())}
+          />
+        )}
       </Show>
       <Show when={settingsOpen()}>
         <SettingsPage
