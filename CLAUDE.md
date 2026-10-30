@@ -8,7 +8,8 @@ and new tab instant.**
 
 | Action                               | Budget        |
 |--------------------------------------|---------------|
-| Tab switch (Ctrl+PgUp/PgDn, click)   | < 16 ms (1 frame), no reflow of the hidden tab |
+| Tab switch: main-thread work p95     | < 16 ms (fits one frame) — `npm run bench` |
+| Tab switch: key → rendered p95       | < 50 ms — `npm run bench` |
 | New tab until prompt is usable       | < 150 ms (pwsh startup itself excluded from our part: < 30 ms) |
 | Cold app start to first prompt       | < 500 ms      |
 | Idle CPU with 10 tabs                | ~0 %          |
@@ -24,7 +25,7 @@ How we hold the budget:
 
 - **Tauri 2** (Rust backend, system WebView2 frontend). No Electron.
 - **Rust backend**: PTY via `portable-pty` (ConPTY), git via the `git` CLI (simple, matches user's git config/hooks), file watching via `notify`, state in a small SQLite or JSON file under `%APPDATA%\Rift`.
-- **Frontend**: TypeScript + Solid — no virtual-DOM-heavy framework. Terminal: **xterm.js with the WebGL addon**.
+- **Frontend**: TypeScript + Solid — no virtual-DOM-heavy framework. Terminal: **xterm.js, DOM renderer** (WebGL measured slower for tab switching, see below).
 - **Default shell**: PowerShell 7 (`pwsh`). Shell is configurable per profile (pwsh, Windows PowerShell, cmd, Git Bash, WSL, Nushell). `ls`, `cat`, `rm` work in pwsh as aliases; Git Bash/WSL profiles for real coreutils.
 - Packaging: MSI/NSIS via Tauri bundler.
 
@@ -54,7 +55,8 @@ Frontend ↔ backend via Tauri commands (request/response) and events (agent sta
 - Spare shell: started at launch and after every `pty_open` without `cwd`. Its output is buffered in `Sink::Buffer` and replayed on attach.
 - ConPTY sends `ESC[6n` (cursor position request) at startup and blocks until answered. xterm.js answers it. That is why `TermView` queues input on a promise until `pty_open` returns: the replayed spare output triggers the answer *before* the id is known. Tests answer it by hand (`[1;1R`).
 - Each tab owns one `TermView` (one xterm) for its whole life; switching = `display: none` toggle, fit only on show.
-- WebGL: browsers cap contexts (~16), so only the 8 most recently shown tabs hold a `WebglAddon` (LRU in `TermView.ts`).
+- No WebGL addon. Measured: creating a WebGL context on show made cycling 20 tabs ~54 ms p95 vs ~15 ms with the DOM renderer, and browsers cap contexts at ~16. Re-adding it needs a bench that proves a win.
+- Known latency floor: xterm resumes a hidden terminal via IntersectionObserver, which costs ~1 extra frame (~20-27 ms p50 key → rendered). Next thing to attack if switching ever feels slow.
 - Shortcuts are handled in a capture-phase `keydown` listener (`tabs/nav.ts`) so xterm never sees them.
 
 ### Agent harness abstraction
@@ -109,12 +111,12 @@ Blocks (actions, find, filter, sharing, sticky header), input editor (syntax hig
 ## Conventions
 - Rust: `cargo fmt`, `cargo clippy -- -D warnings`. Frontend: `tsc --noEmit`, eslint.
 - Every feature ships with tests in the same change. Prefer end-to-end: real PTY spawn, real git repo in a temp dir, real hook JSON through the named pipe.
-- Perf budget has a benchmark test (tab switch with 20 tabs and 50k lines scrollback each). A regression fails CI.
+- Perf budget has a benchmark (`src/bench.ts`: 20 tabs x 10k lines, cycle + toggle). Run it after any change to tabs, terminal or rendering; it exits non-zero over budget.
 - Keep it small: no abstraction until a second user of it exists — except `AgentHarness`, which is a stated requirement.
 - Commits: one short subject line, no sign-off trailers.
 
 ## Status
-Done: tabs + PTY + spare shell + shortcuts + copy/paste. Next: tab-switch benchmark, session restore, Claude hooks/status icons, git panel, file tree, Explorer menu.
+Done: tabs + PTY + spare shell + shortcuts + copy/paste + tab-switch bench. Next: session restore, Claude hooks/status icons, git panel, file tree, Explorer menu.
 
 ## Commands
 ```
@@ -123,4 +125,5 @@ npm run tauri build               # package
 cd src-tauri && cargo test        # backend tests (spawn real cmd.exe)
 npm test                          # frontend tests (vitest)
 npm run typecheck                 # tsc --noEmit
+npm run bench                     # tab-switch benchmark in the real WebView (keep the window visible; fails over budget)
 ```

@@ -1,6 +1,7 @@
 import { createSignal, For, onCleanup, onMount, type Accessor, type Setter } from "solid-js";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { invoke } from "@tauri-apps/api/core";
 import { TermView } from "./terminal/TermView";
 import { neighbour, tabAction } from "./tabs/nav";
 import "./App.css";
@@ -76,6 +77,11 @@ function App() {
     });
     resize.observe(host);
     newTab();
+    invoke<boolean>("bench_enabled").then(async (on) => {
+      if (!on) return;
+      const bench = await import("./bench");
+      bench.run({ newTab, views: () => tabs().map((t) => t.view), activate: (i) => activate(tabs()[i]) });
+    });
     onCleanup(() => {
       window.removeEventListener("keydown", onKey, true);
       unlisten.then((f) => f());

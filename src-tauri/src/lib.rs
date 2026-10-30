@@ -55,6 +55,17 @@ fn pty_close(ptys: Ptys, id: TabId) {
     ptys.close(id);
 }
 
+#[tauri::command]
+fn bench_enabled() -> bool {
+    std::env::var_os("RIFT_BENCH").is_some()
+}
+
+#[tauri::command]
+fn bench_done(app: AppHandle, report: String, ok: bool) {
+    println!("{report}");
+    app.exit(if ok { 0 } else { 1 });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -66,7 +77,12 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            pty_open, pty_write, pty_resize, pty_close
+            pty_open,
+            pty_write,
+            pty_resize,
+            pty_close,
+            bench_enabled,
+            bench_done
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
