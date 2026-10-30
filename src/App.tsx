@@ -475,6 +475,7 @@ function App() {
         filter={filter()}
         onFilter={setFilter}
         onNewWorktree={newWorktree}
+        onFocusTerminal={() => active()?.view.focus()}
       />
         <Resizer edge="right" width={widths().tabs} min={160} max={480} onResize={resizeWidth("tabs")} onDragging={onDragging} />
       </div>

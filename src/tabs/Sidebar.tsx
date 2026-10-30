@@ -24,6 +24,8 @@ export type SidebarProps = {
   filter: TabFilter;
   onFilter(filter: TabFilter): void;
   onNewWorktree(tab: Tab): void;
+  /** Gives the keyboard back to the active terminal. */
+  onFocusTerminal(): void;
 };
 
 type Dragged = { tab: Tab } | { group: string };
@@ -167,7 +169,17 @@ export function Sidebar(props: SidebarProps) {
   }
 
   return (
-    <aside class="sidebar" onContextMenu={(e) => e.preventDefault()}>
+    <aside
+      class="sidebar"
+      onContextMenu={(e) => e.preventDefault()}
+      // The browser moves focus to the clicked row after mousedown activated the tab: once the click is
+      // over, the keyboard goes back to the terminal, unless the click opened an input (rename).
+      onClick={() =>
+        requestAnimationFrame(() => {
+          if (!(document.activeElement instanceof HTMLInputElement)) props.onFocusTerminal();
+        })
+      }
+    >
       <div class="sidebar-head">
         <span>Tabs</span>
         <span class="head-buttons">

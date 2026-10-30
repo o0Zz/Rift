@@ -122,6 +122,10 @@ export class TermView {
     return backwards ? this.search.findPrevious(text) : this.search.findNext(text);
   }
 
+  focus() {
+    this.term.focus();
+  }
+
   endFind() {
     this.search.clearDecorations();
     this.term.clearSelection();
