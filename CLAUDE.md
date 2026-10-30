@@ -52,7 +52,10 @@ src/                 Frontend
 Frontend tabs: `tabs/layout.ts` (pure logic: order, moves, titles, notify rule — unit-tested), `tabs/Tab.ts` (tab state as Solid signals behind getters), `tabs/Sidebar.tsx` (UI only), `App.tsx` (wiring: restore/save, keys, agent status).
 
 ### Side panels (decisions already made — keep them)
-- Files panel (left, Ctrl+Shift+E) and git panel (right, Ctrl+Shift+G), toggled from the sidebar header; open/closed state saved in `layout.panels`.
+- Files panel (left, Ctrl+Shift+E) and git panel (right, Ctrl+Shift+G), toggled from the sidebar header or their × button; open/closed state saved in `layout.panels`.
+- Tabs sidebar, files and git panels are resizable (`ui/Resizer.tsx`, widths saved in `layout.widths`). While dragging, the terminal is **not** refit (re-wrap = 100+ ms per drag frame); it refits on release, then hidden tabs follow in idle time.
+- Commit (git panel): checkboxes (all checked after each load), message, Ctrl+Enter. `git::commit` commits exactly the checked files: `git add` only for untracked ones, then `git commit --only` (keeps other staged changes staged; handles deletions and both sides of a rename via `Change.orig`). Pathspecs go NUL-separated on stdin with `--literal-pathspecs` (no length limit, `[id].tsx` is not a glob).
+- ✨ Generate: `commit_message` sends the checked files' diff (capped 60 KB) to the first harness's `one_shot`. Claude: `claude -p --model haiku --tools "" --no-session-persistence` (~10 s, mostly claude startup). The prompt follows the user's commit convention (one subject line, optional body, no co-author line).
 - **Not live** (user's choice, for speed): panels load when shown, when the shown tab changes, or on ⟳. No file watcher.
 - Panels follow `panelTab`, which trails the active tab by 150 ms: holding Ctrl+PgDn never loads every tab it passes. All panel commands are `async` (off the main thread); stale answers are dropped.
 - Explorer root = the tab's repo root, else its cwd. Folders are listed when first expanded and cached until ⟳.
@@ -85,7 +88,7 @@ Frontend ↔ backend via Tauri commands (request/response) and events (agent sta
 
 Everything agent-specific goes through one trait so Codex/Gemini/OpenCode can be added later without touching the UI:
 
-`src-tauri/src/agents/mod.rs`: `id`, `name`, `parse_hook(payload) -> AgentEvent`, `resume_command(session_id)`, `hooks_installed(exe)`, `install_hooks(exe)`. Add methods when a feature needs them (planned: status events Working/Idle/NeedsInput, `one_shot` for commit messages).
+`src-tauri/src/agents/mod.rs`: `id`, `name`, `parse_hook(payload) -> AgentEvent`, `resume_command(session_id)`, `hooks_installed(exe)`, `install_hooks(exe)`, `one_shot(cwd, prompt, input)`. Add methods when a feature needs them.
 
 UI and session code never mention "claude" directly; they talk to `AgentHarness`, `AgentEvent` and `AgentSession { harness, session_id }`.
 
@@ -140,7 +143,7 @@ Blocks (actions, find, filter, sharing, sticky header), input editor (syntax hig
 - Commits: one short subject line, no sign-off trailers.
 
 ## Status
-Done: tabs + PTY + spare shell + shortcuts + copy/paste + tab-switch bench + session restore (tabs, cwd, per-tab Claude resume) + left sidebar with groups/colors/rename/drag + agent status badges + notifications + files panel + read-only git panel (branch, changes, diff). Next: commit from the git panel (file checkboxes, AI commit message), Explorer right-click menu.
+Done: tabs + PTY + spare shell + shortcuts + copy/paste + tab-switch bench + session restore (tabs, cwd, per-tab Claude resume) + left sidebar with groups/colors/rename/drag + agent status badges + notifications + files panel + git panel (branch, changes, diff, commit selected files, AI commit message) + resizable/closable panels. Next: Explorer right-click menu ("Open in Rift"), session resume polish.
 
 Dev loop: keep `npm run tauri dev` running (the user watches changes live). Run tests with `CARGO_TARGET_DIR=src-tauri/target/test` so they don't fight the running app over `target/debug/rift.exe`.
 

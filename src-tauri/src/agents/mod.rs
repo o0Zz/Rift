@@ -56,6 +56,8 @@ pub trait AgentHarness: Send + Sync {
     /// Whether the agent is configured to call `exe hook <id>`.
     fn hooks_installed(&self, exe: &Path) -> bool;
     fn install_hooks(&self, exe: &Path) -> Result<()>;
+    /// Runs the agent non-interactively in `cwd`: `prompt` as instruction, `input` on stdin; returns its answer.
+    fn one_shot(&self, cwd: &Path, prompt: &str, input: &str) -> Result<String>;
 }
 
 pub struct Harnesses(pub Vec<Box<dyn AgentHarness>>);

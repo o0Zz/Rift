@@ -48,17 +48,112 @@ pub struct Change {
     pub path: String,
     /// One letter: M modified, A added, D deleted, R renamed, ? untracked, U conflict.
     pub status: String,
+    /// Old path of a rename: committing the rename must include it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub orig: Option<String>,
 }
 
 fn git(root: &Path, args: &[&str]) -> Result<std::process::Output> {
+    git_with_input(root, args, None)
+}
+
+/// Runs git without a console window. `input` is written to stdin (e.g. a pathspec list).
+fn git_with_input(
+    root: &Path,
+    args: &[&str],
+    input: Option<&[u8]>,
+) -> Result<std::process::Output> {
+    use std::io::Write;
+    use std::process::Stdio;
     let mut cmd = Command::new("git");
-    cmd.current_dir(root).args(args);
+    cmd.current_dir(root)
+        .args(args)
+        .stdin(if input.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW: no console flashing from the GUI app
     }
-    cmd.output().context("could not run git")
+    let mut child = cmd.spawn().context("could not run git")?;
+    if let Some(input) = input {
+        child.stdin.take().unwrap().write_all(input)?; // dropped right after: git sees EOF
+    }
+    child.wait_with_output().context("could not run git")
+}
+
+fn check(out: std::process::Output) -> Result<std::process::Output> {
+    if out.status.success() {
+        return Ok(out);
+    }
+    let err = String::from_utf8_lossy(&out.stderr);
+    let msg = if err.trim().is_empty() {
+        String::from_utf8_lossy(&out.stdout)
+    } else {
+        err
+    };
+    bail!("{}", msg.trim())
+}
+
+/// Commits exactly the given files (`(path, untracked)`: new, modified, deleted, renamed — both sides of a
+/// rename) with `message`. Other staged changes stay staged. Returns git's one-line summary of the new commit.
+pub fn commit(root: &Path, files: &[(String, bool)], message: &str) -> Result<String> {
+    if message.trim().is_empty() {
+        bail!("Empty commit message");
+    }
+    if files.is_empty() {
+        bail!("No file selected");
+    }
+    // NUL-separated pathspecs on stdin: no command-line length limit, any file name.
+    let spec = |untracked_only: bool| {
+        let mut spec = Vec::new();
+        for (path, untracked) in files {
+            if *untracked || !untracked_only {
+                spec.extend_from_slice(path.as_bytes());
+                spec.push(0);
+            }
+        }
+        spec
+    };
+    let from_stdin = ["--pathspec-from-file=-", "--pathspec-file-nul"];
+    // New files must be added first; `commit --only` takes care of everything git already tracks.
+    // --literal-pathspecs: `[id].tsx` is a file name, not a glob.
+    let new_files = spec(true);
+    if !new_files.is_empty() {
+        let add = [&["--literal-pathspecs", "add"][..], &from_stdin].concat();
+        check(git_with_input(root, &add, Some(&new_files))?)?;
+    }
+    let args = [
+        &["--literal-pathspecs", "commit", "--only", "-m", message][..],
+        &from_stdin,
+    ]
+    .concat();
+    let out = check(git_with_input(root, &args, Some(&spec(false)))?)?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    Ok(text.lines().next().unwrap_or_default().to_string())
+}
+
+/// Diff of several files, for an AI commit message: capped at `max` bytes.
+pub fn diff_many(root: &Path, changes: &[(String, bool)], max: usize) -> Result<String> {
+    let mut all = String::new();
+    for (path, untracked) in changes {
+        all.push_str(&diff(root, path, *untracked)?);
+        if all.len() > max {
+            let cut = (0..=max)
+                .rev()
+                .find(|&i| all.is_char_boundary(i))
+                .unwrap_or(0);
+            all.truncate(cut);
+            all.push_str("\n… (diff truncated)\n");
+            break;
+        }
+    }
+    Ok(all)
 }
 
 pub fn status(root: &Path) -> Result<Vec<Change>> {
@@ -78,9 +173,11 @@ pub fn status(root: &Path) -> Result<Vec<Change>> {
             xy.chars().next().unwrap_or(' '),
             xy.chars().nth(1).unwrap_or(' '),
         );
-        if x == 'R' || x == 'C' {
-            fields.next(); // the old path of a rename/copy
-        }
+        let orig = if x == 'R' || x == 'C' {
+            fields.next().map(String::from) // the old path of a rename/copy
+        } else {
+            None
+        };
         let status = match (x, y) {
             ('?', _) => '?',
             ('U', _) | (_, 'U') | ('A', 'A') | ('D', 'D') => 'U',
@@ -90,6 +187,7 @@ pub fn status(root: &Path) -> Result<Vec<Change>> {
         changes.push(Change {
             path: path.to_string(),
             status: status.to_string(),
+            orig,
         });
     }
     Ok(changes)
@@ -188,6 +286,100 @@ mod tests {
         assert!(d.contains("-two") && d.contains("+TWO"), "{d}");
         let d = diff(r, "new dir/é.txt", true).unwrap();
         assert!(d.contains("+hello"), "{d}");
+    }
+
+    fn committed_files(root: &Path) -> String {
+        let out = git(root, &["show", "--name-status", "--format=%s", "HEAD"]).unwrap();
+        String::from_utf8_lossy(&out.stdout)
+            .trim()
+            .replace('\t', " ")
+    }
+
+    #[test]
+    fn commit_takes_only_the_selected_files() {
+        let dir = repo();
+        let r = dir.path();
+        std::fs::write(r.join("kept.txt"), "changed\n").unwrap();
+        std::fs::remove_file(r.join("gone.txt")).unwrap();
+        std::fs::write(r.join("[id].tsx"), "new\n").unwrap();
+        std::fs::write(r.join("left out.txt"), "not now\n").unwrap();
+
+        let files = [("kept.txt", false), ("gone.txt", false), ("[id].tsx", true)]
+            .map(|(p, u)| (p.to_string(), u));
+        let summary = commit(r, &files, "Pick some files").unwrap();
+        assert!(summary.contains("Pick some files"), "{summary}");
+        assert_eq!(
+            committed_files(r),
+            "Pick some files\n\nA [id].tsx\nD gone.txt\nM kept.txt"
+        );
+        // The unselected file is still pending.
+        let left: Vec<_> = status(r).unwrap().into_iter().map(|c| c.path).collect();
+        assert_eq!(left, ["left out.txt"]);
+    }
+
+    #[test]
+    fn commit_keeps_other_staged_changes_staged() {
+        let dir = repo();
+        let r = dir.path();
+        std::fs::write(r.join("kept.txt"), "staged\n").unwrap();
+        run(r, &["add", "kept.txt"]);
+        std::fs::write(r.join("other.txt"), "x\n").unwrap();
+        commit(r, &[("other.txt".into(), true)], "Only other").unwrap();
+        assert_eq!(committed_files(r), "Only other\n\nA other.txt");
+        let pending: Vec<_> = status(r)
+            .unwrap()
+            .into_iter()
+            .map(|c| (c.path, c.status))
+            .collect();
+        assert_eq!(pending, [("kept.txt".to_string(), "M".to_string())]);
+    }
+
+    #[test]
+    fn commit_includes_both_sides_of_a_rename() {
+        let dir = repo();
+        let r = dir.path();
+        run(r, &["mv", "kept.txt", "renamed.txt"]);
+        let change = status(r)
+            .unwrap()
+            .into_iter()
+            .find(|c| c.status == "R")
+            .unwrap();
+        assert_eq!(change.orig.as_deref(), Some("kept.txt"));
+        commit(
+            r,
+            &[(change.path, false), (change.orig.unwrap(), false)],
+            "Rename",
+        )
+        .unwrap();
+        assert!(status(r).unwrap().is_empty());
+    }
+
+    #[test]
+    fn commit_rejects_empty_message_and_reports_git_errors() {
+        let dir = repo();
+        let r = dir.path();
+        assert!(commit(r, &[("kept.txt".into(), false)], "  ").is_err());
+        let err = commit(r, &[("does-not-exist.txt".into(), false)], "msg").unwrap_err();
+        assert!(!err.to_string().is_empty());
+    }
+
+    #[test]
+    fn diff_many_is_capped() {
+        let dir = repo();
+        let r = dir.path();
+        std::fs::write(r.join("kept.txt"), "x\n".repeat(5000)).unwrap();
+        std::fs::write(r.join("new.txt"), "y\n").unwrap();
+        let d = diff_many(
+            r,
+            &[("kept.txt".into(), false), ("new.txt".into(), true)],
+            1000,
+        )
+        .unwrap();
+        assert!(
+            d.len() < 1100 && d.ends_with("(diff truncated)\n"),
+            "{}",
+            d.len()
+        );
     }
 
     #[test]

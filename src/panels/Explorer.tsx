@@ -32,7 +32,7 @@ function FileIcon(p: { name: string; dir: boolean; open: boolean }) {
 const join = (dir: string, name: string) => `${dir.replace(/[\\/]+$/, "")}\\${name}`;
 
 /** File tree of `root`. Each folder is listed once, when first expanded (cached until ⟳). */
-export function Explorer(props: { root?: string }) {
+export function Explorer(props: { root?: string; onClose(): void }) {
   const [listings, setListings] = createSignal(new Map<string, Entry[] | string>());
   const [expanded, setExpanded] = createSignal(new Set<string>());
   const menu = createMenu();
@@ -118,9 +118,14 @@ export function Explorer(props: { root?: string }) {
         <span class="panel-title" title={props.root}>
           {props.root ? folderName(props.root) : "Files"}
         </span>
-        <button class="icon-btn" title="Refresh" onClick={refresh}>
-          ⟳
-        </button>
+        <span class="head-buttons">
+          <button class="icon-btn" title="Refresh" onClick={refresh}>
+            ⟳
+          </button>
+          <button class="icon-btn" title="Close (Ctrl+Shift+E)" onClick={() => props.onClose()}>
+            ×
+          </button>
+        </span>
       </div>
       <div class="panel-body">
         <Show when={props.root} fallback={<div class="tree-note">No folder</div>}>

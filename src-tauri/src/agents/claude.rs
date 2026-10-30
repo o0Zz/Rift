@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use serde_json::{Map, Value, json};
 
 use super::{AgentEvent, AgentHarness};
@@ -46,6 +46,21 @@ fn is_ours(handler: &Value) -> bool {
             .is_some_and(|c| c.to_lowercase().ends_with("rift.exe"))
 }
 
+/// `claude -p` for short text tasks: small fast model, no tools, not saved in the user's session list.
+fn one_shot_args(prompt: &str) -> Vec<String> {
+    [
+        "-p",
+        prompt,
+        "--model",
+        "haiku",
+        "--tools",
+        "",
+        "--no-session-persistence",
+    ]
+    .map(String::from)
+    .to_vec()
+}
+
 impl AgentHarness for Claude {
     fn id(&self) -> &'static str {
         "claude"
@@ -70,6 +85,41 @@ impl AgentHarness for Claude {
             }
             _ => None,
         }
+    }
+
+    fn one_shot(&self, cwd: &Path, prompt: &str, input: &str) -> Result<String> {
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+        let mut cmd = Command::new("claude");
+        cmd.current_dir(cwd)
+            .args(one_shot_args(prompt))
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+        }
+        let mut child = cmd
+            .spawn()
+            .context("could not run `claude` (is Claude Code installed and on PATH?)")?;
+        let mut stdin = child.stdin.take().unwrap();
+        let input = input.to_string();
+        // Write from another thread: a large diff must not deadlock against claude's own output.
+        let writer = std::thread::spawn(move || stdin.write_all(input.as_bytes()));
+        let out = child.wait_with_output()?;
+        let _ = writer.join();
+        if !out.status.success() {
+            let err = String::from_utf8_lossy(&out.stderr);
+            let err = if err.trim().is_empty() {
+                String::from_utf8_lossy(&out.stdout)
+            } else {
+                err
+            };
+            bail!("claude failed: {}", err.trim());
+        }
+        Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
     }
 
     fn resume_command(&self, session_id: &str) -> Option<String> {
@@ -230,6 +280,19 @@ mod tests {
             read(&c)["hooks"]["SessionStart"],
             json!([{ "hooks": [handler(Path::new(EXE))] }])
         );
+    }
+
+    #[test]
+    fn one_shot_uses_a_fast_model_without_tools_or_saved_session() {
+        let args = one_shot_args("Write a commit message");
+        assert_eq!(&args[..2], ["-p", "Write a commit message"]);
+        let flags = args.join(" ");
+        assert!(flags.contains("--model haiku"), "{flags}");
+        assert!(
+            flags.contains("--tools ") && args.contains(&String::new()),
+            "{flags}"
+        );
+        assert!(flags.contains("--no-session-persistence"), "{flags}");
     }
 
     #[test]

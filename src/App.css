@@ -36,11 +36,43 @@ body,
 
 /* Sidebar */
 
-.sidebar {
+/* Resizable column: holds a panel and its drag handle. */
+.pane {
+  position: relative;
   display: flex;
   flex: none;
+}
+
+.pane > aside {
+  flex: 1;
+  min-width: 0;
+}
+
+.resizer {
+  position: absolute;
+  z-index: 5;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+}
+
+.resizer.right {
+  right: -3px;
+}
+
+.resizer.left {
+  left: -3px;
+}
+
+.resizer:hover,
+.resizer:active {
+  background: #539bf5;
+}
+
+.sidebar {
+  display: flex;
   flex-direction: column;
-  width: 240px;
   background: #181818;
   border-right: 1px solid #2a2a2a;
   user-select: none;
@@ -404,12 +436,10 @@ body,
 }
 
 .panel.explorer {
-  width: 240px;
   border-right: 1px solid #2a2a2a;
 }
 
 .panel.git {
-  width: 440px;
   border-left: 1px solid #2a2a2a;
 }
 
@@ -514,8 +544,82 @@ body,
 
 .git-file {
   display: flex;
+  align-items: center;
   gap: 8px;
   padding: 3px 12px;
+}
+
+.git-file input {
+  margin: 0;
+}
+
+.git-file.all {
+  color: #888;
+  font-size: 12px;
+}
+
+.git-path {
+  cursor: pointer;
+}
+
+.commit-box {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border-top: 1px solid #252525;
+}
+
+.commit-box textarea {
+  height: 64px;
+  padding: 6px;
+  border: 1px solid #333;
+  border-radius: 4px;
+  outline: none;
+  resize: vertical;
+  background: #111;
+  color: #ddd;
+  font: inherit;
+}
+
+.commit-box textarea:focus {
+  border-color: #539bf5;
+}
+
+.commit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.commit-actions button {
+  padding: 4px 12px;
+  border: 1px solid #444;
+  border-radius: 4px;
+  background: #2a2a2a;
+  color: #ddd;
+  font: inherit;
+}
+
+.commit-actions button.primary {
+  border-color: #2f6fb8;
+  background: #2f6fb8;
+  color: #fff;
+}
+
+.commit-actions button:disabled {
+  opacity: 0.45;
+}
+
+.commit-note {
+  color: #8ddb8c;
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.commit-note.error {
+  color: #f47067;
 }
 
 .git-file.active {

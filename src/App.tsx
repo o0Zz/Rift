@@ -10,12 +10,14 @@ import { Tab } from "./tabs/Tab";
 import { Sidebar } from "./tabs/Sidebar";
 import { Explorer } from "./panels/Explorer";
 import { GitPanel } from "./panels/GitPanel";
+import { Resizer } from "./ui/Resizer";
 import "./App.css";
 
 type TabUi = { name?: string; color?: string; group?: string };
 type SavedTab = { cwd?: string; title: string; agent?: AgentSession; ui?: TabUi };
 type Panels = { explorer: boolean; git: boolean };
-type Saved = { tabs: SavedTab[]; active: number; layout?: { groups?: Group[]; panels?: Panels } };
+type Widths = { tabs: number; explorer: number; git: number };
+type Saved = { tabs: SavedTab[]; active: number; layout?: { groups?: Group[]; panels?: Panels; widths?: Widths } };
 type Integration = { id: string; name: string; installed: boolean };
 type AgentStatus = { pty: number; harness: string; status: Status | null; message: string | null };
 
@@ -28,6 +30,17 @@ function App() {
   // From Tauri's window events: document.hasFocus() is not reliable in WebView2.
   const [windowFocused, setWindowFocused] = createSignal(true);
   const [panels, setPanels] = createSignal<Panels>({ explorer: false, git: false });
+  const [widths, setWidths] = createSignal<Widths>({ tabs: 240, explorer: 240, git: 440 });
+  // While a panel edge is dragged the terminal is not re-wrapped (100+ ms each): only on release.
+  let dragging = false;
+  const resizeWidth = (key: keyof Widths) => (w: number) => setWidths({ ...widths(), [key]: w });
+  const onDragging = (d: boolean) => {
+    dragging = d;
+    if (!d) {
+      active()?.view.refit();
+      resizeHiddenTabs();
+    }
+  };
   // The tab the side panels show. Follows the active tab only once it stays put for a moment,
   // so holding Ctrl+PgDn never makes the panels load each tab it passes.
   const [panelTab, setPanelTab] = createSignal<Tab>();
@@ -51,7 +64,7 @@ function App() {
         ui: { name: t.name, color: t.color, group: t.group } satisfies TabUi,
       })),
       active: Math.max(0, list.indexOf(active()!)),
-      layout: { groups: groups(), panels: panels() },
+      layout: { groups: groups(), panels: panels(), widths: widths() },
     });
   }
   createEffect(save);
@@ -106,6 +119,7 @@ function App() {
     const saved = await invoke<Saved>("session_restore");
     setGroups(saved.layout?.groups ?? []);
     if (saved.layout?.panels) setPanels(saved.layout.panels);
+    if (saved.layout?.widths) setWidths(saved.layout.widths);
     const starts = batch(() => (saved.tabs.length ? saved.tabs : [undefined]).map(newTab));
     const list = tabs();
     activate(list[Math.min(saved.active, list.length - 1)]);
@@ -245,6 +259,7 @@ function App() {
     let frame = 0;
     const resize = new ResizeObserver(() => {
       cancelAnimationFrame(frame);
+      if (dragging) return;
       frame = requestAnimationFrame(() => {
         active()?.view.refit();
         resizeHiddenTabs();
@@ -273,6 +288,7 @@ function App() {
 
   return (
     <div class="app">
+      <div class="pane" style={{ width: `${widths().tabs}px` }}>
       <Sidebar
         tabs={tabs()}
         groups={groups()}
@@ -288,8 +304,20 @@ function App() {
         panels={panels()}
         onTogglePanel={togglePanel}
       />
+        <Resizer edge="right" width={widths().tabs} min={160} max={480} onResize={resizeWidth("tabs")} onDragging={onDragging} />
+      </div>
       <Show when={panels().explorer}>
-        <Explorer root={panelTab()?.root ?? panelTab()?.cwd} />
+        <div class="pane" style={{ width: `${widths().explorer}px` }}>
+          <Explorer root={panelTab()?.root ?? panelTab()?.cwd} onClose={() => togglePanel("explorer")} />
+          <Resizer
+            edge="right"
+            width={widths().explorer}
+            min={160}
+            max={600}
+            onResize={resizeWidth("explorer")}
+            onDragging={onDragging}
+          />
+        </div>
       </Show>
       <main class="main">
         <For each={missing()}>
@@ -307,7 +335,10 @@ function App() {
         <div class="terms" ref={host} />
       </main>
       <Show when={panels().git}>
-        <GitPanel root={panelTab()?.root} branch={panelTab()?.branch} />
+        <div class="pane" style={{ width: `${widths().git}px` }}>
+          <Resizer edge="left" width={widths().git} min={280} max={1000} onResize={resizeWidth("git")} onDragging={onDragging} />
+          <GitPanel root={panelTab()?.root} branch={panelTab()?.branch} onClose={() => togglePanel("git")} />
+        </div>
       </Show>
     </div>
   );

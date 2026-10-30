@@ -169,6 +169,37 @@ async fn git_status(root: String) -> Result<Vec<git::Change>, String> {
 }
 
 #[tauri::command]
+async fn git_commit(
+    root: String,
+    files: Vec<(String, bool)>,
+    message: String,
+) -> Result<String, String> {
+    git::commit(root.as_ref(), &files, &message).map_err(err)
+}
+
+/// The user's own convention for commit messages (see their CLAUDE.md).
+const COMMIT_PROMPT: &str = "Write a git commit message for the diff on stdin. \
+One short subject line in the imperative mood (max 72 characters), optionally a blank line and a brief body. \
+No co-author or sign-off lines. Output only the message, without quotes or code fences.";
+
+/// AI commit message for the selected files, written by the first agent harness (Claude today).
+#[tauri::command]
+async fn commit_message(
+    harnesses: State<'_, Harnesses>,
+    root: String,
+    files: Vec<(String, bool)>,
+) -> Result<String, String> {
+    let diff = git::diff_many(root.as_ref(), &files, 60_000).map_err(err)?;
+    if diff.trim().is_empty() {
+        return Err("Nothing to describe: the selected files have no diff".into());
+    }
+    let agent = harnesses.0.first().ok_or("no agent configured")?;
+    agent
+        .one_shot(root.as_ref(), COMMIT_PROMPT, &diff)
+        .map_err(err)
+}
+
+#[tauri::command]
 async fn git_diff(root: String, path: String, untracked: bool) -> Result<String, String> {
     git::diff(root.as_ref(), &path, untracked).map_err(err)
 }
@@ -272,6 +303,8 @@ pub fn run() {
             git_head,
             git_status,
             git_diff,
+            git_commit,
+            commit_message,
             bench_dirs,
             bench_done
         ])

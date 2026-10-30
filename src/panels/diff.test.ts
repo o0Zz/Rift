@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { expect, it } from "vitest";
-import { diffLineClass } from "./diff";
+import { commitFiles, diffLineClass } from "./diff";
 
 it("classifies unified diff lines", () => {
   const diff = [
@@ -14,4 +14,19 @@ it("classifies unified diff lines", () => {
     "+TWO",
   ];
   expect(diff.map(diffLineClass)).toEqual(["meta", "meta", "meta", "meta", "hunk", "", "del", "add"]);
+});
+
+it("lists files to commit, with both sides of a rename", () => {
+  expect(
+    commitFiles([
+      { path: "a.ts", status: "M" },
+      { path: "new.ts", status: "?" },
+      { path: "b2.ts", status: "R", orig: "b.ts" },
+    ]),
+  ).toEqual([
+    ["a.ts", false],
+    ["new.ts", true],
+    ["b2.ts", false],
+    ["b.ts", false],
+  ]);
 });
