@@ -1,17 +1,32 @@
-import { createSignal, For, onCleanup, onMount, type Accessor, type Setter } from "solid-js";
+import { batch, createEffect, createSignal, For, onCleanup, onMount, type Accessor, type Setter } from "solid-js";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
-import { TermView } from "./terminal/TermView";
+import { TermView, type AgentSession } from "./terminal/TermView";
 import { neighbour, tabAction } from "./tabs/nav";
 import "./App.css";
 
-type Tab = { view: TermView; title: Accessor<string>; setTitle: Setter<string> };
+type Tab = { view: TermView; title: Accessor<string>; setTitle: Setter<string>; cwd: Accessor<string | undefined> };
+type SavedTab = { cwd?: string; title: string; agent?: AgentSession };
+type Integration = { id: string; name: string; installed: boolean };
 
 function App() {
   let host!: HTMLDivElement;
   const [tabs, setTabs] = createSignal<Tab[]>([]);
   const [active, setActive] = createSignal<Tab>();
+  const [missing, setMissing] = createSignal<Integration[]>([]);
+  // Saving starts once restored tabs have their shells, so a half-restored state is never written.
+  const [restored, setRestored] = createSignal(false);
+
+  function save() {
+    if (!restored()) return;
+    const list = tabs();
+    invoke("session_update", {
+      tabs: list.map((t) => ({ pty: t.view.ptyId >= 0 ? t.view.ptyId : null, cwd: t.cwd() ?? null, title: t.title() })),
+      active: Math.max(0, list.indexOf(active()!)),
+    });
+  }
+  createEffect(save);
 
   function activate(tab: Tab) {
     const t0 = performance.now();
@@ -23,13 +38,40 @@ function App() {
     }
   }
 
-  function newTab() {
-    const [title, setTitle] = createSignal("shell");
+  function newTab(saved?: SavedTab): Promise<void> {
+    const [title, setTitle] = createSignal(saved?.title ?? "shell");
+    const [cwd, setCwd] = createSignal(saved?.cwd);
     active()?.view.hide();
-    const tab: Tab = { view: new TermView(host, setTitle), title, setTitle };
+    const tab: Tab = { view: new TermView(host, { onTitle: setTitle, onCwd: setCwd }), title, setTitle, cwd };
     setTabs([...tabs(), tab]);
     activate(tab);
-    tab.view.start().catch((e) => tab.setTitle(`error: ${e}`));
+    return tab.view
+      .start(saved?.cwd, saved?.agent)
+      .then(save) // the pty id is not reactive
+      .catch((e) => void tab.setTitle(`error: ${e}`));
+  }
+
+  async function restore() {
+    const saved = await invoke<{ tabs: SavedTab[]; active: number }>("session_restore");
+    const starts = batch(() => (saved.tabs.length ? saved.tabs : [undefined]).map(newTab));
+    const list = tabs();
+    activate(list[Math.min(saved.active, list.length - 1)]);
+    await Promise.all(starts);
+    setRestored(true);
+  }
+
+  async function checkIntegrations() {
+    const all = await invoke<Integration[]>("agent_integrations");
+    setMissing(all.filter((i) => !i.installed));
+  }
+
+  async function enable(id: string) {
+    try {
+      await invoke("agent_install", { id });
+      await checkIntegrations();
+    } catch (e) {
+      alert(`Could not enable integration: ${e}`);
+    }
   }
 
   function closeTab(tab: Tab) {
@@ -76,11 +118,12 @@ function App() {
       frame = requestAnimationFrame(() => active()?.view.refit());
     });
     resize.observe(host);
-    newTab();
+    restore();
+    checkIntegrations();
     invoke<boolean>("bench_enabled").then(async (on) => {
       if (!on) return;
       const bench = await import("./bench");
-      bench.run({ newTab, views: () => tabs().map((t) => t.view), activate: (i) => activate(tabs()[i]) });
+      bench.run({ newTab: () => newTab(), views: () => tabs().map((t) => t.view), activate: (i) => activate(tabs()[i]) });
     });
     onCleanup(() => {
       window.removeEventListener("keydown", onKey, true);
@@ -107,10 +150,22 @@ function App() {
             </div>
           )}
         </For>
-        <div class="tab-new" onClick={newTab} title="New tab (Ctrl+Shift+T)">
+        <div class="tab-new" onClick={() => newTab()} title="New tab (Ctrl+Shift+T)">
           +
         </div>
       </div>
+      <For each={missing()}>
+        {(i) => (
+          <div class="banner">
+            <span>
+              Enable <b>{i.name}</b> integration to restore each tab's session on restart. Adds Rift hooks to its
+              settings (a .bak copy is kept).
+            </span>
+            <button onClick={() => enable(i.id)}>Enable</button>
+            <button onClick={() => setMissing(missing().filter((m) => m !== i))}>Not now</button>
+          </div>
+        )}
+      </For>
       <div class="terms" ref={host} />
     </div>
   );

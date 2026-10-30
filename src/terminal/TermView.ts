@@ -3,6 +3,14 @@ import { FitAddon } from "@xterm/addon-fit";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import "@xterm/xterm/css/xterm.css";
 
+export type AgentSession = { harness: string; session_id: string };
+
+export type TermEvents = {
+  onTitle(title: string): void;
+  /** From the shell's prompt (OSC 9;9, emitted by Rift's PowerShell init). */
+  onCwd(cwd: string): void;
+};
+
 /**
  * One tab's terminal. Stays mounted for the tab's lifetime: switching tabs only hides/shows it.
  * Uses xterm's DOM renderer on purpose: WebGL context creation made tab switching 3-4x slower (npm run bench).
@@ -22,13 +30,18 @@ export class TermView {
   });
   private fit = new FitAddon();
 
-  constructor(host: HTMLElement, onTitle: (title: string) => void) {
+  constructor(host: HTMLElement, events: TermEvents) {
     this.pty = new Promise((resolve) => (this.attached = resolve));
     this.el.className = "term";
     host.appendChild(this.el);
     this.term.loadAddon(this.fit);
     this.term.open(this.el);
-    this.term.onTitleChange(onTitle);
+    this.term.onTitleChange(events.onTitle);
+    this.term.parser.registerOscHandler(9, (data) => {
+      if (!data.startsWith("9;")) return false;
+      events.onCwd(data.slice(2).replace(/^"(.*)"$/, "$1"));
+      return true;
+    });
     this.term.onData((data) => this.pty.then((id) => invoke("pty_write", { id, data })));
     this.term.onResize(({ cols, rows }) => this.pty.then((id) => invoke("pty_resize", { id, cols, rows })));
     this.term.attachCustomKeyEventHandler((e) => {
@@ -43,11 +56,12 @@ export class TermView {
     });
   }
 
-  async start(cwd?: string) {
+  /** Opens the shell in `cwd`; with `agent`, the shell starts by resuming that agent session. */
+  async start(cwd?: string, agent?: AgentSession) {
     this.fit.fit();
     const onData = new Channel<ArrayBuffer>();
     onData.onmessage = (buf) => this.term.write(new Uint8Array(buf));
-    this.ptyId = await invoke<number>("pty_open", { cwd, cols: this.term.cols, rows: this.term.rows, onData });
+    this.ptyId = await invoke<number>("pty_open", { cwd, agent, cols: this.term.cols, rows: this.term.rows, onData });
     this.attached(this.ptyId);
   }
 

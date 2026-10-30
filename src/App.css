@@ -79,3 +79,26 @@ body,
   inset: 0;
   padding: 4px 0 0 6px;
 }
+
+.banner {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: #2b2d42;
+  border-bottom: 1px solid #3a3d5c;
+}
+
+.banner span {
+  flex: 1;
+}
+
+.banner button {
+  padding: 3px 10px;
+  border: 1px solid #555;
+  border-radius: 3px;
+  background: #3a3d5c;
+  color: #fff;
+  font: inherit;
+}

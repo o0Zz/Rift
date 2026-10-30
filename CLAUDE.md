@@ -24,7 +24,7 @@ How we hold the budget:
 ## Stack
 
 - **Tauri 2** (Rust backend, system WebView2 frontend). No Electron.
-- **Rust backend**: PTY via `portable-pty` (ConPTY), git via the `git` CLI (simple, matches user's git config/hooks), file watching via `notify`, state in a small SQLite or JSON file under `%APPDATA%\Rift`.
+- **Rust backend**: PTY via `portable-pty` (ConPTY), git via the `git` CLI (simple, matches user's git config/hooks), file watching via `notify`, state in `%APPDATA%\dev.rift.terminal\session.json` (Tauri app data dir).
 - **Frontend**: TypeScript + Solid — no virtual-DOM-heavy framework. Terminal: **xterm.js, DOM renderer** (WebGL measured slower for tab switching, see below).
 - **Default shell**: PowerShell 7 (`pwsh`). Shell is configurable per profile (pwsh, Windows PowerShell, cmd, Git Bash, WSL, Nushell). `ls`, `cat`, `rm` work in pwsh as aliases; Git Bash/WSL profiles for real coreutils.
 - Packaging: MSI/NSIS via Tauri bundler.
@@ -37,8 +37,10 @@ Target layout (✅ = exists). Add a module only when its feature is built.
 src-tauri/src/       Rust
   pty.rs ✅          spawn, resize, read/write, spare shell (Tauri-free, tested against real shells)
   lib.rs ✅          Tauri commands + setup
-  session/           tab state, persistence, restore
-  agents/            AgentHarness trait + adapters (claude/, later codex/, gemini/...)
+  main.rs ✅         `rift.exe hook <harness>` subcommand, else the app
+  session.rs ✅      what to restore: tabs (cwd, title) + agent session per tab
+  hook.rs ✅         hook client (`rift.exe hook`) + named-pipe server
+  agents/ ✅         AgentHarness trait + adapters (claude.rs ✅, later codex, gemini...)
   git/               status, diff, stage/unstage, commit
   fs/                file tree + watcher
   notify/            Windows toast notifications
@@ -53,7 +55,7 @@ Frontend ↔ backend via Tauri commands (request/response) and events (agent sta
 - `pty_open` takes a Tauri `Channel`; PTY output is sent as `InvokeResponseBody::Raw` bytes (no JSON) and fed to `term.write(Uint8Array)`. Shell exit is the `pty-exit` event (payload: pty id).
 - Exit is detected by waiting on the child, not by reader EOF: ConPTY keeps the pipe open after the shell exits.
 - Spare shell: started at launch and after every `pty_open` without `cwd`. Its output is buffered in `Sink::Buffer` and replayed on attach.
-- ConPTY sends `ESC[6n` (cursor position request) at startup and blocks until answered. xterm.js answers it. That is why `TermView` queues input on a promise until `pty_open` returns: the replayed spare output triggers the answer *before* the id is known. Tests answer it by hand (`[1;1R`).
+- ConPTY sends `ESC[6n` (cursor position request) at startup and blocks until answered. xterm.js answers it. That is why `TermView` queues input on a promise until `pty_open` returns: the replayed spare output triggers the answer *before* the id is known. Tests answer it by hand (`\x1b[1;1R`).
 - Each tab owns one `TermView` (one xterm) for its whole life; switching = `display: none` toggle, fit only on show.
 - No WebGL addon. Measured: creating a WebGL context on show made cycling 20 tabs ~54 ms p95 vs ~15 ms with the DOM renderer, and browsers cap contexts at ~16. Re-adding it needs a bench that proves a win.
 - Known latency floor: xterm resumes a hidden terminal via IntersectionObserver, which costs ~1 extra frame (~20-27 ms p50 key → rendered). Next thing to attack if switching ever feels slow.
@@ -63,25 +65,25 @@ Frontend ↔ backend via Tauri commands (request/response) and events (agent sta
 
 Everything agent-specific goes through one trait so Codex/Gemini/OpenCode can be added later without touching the UI:
 
-```rust
-trait AgentHarness {
-    fn id(&self) -> &'static str;                         // "claude"
-    fn detect(&self, cmdline: &str) -> bool;              // is this tab running us?
-    fn install_hooks(&self) -> Result<()>;                // wire status reporting
-    fn resume_command(&self, session_id: &str) -> String; // e.g. `claude --resume <id>`
-    fn one_shot(&self, prompt: &str, stdin: &str) -> Result<String>; // non-interactive call
-}
-// Status events the UI understands: Working, Idle, NeedsInput(message), Ended
-```
+`src-tauri/src/agents/mod.rs`: `id`, `name`, `parse_hook(payload) -> AgentEvent`, `resume_command(session_id)`, `hooks_installed(exe)`, `install_hooks(exe)`. Add methods when a feature needs them (planned: status events Working/Idle/NeedsInput, `one_shot` for commit messages).
 
-UI code never mentions "claude" directly; it talks to `AgentHarness` and the status events.
+UI and session code never mention "claude" directly; they talk to `AgentHarness`, `AgentEvent` and `AgentSession { harness, session_id }`.
+
+### Session restore (decisions already made — keep them)
+- Shells are spawned with `RIFT_TAB_ID` (pty id) and `RIFT_PIPE` (`rift-<pid>`, one pipe per Rift instance). The agent's hook runs `rift.exe hook <harness>`, which forwards stdin + tab id to that pipe. Outside Rift (no env) it is a silent no-op; it always exits 0.
+- PowerShell starts with `-NoExit -EncodedCommand <init + startup>`: init wraps the user's prompt (after their profile) to emit OSC 9;9 with the cwd; startup is e.g. `claude --resume <id>`. No file written, user profile untouched.
+- Frontend owns the tab list (`session_update`); hooks own the agent binding per pty. `SessionStore` writes on every change (tmp + rename), never before the frontend's first report, never after `CloseRequested` (freeze), so killing shells on close cannot erase sessions.
+- `SessionEnded` only unbinds if it matches the bound id (`/clear` starts the new session before ending the old one).
+- A restored tab binds its session at `pty_open`, before the agent reports anything.
+- Resume only accepts UUID-shaped ids, so a tampered session file cannot inject shell commands.
+- `RIFT_BENCH` uses a temp session file so the bench never touches the user's tabs.
 
 ### Claude adapter
 
-- **Status (icon working/idle, notifications)**: Claude Code hooks. Rift registers hooks (`UserPromptSubmit` → Working, `Stop` → Idle, `Notification` → NeedsInput, `SessionStart`/`SessionEnd` → bind/unbind session). Hook command is a tiny `rift-hook` binary that forwards the hook JSON + `RIFT_TAB_ID` env var to the app over a named pipe (`\\.\pipe\rift`). Every PTY is spawned with `RIFT_TAB_ID` set, so this also works when the user types `claude` by hand.
-- **Resume per tab**: the `SessionStart` hook gives `session_id` + `cwd`; store `{tab_id, cwd, harness, session_id}`. On reopen, recreate each tab in its cwd and run `claude --resume <session_id>` in the tabs that had a live agent session. Each tab resumes its *own* session, not "the last one".
+- **Hooks**: registered in `~/.claude/settings.json` in **exec form** (`"command": "<path>\rift.exe", "args": ["hook", "claude"]`); shell form would run through Git Bash on Windows. Installed only when the user clicks "Enable" in the app banner. Other settings are preserved (key order too), a `.bak` is written, an older Rift entry (other exe path) is replaced. Today: `SessionStart`/`SessionEnd`. Next: `UserPromptSubmit` → Working, `Stop` → Idle, `Notification` → NeedsInput.
+- **Resume per tab**: on reopen each tab starts in its cwd and runs `claude --resume <its own session_id>`. Also works when the user types `claude` by hand, since the env comes from the tab's shell.
 - **Commit message**: `one_shot` runs `claude -p` with the staged diff on stdin and a fixed prompt. Uses the user's existing Claude login, no API key in Rift.
-- Never edit the user's `~/.claude/settings.json` without asking; prefer merging Rift's hook entries and removing them cleanly on uninstall.
+- Never edit the user's `~/.claude/settings.json` without their click. Uninstall (removing Rift's entries) is not built yet.
 
 ## Features
 
@@ -116,7 +118,7 @@ Blocks (actions, find, filter, sharing, sticky header), input editor (syntax hig
 - Commits: one short subject line, no sign-off trailers.
 
 ## Status
-Done: tabs + PTY + spare shell + shortcuts + copy/paste + tab-switch bench. Next: session restore, Claude hooks/status icons, git panel, file tree, Explorer menu.
+Done: tabs + PTY + spare shell + shortcuts + copy/paste + tab-switch bench + session restore (tabs, cwd, per-tab Claude resume). Next: Claude status icons + notifications, git panel, file tree, Explorer menu.
 
 ## Commands
 ```

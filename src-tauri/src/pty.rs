@@ -8,16 +8,31 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use anyhow::{Context, Result};
+use base64::Engine;
 use portable_pty::{ChildKiller, CommandBuilder, MasterPty, PtySize, native_pty_system};
 
 pub type TabId = u32;
 pub type OnData = Box<dyn FnMut(Vec<u8>) + Send>;
 pub type OnExit = Box<dyn FnOnce(TabId) + Send>;
 
+/// Runs after the user's profile: wraps their prompt so every prompt reports the cwd (OSC 9;9).
+const PWSH_INIT: &str = r#"
+$global:__riftPrompt = $function:prompt
+function global:prompt {
+  $loc = $executionContext.SessionState.Path.CurrentLocation
+  $p = & $global:__riftPrompt
+  if ($loc.Provider.Name -eq 'FileSystem') { "$([char]27)]9;9;`"$($loc.ProviderPath)`"$([char]27)\$p" } else { $p }
+}
+"#;
+
 #[derive(Clone, Debug)]
-pub struct Shell {
-    pub program: String,
-    pub args: Vec<String>,
+pub enum Shell {
+    PowerShell {
+        exe: String,
+    },
+    /// Deterministic shell for tests.
+    #[cfg(test)]
+    Cmd,
 }
 
 impl Shell {
@@ -26,9 +41,31 @@ impl Shell {
         let pwsh = std::env::var_os("PATH")
             .map(|p| std::env::split_paths(&p).any(|dir| dir.join("pwsh.exe").is_file()))
             .unwrap_or(false);
-        Shell {
-            program: if pwsh { "pwsh.exe" } else { "powershell.exe" }.into(),
-            args: vec!["-NoLogo".into()],
+        Shell::PowerShell {
+            exe: if pwsh { "pwsh.exe" } else { "powershell.exe" }.into(),
+        }
+    }
+
+    /// The shell command line, running `startup` (e.g. `claude --resume <id>`) once the shell is ready.
+    fn command(&self, startup: Option<&str>) -> CommandBuilder {
+        match self {
+            Shell::PowerShell { exe } => {
+                let script = format!("{PWSH_INIT}\n{}", startup.unwrap_or(""));
+                let utf16: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
+                let mut cmd = CommandBuilder::new(exe);
+                cmd.args(["-NoLogo", "-NoExit", "-EncodedCommand"]);
+                cmd.arg(base64::engine::general_purpose::STANDARD.encode(utf16));
+                cmd
+            }
+            #[cfg(test)]
+            Shell::Cmd => {
+                let mut cmd = CommandBuilder::new("cmd.exe");
+                cmd.arg("/Q");
+                if let Some(s) = startup {
+                    cmd.args(["/K", s]);
+                }
+                cmd
+            }
         }
     }
 }
@@ -76,6 +113,8 @@ struct Session {
 pub struct PtyManager {
     shell: Shell,
     home: PathBuf,
+    /// Extra environment for every shell (e.g. the hook pipe name).
+    env: Vec<(String, String)>,
     next_id: AtomicU32,
     sessions: Mutex<HashMap<TabId, Session>>,
     /// A shell started ahead of time so a new tab does not wait for shell startup.
@@ -83,10 +122,11 @@ pub struct PtyManager {
 }
 
 impl PtyManager {
-    pub fn new(shell: Shell, home: PathBuf) -> Arc<Self> {
+    pub fn new(shell: Shell, home: PathBuf, env: Vec<(String, String)>) -> Arc<Self> {
         Arc::new(PtyManager {
             shell,
             home,
+            env,
             next_id: AtomicU32::new(1),
             sessions: Mutex::new(HashMap::new()),
             spare: Mutex::new(None),
@@ -97,7 +137,9 @@ impl PtyManager {
     pub fn prewarm(self: &Arc<Self>) {
         let me = self.clone();
         thread::spawn(move || {
-            let Ok(id) = me.spawn(&me.home) else { return };
+            let Ok(id) = me.spawn(&me.home, None) else {
+                return;
+            };
             let mut spare = me.spare.lock().unwrap();
             if spare.is_none() {
                 *spare = Some(id);
@@ -108,22 +150,23 @@ impl PtyManager {
         });
     }
 
-    /// Open a tab's shell. `cwd = None` means the home directory and takes the spare shell.
+    /// Open a tab's shell. Without `cwd` (= home) and `startup`, it takes the spare shell.
     pub fn open(
         self: &Arc<Self>,
         cwd: Option<PathBuf>,
+        startup: Option<&str>,
         size: PtySize,
         on_data: OnData,
         on_exit: OnExit,
     ) -> Result<TabId> {
-        let spare = if cwd.is_none() {
+        let spare = if cwd.is_none() && startup.is_none() {
             self.spare.lock().unwrap().take()
         } else {
             None
         };
         let id = match spare {
             Some(id) => id,
-            None => self.spawn(cwd.as_deref().unwrap_or(&self.home))?,
+            None => self.spawn(cwd.as_deref().unwrap_or(&self.home), startup)?,
         };
         self.resize(id, size)?;
         self.attach(id, on_data, on_exit)?;
@@ -188,7 +231,7 @@ impl PtyManager {
         Ok(())
     }
 
-    fn spawn(&self, cwd: &Path) -> Result<TabId> {
+    fn spawn(&self, cwd: &Path, startup: Option<&str>) -> Result<TabId> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let pair = native_pty_system().openpty(PtySize {
             rows: 24,
@@ -196,10 +239,12 @@ impl PtyManager {
             ..Default::default()
         })?;
 
-        let mut cmd = CommandBuilder::new(&self.shell.program);
-        cmd.args(&self.shell.args);
+        let mut cmd = self.shell.command(startup);
         cmd.cwd(cwd);
         cmd.env("RIFT_TAB_ID", id.to_string());
+        for (k, v) in &self.env {
+            cmd.env(k, v);
+        }
         let mut child = pair.slave.spawn_command(cmd)?;
         drop(pair.slave);
 
@@ -245,11 +290,7 @@ mod tests {
     use std::time::{Duration, Instant};
 
     fn cmd_manager() -> Arc<PtyManager> {
-        let shell = Shell {
-            program: "cmd.exe".into(),
-            args: vec!["/Q".into()],
-        };
-        PtyManager::new(shell, std::env::temp_dir())
+        PtyManager::new(Shell::Cmd, std::env::temp_dir(), vec![])
     }
 
     fn size() -> PtySize {
@@ -264,12 +305,14 @@ mod tests {
     fn open(
         m: &Arc<PtyManager>,
         cwd: Option<PathBuf>,
+        startup: Option<&str>,
     ) -> (TabId, mpsc::Receiver<Vec<u8>>, mpsc::Receiver<TabId>) {
         let (data_tx, data_rx) = mpsc::channel();
         let (exit_tx, exit_rx) = mpsc::channel();
         let id = m
             .open(
                 cwd,
+                startup,
                 size(),
                 Box::new(move |b| {
                     let _ = data_tx.send(b);
@@ -315,7 +358,7 @@ mod tests {
     #[test]
     fn runs_commands_and_sees_tab_id() {
         let m = cmd_manager();
-        let (id, out, _) = open(&m, Some(std::env::temp_dir()));
+        let (id, out, _) = open(&m, Some(std::env::temp_dir()), None);
         m.write(id, b"echo rift-%RIFT_TAB_ID%-ok\r\n").unwrap();
         wait_for_output(&out, &format!("rift-{id}-ok"));
         m.close(id);
@@ -329,7 +372,7 @@ mod tests {
         // Let the spare print its prompt into the buffer before anyone attaches.
         thread::sleep(Duration::from_millis(500));
 
-        let (id, out, _) = open(&m, None);
+        let (id, out, _) = open(&m, None, None);
         assert_eq!(id, spare);
         wait_for_output(&out, ">"); // buffered prompt is replayed
         m.write(id, b"echo still-alive\r\n").unwrap();
@@ -343,16 +386,40 @@ mod tests {
     #[test]
     fn reports_exit_when_shell_exits() {
         let m = cmd_manager();
-        let (id, _out, exit) = open(&m, Some(std::env::temp_dir()));
+        let (id, _out, exit) = open(&m, Some(std::env::temp_dir()), None);
         m.write(id, b"exit\r\n").unwrap();
         assert_eq!(exit.recv_timeout(Duration::from_secs(10)).unwrap(), id);
         m.close(id);
     }
 
     #[test]
+    fn startup_command_runs_in_new_shell() {
+        let m = cmd_manager();
+        let (id, out, _) = open(&m, Some(std::env::temp_dir()), Some("echo rift-startup-ok"));
+        wait_for_output(&out, "rift-startup-ok");
+        m.close(id);
+    }
+
+    #[test]
+    fn powershell_reports_cwd_and_runs_startup() {
+        let dir = tempfile::tempdir().unwrap();
+        let cwd = dir.path().canonicalize().unwrap();
+        let cwd = cwd.to_string_lossy().trim_start_matches(r"\?\").to_string();
+        let m = PtyManager::new(Shell::default_for_platform(), std::env::temp_dir(), vec![]);
+        let (id, out, _) = open(
+            &m,
+            Some(cwd.clone().into()),
+            Some("Write-Output rift-pwsh-ok"),
+        );
+        wait_for_output(&out, "rift-pwsh-ok");
+        wait_for_output(&out, &format!("\x1b]9;9;\"{cwd}\""));
+        m.close(id);
+    }
+
+    #[test]
     fn close_removes_tab() {
         let m = cmd_manager();
-        let (id, _out, _) = open(&m, Some(std::env::temp_dir()));
+        let (id, _out, _) = open(&m, Some(std::env::temp_dir()), None);
         m.close(id);
         assert!(m.write(id, b"x").is_err());
     }
