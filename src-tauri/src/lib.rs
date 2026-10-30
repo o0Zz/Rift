@@ -135,6 +135,12 @@ async fn open_url(url: String) -> Result<(), String> {
     tauri_plugin_opener::open_url(url, None::<&str>).map_err(err)
 }
 
+/// Lines changed and commits ahead/behind, shown on the tab and on the git button. Background only.
+#[tauri::command]
+async fn git_stats(root: String) -> Result<git::Stats, String> {
+    git::stats(root.as_ref()).map_err(err)
+}
+
 /// New git worktree (and branch) next to the repository, for a parallel agent. Returns its folder.
 #[tauri::command]
 async fn git_worktree_add(root: String, branch: String) -> Result<String, String> {
@@ -477,6 +483,7 @@ pub fn run() {
             git_diff,
             git_commit,
             git_worktree_add,
+            git_stats,
             open_url,
             settings_load,
             startup_dir,

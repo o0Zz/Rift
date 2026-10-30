@@ -4,6 +4,7 @@ import { createMenu, type MenuItem } from "../ui/Menu";
 import type { Tab } from "./Tab";
 import { TabIcon } from "./icons";
 import { Icon } from "../ui/Icon";
+import { GitStatsView } from "./GitStats";
 
 export type SidebarProps = {
   tabs: Tab[];
@@ -164,6 +165,7 @@ export function Sidebar(props: SidebarProps) {
                 <span class="tab-branch">
                   <Icon name="branch" size={11} /> {tab.branch}
                 </span>
+                <GitStatsView stats={tab.stats} />
               </Show>
               <span class="tab-path">
                 <bdo dir="ltr">{tab.cwd}</bdo>
@@ -203,14 +205,6 @@ export function Sidebar(props: SidebarProps) {
             title="Files (Ctrl+Shift+E)"
           >
             <Icon name="folder" />
-          </button>
-          <button
-            class="icon-btn"
-            classList={{ on: props.panels.git }}
-            onClick={() => props.onTogglePanel("git")}
-            title="Git changes (Ctrl+Shift+G)"
-          >
-            <Icon name="branch" />
           </button>
           <button class="icon-btn" onClick={() => props.onOpenSettings()} title="Settings (Ctrl+,)">
             <Icon name="gear" />

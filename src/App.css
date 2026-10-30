@@ -1130,3 +1130,80 @@ body,
   color: var(--fg);
   font: inherit;
 }
+
+/* Git stats: +added -deleted, ahead/behind */
+
+.stat-add {
+  color: var(--s-a);
+}
+
+.stat-del {
+  color: var(--s-d);
+}
+
+.stat-ab {
+  color: var(--fg-muted);
+}
+
+.tab-sub .stat-add,
+.tab-sub .stat-del,
+.tab-sub .stat-ab {
+  flex: none;
+}
+
+/* Top bar above the terminal: active tab, git button on the right (Warp-style) */
+
+.topbar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  height: 32px;
+  padding: 0 8px 0 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--side);
+}
+
+.topbar-title {
+  overflow: hidden;
+  color: var(--fg-muted);
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.git-button {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 5px;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+}
+
+.git-button:hover {
+  background: var(--hover);
+}
+
+.git-button.on {
+  border-color: var(--accent);
+  background: var(--on-bg);
+  color: var(--fg-strong);
+}
+
+/* Layout containment: the top bar's text, the sidebar and the terminal area change independently.
+   Without it, updating the top bar on a tab switch re-laid out the terminal's DOM (+4 ms per switch). */
+.topbar,
+.sidebar {
+  contain: layout paint style;
+}
+
+.terms {
+  contain: strict;
+}

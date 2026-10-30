@@ -138,6 +138,71 @@ pub fn commit(root: &Path, files: &[(String, bool)], message: &str) -> Result<St
     Ok(text.lines().next().unwrap_or_default().to_string())
 }
 
+/// What the tab shows next to its branch: lines changed against HEAD, commits ahead/behind upstream.
+#[derive(Debug, Default, PartialEq, Serialize)]
+pub struct Stats {
+    pub added: u32,
+    pub deleted: u32,
+    pub ahead: u32,
+    pub behind: u32,
+}
+
+/// `git diff --shortstat`: " 3 files changed, 12 insertions(+), 3 deletions(-)" -> (12, 3).
+fn parse_shortstat(text: &str) -> (u32, u32) {
+    let count = |word: &str| {
+        text.split(',')
+            .find(|part| part.contains(word))
+            .and_then(|part| part.split_whitespace().next()?.parse().ok())
+            .unwrap_or(0)
+    };
+    (count("insertion"), count("deletion"))
+}
+
+/// `git status --porcelain=v2 --branch`: the "# branch.ab +1 -2" line -> (1, 2); none without upstream.
+fn parse_ahead_behind(text: &str) -> (u32, u32) {
+    text.lines()
+        .find_map(|l| l.strip_prefix("# branch.ab "))
+        .and_then(|ab| {
+            let mut it = ab.split_whitespace();
+            let ahead = it.next()?.trim_start_matches('+').parse().ok()?;
+            let behind = it.next()?.trim_start_matches('-').parse().ok()?;
+            Some((ahead, behind))
+        })
+        .unwrap_or((0, 0))
+}
+
+/// Both git commands run in parallel (~80 ms on Windows, mostly git's process start).
+pub fn stats(root: &Path) -> Result<Stats> {
+    let diff_root = root.to_path_buf();
+    let diff = std::thread::spawn(move || {
+        git(
+            &diff_root,
+            &["--no-optional-locks", "diff", "HEAD", "--shortstat"],
+        )
+    });
+    let status = check(git(
+        root,
+        &[
+            "--no-optional-locks",
+            "status",
+            "--porcelain=v2",
+            "--branch",
+            "--untracked-files=no",
+        ],
+    )?)?;
+    let diff = diff
+        .join()
+        .map_err(|_| anyhow::anyhow!("git diff panicked"))??;
+    let (added, deleted) = parse_shortstat(&String::from_utf8_lossy(&diff.stdout));
+    let (ahead, behind) = parse_ahead_behind(&String::from_utf8_lossy(&status.stdout));
+    Ok(Stats {
+        added,
+        deleted,
+        ahead,
+        behind,
+    })
+}
+
 /// Creates a git worktree for `branch` next to the repository, in `<repo>.worktrees/<branch>`, so
 /// parallel agents work on separate checkouts. Creates the branch from HEAD unless it exists.
 /// Returns the worktree folder.
@@ -448,6 +513,32 @@ mod tests {
         );
         assert!(worktree_add(&root, "feature/login").is_err());
         assert!(worktree_add(&root, "bad..name").is_err());
+    }
+
+    #[test]
+    fn parses_shortstat_and_ahead_behind() {
+        assert_eq!(
+            parse_shortstat(" 3 files changed, 12 insertions(+), 3 deletions(-)\n"),
+            (12, 3)
+        );
+        assert_eq!(parse_shortstat(" 1 file changed, 1 insertion(+)"), (1, 0));
+        assert_eq!(parse_shortstat(" 1 file changed, 2 deletions(-)"), (0, 2));
+        assert_eq!(parse_shortstat(""), (0, 0));
+        let status = "# branch.oid abc\n# branch.head main\n# branch.upstream origin/main\n# branch.ab +4 -1\n";
+        assert_eq!(parse_ahead_behind(status), (4, 1));
+        assert_eq!(parse_ahead_behind("# branch.head main\n"), (0, 0)); // no upstream
+    }
+
+    #[test]
+    fn stats_count_changed_lines_against_head() {
+        let dir = repo();
+        let r = dir.path();
+        assert_eq!(stats(r).unwrap(), Stats::default());
+        std::fs::write(r.join("kept.txt"), "one\nTWO\nthree\n").unwrap(); // 1 line changed, 1 added
+        std::fs::remove_file(r.join("gone.txt")).unwrap(); // 1 line removed
+        let s = stats(r).unwrap();
+        assert_eq!((s.added, s.deleted), (2, 2));
+        assert_eq!((s.ahead, s.behind), (0, 0));
     }
 
     #[test]

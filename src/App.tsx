@@ -24,8 +24,10 @@ import {
   type Status,
   type TabFilter,
 } from "./tabs/layout";
-import { Tab } from "./tabs/Tab";
+import { Tab, type GitStats } from "./tabs/Tab";
 import { Sidebar } from "./tabs/Sidebar";
+import { GitStatsView } from "./tabs/GitStats";
+import { Icon } from "./ui/Icon";
 import { Explorer } from "./panels/Explorer";
 import { GitPanel } from "./panels/GitPanel";
 import { Resizer } from "./ui/Resizer";
@@ -60,6 +62,12 @@ function App() {
   const [finding, setFinding] = createSignal(false);
   const [filter, setFilter] = createSignal<TabFilter>("all");
   const [renameRequest, setRenameRequest] = createSignal<{ tab: Tab }>();
+  // The top bar follows the active tab one frame later: the switch frame only shows the new terminal.
+  const [barTab, setBarTab] = createSignal<Tab>();
+  createEffect(() => {
+    const tab = active();
+    requestAnimationFrame(() => setBarTab(tab));
+  });
   const [worktreeFrom, setWorktreeFrom] = createSignal<Tab>();
   let updater: Updater | undefined;
 
@@ -150,6 +158,19 @@ function App() {
   }
   createEffect(save);
 
+  // Git stats per tab (~80 ms of git in the background, never on a tab switch): after a prompt or an agent
+  // status change, coalesced so that a burst of prompts costs one refresh per tab and 1.5 s.
+  const statsPending = new WeakSet<Tab>();
+  function refreshStats(tab: Tab) {
+    if (statsPending.has(tab)) return;
+    statsPending.add(tab);
+    setTimeout(async () => {
+      statsPending.delete(tab);
+      const root = tab.root;
+      tab.stats = root ? await invoke<GitStats>("git_stats", { root }).catch(() => undefined) : undefined;
+    }, 1500);
+  }
+
   /** A finished agent the user has now seen goes back to the plain agent icon after a moment. */
   function fadeDoneWhenSeen(tab: Tab) {
     if (tab.status !== "done") return;
@@ -193,6 +214,7 @@ function App() {
         batch(() => {
           tab.root = head?.root;
           tab.branch = head?.branch;
+          refreshStats(tab);
         }),
       );
     };
@@ -320,6 +342,7 @@ function App() {
       tab.status = status ?? undefined;
       tab.agent = status ? harness : undefined;
     });
+    refreshStats(tab); // an agent at work changes files
     const visible = active() === tab && windowFocused();
     if (visible) fadeDoneWhenSeen(tab);
     if (!shouldNotify(tab.status, visible)) return;
@@ -538,6 +561,20 @@ function App() {
         />
       </Show>
       <main class="main">
+        {/* Like Warp: the active tab's branch and changes on the right, opening the git panel. */}
+        <div class="topbar">
+          <span class="topbar-title">{barTab() ? displayTitle(barTab()!) : ""}</span>
+          <button
+            class="git-button"
+            classList={{ on: panels().git }}
+            onClick={() => togglePanel("git")}
+            title="Git changes (Ctrl+Shift+G)"
+          >
+            <Icon name="branch" size={14} />
+            <span>{barTab()?.branch ?? "Git"}</span>
+            <GitStatsView stats={barTab()?.stats} />
+          </button>
+        </div>
         <Show when={update()}>
           {(u) => (
             <div class="banner">
@@ -572,7 +609,12 @@ function App() {
       <Show when={panels().git}>
         <div class="pane" style={{ width: `${widths().git}px` }}>
           <Resizer edge="left" width={widths().git} min={280} max={1000} onResize={resizeWidth("git")} onDragging={onDragging} />
-          <GitPanel root={panelTab()?.root} branch={panelTab()?.branch} onClose={() => togglePanel("git")} />
+          <GitPanel
+            root={panelTab()?.root}
+            branch={panelTab()?.branch}
+            onClose={() => togglePanel("git")}
+            onCommitted={() => panelTab() && refreshStats(panelTab()!)}
+          />
         </div>
       </Show>
     </div>

@@ -2,6 +2,9 @@ import { createSignal } from "solid-js";
 import type { TermView } from "../terminal/TermView";
 import type { Status } from "./layout";
 
+/** Lines changed against HEAD and commits ahead/behind upstream (git_stats). */
+export type GitStats = { added: number; deleted: number; ahead: number; behind: number };
+
 function field<T>(value: T) {
   const [get, set] = createSignal(value);
   return { get, set: (v: T) => set(() => v) };
@@ -22,6 +25,7 @@ export class Tab {
     branch: field<string | undefined>(undefined),
     unread: field(false),
     shell: field<string | undefined>(undefined),
+    stats: field<GitStats | undefined>(undefined),
   };
 
   get title() { return this.f.title.get(); }
@@ -49,6 +53,8 @@ export class Tab {
   /** Shell profile id (see shell_profiles); undefined = the default shell. */
   get shell() { return this.f.shell.get(); }
   set shell(v) { this.f.shell.set(v); }
+  get stats() { return this.f.stats.get(); }
+  set stats(v) { this.f.stats.set(v); }
   get unread() { return this.f.unread.get(); }
   set unread(v) { this.f.unread.set(v); }
 }

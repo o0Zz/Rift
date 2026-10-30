@@ -7,7 +7,7 @@ import { Icon } from "../ui/Icon";
  * Branch, changed files, per-file diff, and commit of the checked files.
  * Not live: loads when shown, when the shown repo changes, after a commit, or on ⟳.
  */
-export function GitPanel(props: { root?: string; branch?: string; onClose(): void }) {
+export function GitPanel(props: { root?: string; branch?: string; onClose(): void; onCommitted?(): void }) {
   const [changes, setChanges] = createSignal<Change[] | string>();
   const [checked, setChecked] = createSignal(new Set<string>());
   const [selected, setSelected] = createSignal<Change>();
@@ -78,6 +78,7 @@ export function GitPanel(props: { root?: string; branch?: string; onClose(): voi
       setMessage("");
       setNote({ text: summary });
       await load(props.root!);
+      props.onCommitted?.();
     } catch (e) {
       setNote({ text: String(e), error: true });
     } finally {
