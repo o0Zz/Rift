@@ -194,9 +194,13 @@ async fn git_commit(
 }
 
 /// The user's own convention for commit messages (see their CLAUDE.md).
-const COMMIT_PROMPT: &str = "Write a git commit message for the diff on stdin. \
-One short subject line in the imperative mood (max 72 characters), optionally a blank line and a brief body. \
-No co-author or sign-off lines. Output only the message, without quotes or code fences.";
+const COMMIT_PROMPT: &str = "Write a git commit message for the diff on stdin, following Conventional Commits. \
+Subject line: `type(scope): description`, where type is one of feat, fix, docs, style, refactor, perf, test, \
+build, ci, chore; the scope is optional (the main area touched, one short word); the description is in the \
+imperative mood, lower case, no final period; the whole line at most 72 characters. \
+For a breaking change, add `!` before the colon and a `BREAKING CHANGE:` footer. \
+Optionally a blank line and a brief body. No co-author or sign-off lines. \
+Output only the message, without quotes or code fences.";
 
 /// AI commit message for the selected files, written by the first agent harness (Claude today).
 #[tauri::command]

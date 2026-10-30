@@ -165,7 +165,7 @@ Blocks (actions, find, filter, sharing, sticky header), input editor (syntax hig
 - Every feature ships with tests in the same change. Prefer end-to-end: real PTY spawn, real git repo in a temp dir, real hook JSON through the named pipe.
 - Perf budget has a benchmark (`src/bench.ts`: 20 tabs x 10k lines; cycle, toggle, and cycle with both panels open while tabs alternate between two git repos — `scripts/bench.mjs` creates the second repo). Run it after any change to tabs, terminal, panels or rendering; it exits non-zero over budget.
 - Keep it small: no abstraction until a second user of it exists — except `AgentHarness`, which is a stated requirement.
-- Commits: one short subject line, no sign-off trailers.
+- Commits: **Conventional Commits** (`feat(scope): description`, types feat/fix/docs/style/refactor/perf/test/build/ci/chore), one short subject line, optional brief body, no sign-off trailers. The git panel's ✨ Generate (`COMMIT_PROMPT` in lib.rs) asks Claude for the same format.
 
 ## Status
 Done: tabs + PTY + spare shell + shortcuts + copy/paste + tab-switch bench + session restore (tabs, cwd, per-tab Claude resume) + left sidebar with groups/colors/rename/drag + agent status badges + notifications + files panel + git panel (branch, changes, diff, commit selected files, AI commit message) + resizable/closable panels + settings page (theme dark/light/system, font, shortcuts) + app icon + Explorer "Open in Rift" (new tab, single instance). Next: default shell choice (pwsh/cmd/Git Bash/WSL), multi-window, session resume polish.
