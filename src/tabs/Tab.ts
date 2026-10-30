@@ -21,6 +21,7 @@ export class Tab {
     root: field<string | undefined>(undefined),
     branch: field<string | undefined>(undefined),
     unread: field(false),
+    shell: field<string | undefined>(undefined),
   };
 
   get title() { return this.f.title.get(); }
@@ -45,6 +46,9 @@ export class Tab {
   set root(v) { this.f.root.set(v); }
   get branch() { return this.f.branch.get(); }
   set branch(v) { this.f.branch.set(v); }
+  /** Shell profile id (see shell_profiles); undefined = the default shell. */
+  get shell() { return this.f.shell.get(); }
+  set shell(v) { this.f.shell.set(v); }
   get unread() { return this.f.unread.get(); }
   set unread(v) { this.f.unread.set(v); }
 }

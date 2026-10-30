@@ -33,7 +33,7 @@ import { FindBar } from "./ui/FindBar";
 import { PromptDialog } from "./ui/PromptDialog";
 import "./App.css";
 
-type TabUi = { name?: string; color?: string; group?: string };
+type TabUi = { name?: string; color?: string; group?: string; shell?: string };
 type SavedTab = { cwd?: string; title: string; agent?: AgentSession; ui?: TabUi };
 type Panels = { explorer: boolean; git: boolean };
 type Widths = { tabs: number; explorer: number; git: number };
@@ -48,6 +48,10 @@ function App() {
   const [active, setActive] = createSignal<Tab>();
   const [missing, setMissing] = createSignal<Integration[]>([]);
   const [agents, setAgents] = createSignal<Integration[]>([]);
+  const [shells, setShells] = createSignal<{ id: string; name: string }[]>([]);
+  invoke<{ id: string; name: string }[]>("shell_profiles").then(setShells);
+  // The default shell (settings) is the backend's: spare shells start with it.
+  createEffect(on(() => settings().shell, (id) => invoke("shell_set_default", { id: id || null }), { defer: true }));
   const [update, setUpdate] = createSignal<{ version: string; restart: () => Promise<void> }>();
   // From Tauri's window events: document.hasFocus() is not reliable in WebView2.
   const [windowFocused, setWindowFocused] = createSignal(true);
@@ -138,7 +142,7 @@ function App() {
         pty: t.view.ptyId >= 0 ? t.view.ptyId : null,
         cwd: t.cwd ?? null,
         title: t.title,
-        ui: { name: t.name, color: t.color, group: t.group } satisfies TabUi,
+        ui: { name: t.name, color: t.color, group: t.group, shell: t.shell } satisfies TabUi,
       })),
       active: Math.max(0, list.indexOf(active()!)),
       layout: { groups: groups(), panels: panels(), widths: widths() },
@@ -171,7 +175,7 @@ function App() {
   /** New tabs open right after the active one, in its group and its folder. */
   function newTab(
     saved?: SavedTab,
-    opts: { cwd?: string; name?: string; group?: string; startAgent?: string } = {},
+    opts: { cwd?: string; name?: string; group?: string; startAgent?: string; shell?: string } = {},
   ): Promise<void> {
     const tab = new Tab();
     const cwd = saved ? saved.cwd : (opts.cwd ?? active()?.cwd);
@@ -180,6 +184,8 @@ function App() {
     tab.name = saved?.ui?.name ?? opts.name;
     tab.color = saved?.ui?.color;
     tab.group = saved ? saved.ui?.group : (opts.group ?? active()?.group);
+    // Like the folder, a new tab keeps the shell of the tab it was opened from.
+    tab.shell = saved ? saved.ui?.shell : (opts.shell ?? active()?.shell);
     const onCwd = (cwd: string) => {
       tab.cwd = cwd;
       // At every prompt: also catches `git checkout` (same cwd, new branch).
@@ -209,7 +215,7 @@ function App() {
     setTabs(list);
     activate(tab);
     return tab.view
-      .start(cwd, saved?.agent, opts.startAgent)
+      .start(cwd, saved?.agent, opts.startAgent, tab.shell)
       .then(save) // the pty id is not reactive
       .catch((e) => void (tab.title = `error: ${e}`));
   }
@@ -480,7 +486,8 @@ function App() {
         active={active()}
         onActivate={activate}
         onClose={closeTab}
-        onNewTab={() => newTab()}
+        onNewTab={(shell) => newTab(undefined, shell ? { shell } : {})}
+        shells={shells()}
         onMoveTab={move}
         onMoveGroup={(id, before) => setGroups(moveGroup(groups(), id, before))}
         onNewGroup={newGroup}

@@ -11,7 +11,9 @@ export type SidebarProps = {
   active?: Tab;
   onActivate(tab: Tab): void;
   onClose(tab: Tab): void;
-  onNewTab(): void;
+  onNewTab(shell?: string): void;
+  /** Installed shells, for "New tab with…" (right-click on +). */
+  shells: { id: string; name: string }[];
   onMoveTab(tab: Tab, drop: Drop<Tab>): void;
   onMoveGroup(id: string, before?: string): void;
   onNewGroup(tab: Tab): void;
@@ -213,7 +215,17 @@ export function Sidebar(props: SidebarProps) {
           <button class="icon-btn" onClick={() => props.onOpenSettings()} title="Settings (Ctrl+,)">
             <Icon name="gear" />
           </button>
-          <button class="icon-btn" onClick={() => props.onNewTab()} title="New tab (Ctrl+Shift+T)">
+          <button
+            class="icon-btn"
+            onClick={() => props.onNewTab()}
+            onContextMenu={(e) =>
+              openMenu(
+                e,
+                props.shells.map((s) => ({ label: `New tab: ${s.name}`, run: () => props.onNewTab(s.id) })),
+              )
+            }
+            title="New tab (Ctrl+Shift+T) — right-click to choose the shell"
+          >
             <Icon name="plus" />
           </button>
         </span>

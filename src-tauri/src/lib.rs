@@ -45,6 +45,7 @@ fn pty_open(
     cwd: Option<String>,
     agent: Option<AgentSession>,
     start_agent: Option<String>,
+    shell: Option<String>,
     cols: u16,
     rows: u16,
     on_data: Channel<InvokeResponseBody>,
@@ -58,6 +59,8 @@ fn pty_open(
         .open(
             cwd.map(Into::into),
             startup.as_deref(),
+            // A tab's own shell profile; unknown (uninstalled) profiles fall back to the default shell.
+            shell.as_deref().and_then(Shell::from_profile),
             size(cols, rows),
             Box::new(move |bytes| {
                 let _ = on_data.send(InvokeResponseBody::Raw(bytes));
@@ -81,6 +84,35 @@ fn pty_write(ptys: Ptys, id: TabId, data: String) -> Result<(), String> {
 #[tauri::command]
 fn pty_resize(ptys: Ptys, id: TabId, cols: u16, rows: u16) -> Result<(), String> {
     ptys.resize(id, size(cols, rows)).map_err(err)
+}
+
+#[derive(Serialize)]
+struct ShellProfile {
+    id: String,
+    name: String,
+}
+
+/// The shells installed here (default first), for settings and "New tab with…".
+#[tauri::command]
+fn shell_profiles() -> Vec<ShellProfile> {
+    shell::profiles()
+        .into_iter()
+        .map(|p| ShellProfile {
+            id: p.id,
+            name: p.name,
+        })
+        .collect()
+}
+
+/// Default shell from settings (`None`: the platform default). Spare shells use it from now on.
+#[tauri::command]
+fn shell_set_default(ptys: Ptys, id: Option<String>) {
+    let shell = id
+        .as_deref()
+        .and_then(Shell::from_profile)
+        .unwrap_or_else(Shell::default_for_platform);
+    ptys.set_default_shell(shell);
+    ptys.prewarm(None);
 }
 
 /// Keeps a spare shell ready in `cwd` (the active tab's folder): the next new tab there is instant.
@@ -430,6 +462,8 @@ pub fn run() {
             pty_resize,
             pty_close,
             pty_prewarm,
+            shell_profiles,
+            shell_set_default,
             session_restore,
             session_update,
             session_freeze,

@@ -12,6 +12,8 @@ export function SettingsPage(props: { settings: Settings; onChange(s: Settings):
   const [menuInstalled, setMenuInstalled] = createSignal<boolean | null>();
   const [menuError, setMenuError] = createSignal<string>();
   const [version, setVersion] = createSignal<string>();
+  const [profiles, setProfiles] = createSignal<{ id: string; name: string }[]>([]);
+  invoke<{ id: string; name: string }[]>("shell_profiles").then(setProfiles);
   getVersion().then((v) => setVersion(displayVersion(v)));
   invoke<boolean | null>("explorer_menu_installed").then(setMenuInstalled, (e) => setMenuError(String(e)));
 
@@ -68,6 +70,15 @@ export function SettingsPage(props: { settings: Settings; onChange(s: Settings):
           </button>
         </div>
         <div class="settings-body">
+          <h3>Terminal</h3>
+          <div class="setting">
+            <label for="shell">Default shell</label>
+            <select id="shell" value={props.settings.shell} onChange={(e) => set({ shell: e.currentTarget.value })}>
+              <option value="">Automatic ({profiles()[0]?.name ?? "system default"})</option>
+              <For each={profiles()}>{(p) => <option value={p.id}>{p.name}</option>}</For>
+            </select>
+          </div>
+
           <h3>Appearance</h3>
           <div class="setting">
             <label>Theme</label>

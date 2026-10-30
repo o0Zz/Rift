@@ -6,13 +6,21 @@ export function cwdFromOsc9(data: string): string | undefined {
   return data.slice(2).replace(/^"(.*)"$/, "$1");
 }
 
-/** OSC 7 (bash/zsh): `file://host/path`, percent-encoded. */
-export function cwdFromOsc7(data: string): string | undefined {
+const IS_WINDOWS = typeof navigator !== "undefined" && /Win/i.test(navigator.platform);
+
+/**
+ * OSC 7 (bash/zsh): `file://host/path`, percent-encoded. On Windows, Git Bash reports MSYS paths
+ * (`/c/Dev/x`): they become Windows paths (`C:\Dev\x`) so the rest of Rift can use them.
+ */
+export function cwdFromOsc7(data: string, windows = IS_WINDOWS): string | undefined {
   const m = /^file:\/\/[^/]*(\/.*)$/.exec(data);
   if (!m) return;
+  let path: string;
   try {
-    return decodeURIComponent(m[1]);
+    path = decodeURIComponent(m[1]);
   } catch {
-    return m[1];
+    path = m[1];
   }
+  const msys = windows && /^\/([a-zA-Z])(\/.*)?$/.exec(path);
+  return msys ? `${msys[1].toUpperCase()}:${(msys[2] ?? "\\").replace(/\//g, "\\")}` : path;
 }

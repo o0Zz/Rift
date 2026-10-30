@@ -102,7 +102,7 @@ export class TermView {
    * Opens the shell in `cwd`. With `agent`, the shell starts by resuming that agent session;
    * with `startAgent` (harness id), by starting a new one.
    */
-  async start(cwd?: string, agent?: AgentSession, startAgent?: string) {
+  async start(cwd?: string, agent?: AgentSession, startAgent?: string, shell?: string) {
     this.fit.fit();
     const onData = new Channel<ArrayBuffer>();
     onData.onmessage = (buf) => this.term.write(new Uint8Array(buf));
@@ -110,6 +110,7 @@ export class TermView {
       cwd,
       agent,
       startAgent,
+      shell,
       cols: this.term.cols,
       rows: this.term.rows,
       onData,

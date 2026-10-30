@@ -14,3 +14,10 @@ it("reads bash/zsh OSC 7", () => {
   // A raw % that is not an escape: kept as is.
   expect(cwdFromOsc7("file://h/tmp/100%")).toBe("/tmp/100%");
 });
+
+it("turns Git Bash's MSYS paths into Windows paths on Windows only", () => {
+  expect(cwdFromOsc7("file://pc/c/Dev/My%20App", true)).toBe("C:\\Dev\\My App");
+  expect(cwdFromOsc7("file://pc/d", true)).toBe("D:\\");
+  expect(cwdFromOsc7("file://pc/c/Dev", false)).toBe("/c/Dev");
+  expect(cwdFromOsc7("file://pc/home/me", true)).toBe("/home/me"); // not a drive letter
+});

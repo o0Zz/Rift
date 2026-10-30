@@ -57,7 +57,8 @@ struct Session {
 }
 
 pub struct PtyManager {
-    shell: Shell,
+    /// The default shell: spare shells and tabs without their own profile use it.
+    shell: Mutex<Shell>,
     home: PathBuf,
     /// Extra environment for every shell (e.g. the hook pipe name).
     env: Vec<(String, String)>,
@@ -85,13 +86,22 @@ fn same_dir(a: &Path, b: &Path) -> bool {
 impl PtyManager {
     pub fn new(shell: Shell, home: PathBuf, env: Vec<(String, String)>) -> Arc<Self> {
         Arc::new(PtyManager {
-            shell,
+            shell: Mutex::new(shell),
             home,
             env,
             next_id: AtomicU32::new(1),
             sessions: Mutex::new(HashMap::new()),
             spare: Mutex::new(None),
         })
+    }
+
+    /// Changes the default shell (settings). The spare shell, started with the old one, is dropped.
+    pub fn set_default_shell(&self, shell: Shell) {
+        *self.shell.lock().unwrap() = shell;
+        let spare = self.spare.lock().unwrap().take();
+        if let Some((_, id)) = spare {
+            self.close(id);
+        }
     }
 
     /// Start a spare shell in `dir` (home if `None`) in the background, replacing a spare waiting in
@@ -109,7 +119,8 @@ impl PtyManager {
         }
         let me = self.clone();
         thread::spawn(move || {
-            let Ok(id) = me.spawn(&dir, None) else {
+            let shell = me.shell.lock().unwrap().clone();
+            let Ok(id) = me.spawn(&dir, None, &shell) else {
                 return;
             };
             let replaced = me.spare.lock().unwrap().replace((dir, id));
@@ -119,18 +130,20 @@ impl PtyManager {
         });
     }
 
-    /// Open a tab's shell in `cwd` (home if `None`). Takes the spare shell if it waits in that folder
-    /// and there is no startup command. Refilling the spare is the caller's call (`prewarm`).
+    /// Open a tab's shell in `cwd` (home if `None`), with `shell` or the default one. Takes the spare
+    /// shell if it waits in that folder and the tab uses the default shell without startup command.
+    /// Refilling the spare is the caller's call (`prewarm`).
     pub fn open(
         self: &Arc<Self>,
         cwd: Option<PathBuf>,
         startup: Option<&str>,
+        shell: Option<Shell>,
         size: PtySize,
         on_data: OnData,
         on_exit: OnExit,
     ) -> Result<TabId> {
         let dir = cwd.unwrap_or_else(|| self.home.clone());
-        let spare = if startup.is_none() {
+        let spare = if startup.is_none() && shell.is_none() {
             let mut spare = self.spare.lock().unwrap();
             match spare.as_ref() {
                 Some((d, _)) if same_dir(d, &dir) => spare.take().map(|(_, id)| id),
@@ -141,7 +154,10 @@ impl PtyManager {
         };
         let id = match spare {
             Some(id) => id,
-            None => self.spawn(&dir, startup)?,
+            None => {
+                let shell = shell.unwrap_or_else(|| self.shell.lock().unwrap().clone());
+                self.spawn(&dir, startup, &shell)?
+            }
         };
         self.resize(id, size)?;
         self.attach(id, on_data, on_exit)?;
@@ -221,7 +237,7 @@ impl PtyManager {
         Ok(())
     }
 
-    fn spawn(&self, cwd: &Path, startup: Option<&str>) -> Result<TabId> {
+    fn spawn(&self, cwd: &Path, startup: Option<&str>, shell: &Shell) -> Result<TabId> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let pair = native_pty_system().openpty(PtySize {
             rows: 24,
@@ -229,7 +245,7 @@ impl PtyManager {
             ..Default::default()
         })?;
 
-        let mut cmd = self.shell.command(startup);
+        let mut cmd = shell.command(startup);
         cmd.cwd(cwd);
         cmd.env("RIFT_TAB_ID", id.to_string());
         for (k, v) in &self.env {
@@ -327,12 +343,22 @@ mod tests {
         cwd: Option<PathBuf>,
         startup: Option<&str>,
     ) -> (TabId, mpsc::Receiver<Vec<u8>>, mpsc::Receiver<TabId>) {
+        open_with(m, cwd, startup, None)
+    }
+
+    fn open_with(
+        m: &Arc<PtyManager>,
+        cwd: Option<PathBuf>,
+        startup: Option<&str>,
+        shell: Option<Shell>,
+    ) -> (TabId, mpsc::Receiver<Vec<u8>>, mpsc::Receiver<TabId>) {
         let (data_tx, data_rx) = mpsc::channel();
         let (exit_tx, exit_rx) = mpsc::channel();
         let id = m
             .open(
                 cwd,
                 startup,
+                shell,
                 size(),
                 Box::new(move |b| {
                     let _ = data_tx.send(b);
@@ -501,9 +527,58 @@ mod tests {
         m.close(spare);
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn cmd_reports_cwd_and_runs_startup() {
+        let dir = tempfile::tempdir().unwrap();
+        let m = test_manager();
+        let (id, out, _) = open(&m, Some(dir.path().into()), Some("echo rift-cmd-ok"));
+        // ConPTY forwards escape sequences (the prompt's OSC 9;9 ... ESC \) at once but paints text on its
+        // next frame: the startup output may come after the folder report.
+        let name = dir
+            .path()
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        let first = wait_for_output(&out, &format!("{name}\x1b\\"));
+        let all = if first.contains("rift-cmd-ok") {
+            first
+        } else {
+            first + &wait_for_output(&out, "rift-cmd-ok")
+        };
+        assert!(all.contains("rift-cmd-ok"), "startup did not run: {all}");
+        assert!(all.contains("\x1b]9;9;"), "no OSC 9;9 in: {all}");
+        m.close(id);
+    }
+
+    #[test]
+    fn a_tab_can_use_another_shell_than_the_default() {
+        let m = test_manager();
+        m.prewarm(None);
+        let spare = wait_for_spare(&m);
+        let other = crate::shell::profiles()
+            .into_iter()
+            .map(|p| p.shell)
+            .next()
+            .unwrap();
+        let (id, out, _) = open_with(&m, None, None, Some(other));
+        assert_ne!(
+            id, spare,
+            "another shell than the default never takes the spare"
+        );
+        run(&m, id, "echo other-shell-ok");
+        wait_for_output(&out, "other-shell-ok");
+        m.close(id);
+
+        // A new default drops the spare started with the old one.
+        m.set_default_shell(os::shell());
+        assert!(m.spare.lock().unwrap().is_none());
+        assert!(m.write(spare, b"x").is_err());
+    }
+
     /// bash/zsh integration: the user's config still loads, the startup command runs, and each prompt
     /// reports the cwd as OSC 7.
-    #[cfg(unix)]
     fn check_posix_integration(exe: &str) {
         let dir = tempfile::tempdir().unwrap();
         let m = PtyManager::new(
@@ -523,6 +598,16 @@ mod tests {
         let all = wait_for_output(&out, &name);
         assert!(all.contains("\x1b]7;file://"), "no OSC 7 in: {all}");
         m.close(id);
+    }
+
+    /// Git Bash: the same bash integration (rcfile path with forward slashes); OSC 7 reports /c/... paths.
+    #[cfg(windows)]
+    #[test]
+    fn git_bash_reports_cwd_and_runs_startup() {
+        match crate::shell::Shell::from_profile("gitbash") {
+            Some(crate::shell::Shell::Posix { exe }) => check_posix_integration(&exe),
+            _ => eprintln!("Git Bash not installed: skipped"),
+        }
     }
 
     #[cfg(unix)]

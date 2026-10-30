@@ -25,6 +25,8 @@ export type Settings = {
   theme: ThemeChoice;
   fontSize: number;
   fontFamily: string;
+  /** Default shell profile id; "" = the platform default (PowerShell 7 / $SHELL). */
+  shell: string;
   keys: Keymap;
 };
 
@@ -76,6 +78,7 @@ export const DEFAULTS: Settings = {
   fontSize: 14,
   // Windows, macOS, Linux defaults, then whatever monospace font the system has.
   fontFamily: "'Cascadia Mono', Consolas, Menlo, 'DejaVu Sans Mono', monospace",
+  shell: "",
   keys: DEFAULT_KEYS,
 };
 
@@ -91,6 +94,7 @@ export function mergeSettings(saved: unknown): Settings {
     theme: s.theme === "light" || s.theme === "system" || s.theme === "dark" ? s.theme : DEFAULTS.theme,
     fontSize: typeof s.fontSize === "number" && s.fontSize >= 8 && s.fontSize <= 32 ? s.fontSize : DEFAULTS.fontSize,
     fontFamily: typeof s.fontFamily === "string" && s.fontFamily.trim() ? s.fontFamily : DEFAULTS.fontFamily,
+    shell: typeof s.shell === "string" ? s.shell : DEFAULTS.shell,
     keys,
   };
 }
