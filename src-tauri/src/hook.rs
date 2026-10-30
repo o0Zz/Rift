@@ -57,28 +57,23 @@ pub fn send(pipe: &str, msg: &HookMessage) -> std::io::Result<()> {
     Err(std::io::ErrorKind::TimedOut.into())
 }
 
-/// Accepts hook connections forever, one message per connection.
-pub async fn serve(
-    name: String,
-    on_message: impl Fn(HookMessage) + Send + Sync + 'static,
-) -> std::io::Result<()> {
+/// Accepts hook connections forever, one message per connection, handled in arrival order
+/// (a `Stop` must never be applied before the `PostToolUse` that preceded it).
+pub async fn serve(name: String, on_message: impl Fn(HookMessage)) -> std::io::Result<()> {
     let path = pipe_path(&name);
-    let on_message = std::sync::Arc::new(on_message);
     let mut server = ServerOptions::new()
         .first_pipe_instance(true)
         .create(&path)?;
     loop {
         server.connect().await?;
+        // Re-arm first: the next hook can connect (and write into the pipe buffer) while we read.
         let mut conn = std::mem::replace(&mut server, ServerOptions::new().create(&path)?);
-        let on_message = on_message.clone();
-        tokio::spawn(async move {
-            let mut buf = Vec::new();
-            if conn.read_to_end(&mut buf).await.is_ok()
-                && let Ok(msg) = serde_json::from_slice(&buf)
-            {
-                on_message(msg);
-            }
-        });
+        let mut buf = Vec::new();
+        if conn.read_to_end(&mut buf).await.is_ok()
+            && let Ok(msg) = serde_json::from_slice(&buf)
+        {
+            on_message(msg);
+        }
     }
 }
 
@@ -120,8 +115,7 @@ mod tests {
             assert_eq!(m.payload["session_id"], "s");
             tabs.push(m.tab);
         }
-        tabs.sort();
-        assert_eq!(tabs, [7, 8]);
+        assert_eq!(tabs, [7, 8], "messages must arrive in send order");
     }
 
     #[test]

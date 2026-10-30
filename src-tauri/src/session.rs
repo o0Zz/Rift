@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::agents::{AgentEvent, AgentSession};
 use crate::pty::TabId;
@@ -15,12 +16,18 @@ pub struct SavedTab {
     pub cwd: Option<String>,
     pub title: String,
     pub agent: Option<AgentSession>,
+    /// Frontend-only tab data (name, color, group), stored as is.
+    #[serde(default)]
+    pub ui: Value,
 }
 
 #[derive(Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Saved {
     pub tabs: Vec<SavedTab>,
     pub active: usize,
+    /// Frontend-only sidebar data (groups), stored as is.
+    #[serde(default)]
+    pub layout: Value,
 }
 
 /// A tab as the frontend reports it. `pty` is unknown until its shell is open.
@@ -29,12 +36,15 @@ pub struct TabInfo {
     pub pty: Option<TabId>,
     pub cwd: Option<String>,
     pub title: String,
+    #[serde(default)]
+    pub ui: Value,
 }
 
 #[derive(Default)]
 struct Inner {
     tabs: Vec<TabInfo>,
     active: usize,
+    layout: Value,
     agents: HashMap<TabId, AgentSession>,
     /// No write before the frontend reported its tabs, so a half-restored state never hits disk.
     initialized: bool,
@@ -63,7 +73,7 @@ impl SessionStore {
             .unwrap_or_default()
     }
 
-    pub fn update_tabs(&self, tabs: Vec<TabInfo>, active: usize) {
+    pub fn update_tabs(&self, tabs: Vec<TabInfo>, active: usize, layout: Value) {
         let mut inner = self.inner.lock().unwrap();
         if inner.frozen {
             return;
@@ -73,6 +83,7 @@ impl SessionStore {
             .retain(|pty, _| tabs.iter().any(|t| t.pty == Some(*pty)));
         inner.tabs = tabs;
         inner.active = active;
+        inner.layout = layout;
         inner.initialized = true;
         self.write(&inner);
     }
@@ -108,6 +119,8 @@ impl SessionStore {
                     inner.agents.remove(&pty);
                 }
             }
+            // Status changes are live-only, nothing to restore.
+            _ => return,
         }
         self.write(&inner);
     }
@@ -128,9 +141,11 @@ impl SessionStore {
                     cwd: t.cwd.clone(),
                     title: t.title.clone(),
                     agent: t.pty.and_then(|p| inner.agents.get(&p).cloned()),
+                    ui: t.ui.clone(),
                 })
                 .collect(),
             active: inner.active,
+            layout: inner.layout.clone(),
         };
         // Write-then-rename so a crash mid-write never leaves a truncated file.
         let tmp = self.path.with_extension("json.tmp");
@@ -152,6 +167,7 @@ mod tests {
             pty: Some(pty),
             cwd: Some(cwd.into()),
             title: format!("t{pty}"),
+            ui: Value::Null,
         }
     }
 
@@ -173,7 +189,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("session.json");
         let store = SessionStore::new(path.clone());
-        store.update_tabs(vec![tab(1, r"C:\a"), tab(2, r"C:\b"), tab(3, r"C:\c")], 1);
+        store.update_tabs(
+            vec![tab(1, r"C:\a"), tab(2, r"C:\b"), tab(3, r"C:\c")],
+            1,
+            Value::Null,
+        );
         store.agent_event(1, "claude", &started("s1"));
         store.agent_event(3, "claude", &started("s3"));
 
@@ -188,7 +208,7 @@ mod tests {
     fn session_end_unbinds_only_the_matching_session() {
         let dir = tempfile::tempdir().unwrap();
         let store = SessionStore::new(dir.path().join("session.json"));
-        store.update_tabs(vec![tab(1, "a")], 0);
+        store.update_tabs(vec![tab(1, "a")], 0, Value::Null);
         // /clear: new session starts, then the old one ends.
         store.agent_event(1, "claude", &started("old"));
         store.agent_event(1, "claude", &started("new"));
@@ -215,7 +235,7 @@ mod tests {
     fn closing_the_window_keeps_sessions() {
         let dir = tempfile::tempdir().unwrap();
         let store = SessionStore::new(dir.path().join("session.json"));
-        store.update_tabs(vec![tab(1, "a"), tab(2, "b")], 0);
+        store.update_tabs(vec![tab(1, "a"), tab(2, "b")], 0, Value::Null);
         store.agent_event(1, "claude", &started("s1"));
         store.freeze();
         // Shells being killed: agent exits and tabs disappear.
@@ -226,7 +246,7 @@ mod tests {
                 session_id: "s1".into(),
             },
         );
-        store.update_tabs(vec![], 0);
+        store.update_tabs(vec![], 0, Value::Null);
         let saved = store.load();
         assert_eq!(saved.tabs.len(), 2);
         assert_eq!(saved.tabs[0].agent, agent("s1"));
@@ -244,17 +264,43 @@ mod tests {
                 session_id: "r".into(),
             },
         );
-        store.update_tabs(vec![tab(5, "a"), tab(6, "b")], 0);
+        store.update_tabs(vec![tab(5, "a"), tab(6, "b")], 0, Value::Null);
         assert_eq!(store.load().tabs[0].agent, agent("r"));
-        store.update_tabs(vec![tab(6, "b")], 0);
+        store.update_tabs(vec![tab(6, "b")], 0, Value::Null);
         assert_eq!(
             store.load().tabs,
             [SavedTab {
                 cwd: Some("b".into()),
                 title: "t6".into(),
-                agent: None
+                agent: None,
+                ui: Value::Null,
             }]
         );
+    }
+
+    #[test]
+    fn keeps_frontend_ui_data_as_is() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SessionStore::new(dir.path().join("session.json"));
+        let mut t = tab(1, "a");
+        t.ui = serde_json::json!({ "name": "api", "color": "#e5534b", "group": "g1" });
+        let layout = serde_json::json!({ "groups": [{ "id": "g1", "name": "Backend", "collapsed": false }] });
+        store.update_tabs(vec![t], 0, layout.clone());
+        let saved = store.load();
+        assert_eq!(saved.tabs[0].ui["color"], "#e5534b");
+        assert_eq!(saved.layout, layout);
+    }
+
+    #[test]
+    fn status_events_do_not_rewrite_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("session.json");
+        let store = SessionStore::new(path.clone());
+        store.update_tabs(vec![tab(1, "a")], 0, Value::Null);
+        std::fs::remove_file(&path).unwrap();
+        store.agent_event(1, "claude", &AgentEvent::Working);
+        store.agent_event(1, "claude", &AgentEvent::Done);
+        assert!(!path.exists());
     }
 
     #[test]

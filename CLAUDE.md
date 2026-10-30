@@ -49,6 +49,17 @@ src/                 Frontend
   tabs/ ✅  terminal/ ✅  panels/filetree/  panels/git/  settings/
 ```
 
+Frontend tabs: `tabs/layout.ts` (pure logic: order, moves, titles, notify rule — unit-tested), `tabs/Tab.ts` (tab state as Solid signals behind getters), `tabs/Sidebar.tsx` (UI only), `App.tsx` (wiring: restore/save, keys, agent status).
+
+### Sidebar (decisions already made — keep them)
+- Vertical tabs on the left (240px). Named groups (collapsible, colored, drag to reorder); tabs have an optional color (bar; falls back to the group color) and an optional user name. Right-click menus; double-click renames.
+- One global tab array + `group` per tab; the **visual order** (`visualOrder`: groups in order, then ungrouped) drives the sidebar and Ctrl+PgUp/PgDn. Activating a tab in a collapsed group expands it. New tabs open after the active tab, in its group.
+- Title: user name > agent's terminal title (Claude names the conversation) > folder name; a title ending in `.exe` (pwsh sets its own path) is ignored.
+- Name/color/group are saved as opaque `ui` per tab and groups as `layout`: the backend never interprets them.
+- `dragDropEnabled: false` in tauri.conf.json, otherwise Tauri swallows HTML5 drag and drop on Windows.
+- Window focus comes from Tauri `onFocusChanged`: `document.hasFocus()` is unreliable in WebView2.
+- Status badge (Warp-style, bottom-right of the icon): working = spinning magenta, done = green, blocked = yellow square; unread blue dot + Windows toast when done/blocked and the tab is not in front (not active or window unfocused).
+
 Frontend ↔ backend via Tauri commands (request/response) and events (agent status, fs/git changes).
 
 ### Terminal pipeline (decisions already made — keep them)
@@ -77,10 +88,12 @@ UI and session code never mention "claude" directly; they talk to `AgentHarness`
 - A restored tab binds its session at `pty_open`, before the agent reports anything.
 - Resume only accepts UUID-shaped ids, so a tampered session file cannot inject shell commands.
 - `RIFT_BENCH` uses a temp session file so the bench never touches the user's tabs.
+- `session_restore` first closes every tab shell (`close_all_tabs`, spare kept): a freshly loaded page owns none, and dev reloads would otherwise leak shells (and resumed agents).
+- The hook pipe server handles connections **sequentially**: status depends on order (a `Stop` applied before the preceding `PostToolUse` would leave "working" stuck).
 
 ### Claude adapter
 
-- **Hooks**: registered in `~/.claude/settings.json` in **exec form** (`"command": "<path>\rift.exe", "args": ["hook", "claude"]`); shell form would run through Git Bash on Windows. Installed only when the user clicks "Enable" in the app banner. Other settings are preserved (key order too), a `.bak` is written, an older Rift entry (other exe path) is replaced. Today: `SessionStart`/`SessionEnd`. Next: `UserPromptSubmit` → Working, `Stop` → Idle, `Notification` → NeedsInput.
+- **Hooks**: registered in `~/.claude/settings.json` in **exec form** (`"command": "<path>\rift.exe", "args": ["hook", "claude"]`); shell form would run through Git Bash on Windows. Installed only when the user clicks "Enable" in the app banner. Other settings are preserved (key order too), a `.bak` is written, an older Rift entry (other exe path) is replaced. Events: `SessionStart` → idle (+ bind), `SessionEnd` → none (+ unbind), `UserPromptSubmit`/`PostToolUse` → working (PostToolUse also clears "blocked" once a permission is granted), `Stop` → done, `Notification` → blocked (except `idle_prompt`, the 60 s reminder). A hook call costs ~25 ms (process start). Known gap: interrupting Claude (Esc) fires no hook, so the tab stays "working" until the next prompt.
 - **Resume per tab**: on reopen each tab starts in its cwd and runs `claude --resume <its own session_id>`. Also works when the user types `claude` by hand, since the env comes from the tab's shell.
 - **Commit message**: `one_shot` runs `claude -p` with the staged diff on stdin and a fixed prompt. Uses the user's existing Claude login, no API key in Rift.
 - Never edit the user's `~/.claude/settings.json` without their click. Uninstall (removing Rift's entries) is not built yet.
@@ -118,7 +131,9 @@ Blocks (actions, find, filter, sharing, sticky header), input editor (syntax hig
 - Commits: one short subject line, no sign-off trailers.
 
 ## Status
-Done: tabs + PTY + spare shell + shortcuts + copy/paste + tab-switch bench + session restore (tabs, cwd, per-tab Claude resume). Next: Claude status icons + notifications, git panel, file tree, Explorer menu.
+Done: tabs + PTY + spare shell + shortcuts + copy/paste + tab-switch bench + session restore (tabs, cwd, per-tab Claude resume) + left sidebar with groups/colors/rename/drag + agent status badges + notifications. Next: git panel (right), file tree (left, alongside the tabs sidebar), Explorer menu.
+
+Dev loop: keep `npm run tauri dev` running (the user watches changes live). Run tests with `CARGO_TARGET_DIR=src-tauri/target/test` so they don't fight the running app over `target/debug/rift.exe`.
 
 ## Commands
 ```

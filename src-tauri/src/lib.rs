@@ -5,7 +5,7 @@ mod session;
 
 use std::sync::Arc;
 
-use agents::{AgentSession, Harnesses, claude::Claude};
+use agents::{AgentEvent, AgentSession, Harnesses, claude::Claude};
 use portable_pty::PtySize;
 use pty::{PtyManager, Shell, TabId};
 use serde::Serialize;
@@ -79,15 +79,30 @@ fn pty_close(ptys: Ptys, id: TabId) {
     ptys.close(id);
 }
 
-/// Tabs saved by the previous run.
+/// Tabs saved by the previous run. Called once per page load: shells left over from a previous
+/// page (dev reload, WebView reload) have no tab anymore and are closed.
 #[tauri::command]
-fn session_restore(session: State<SessionStore>) -> Saved {
+fn session_restore(session: State<SessionStore>, ptys: Ptys) -> Saved {
+    ptys.close_all_tabs();
     session.load()
 }
 
 #[tauri::command]
-fn session_update(session: State<SessionStore>, tabs: Vec<TabInfo>, active: usize) {
-    session.update_tabs(tabs, active);
+fn session_update(
+    session: State<SessionStore>,
+    tabs: Vec<TabInfo>,
+    active: usize,
+    layout: serde_json::Value,
+) {
+    session.update_tabs(tabs, active, layout);
+}
+
+/// Payload of the `agent-status` event.
+#[derive(Clone, Serialize)]
+struct AgentStatus {
+    pty: TabId,
+    status: Option<&'static str>,
+    message: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -140,6 +155,7 @@ fn bench_done(app: AppHandle, report: String, ok: bool) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let home = app.path().home_dir()?;
             // Per-process pipe: hooks reach the Rift instance that owns their tab.
@@ -169,6 +185,16 @@ pub fn run() {
                 handle
                     .state::<SessionStore>()
                     .agent_event(msg.tab, &msg.harness, &event);
+                let message = match &event {
+                    AgentEvent::NeedsInput { message } => Some(message.clone()),
+                    _ => None,
+                };
+                let status = AgentStatus {
+                    pty: msg.tab,
+                    status: event.status(),
+                    message,
+                };
+                let _ = handle.emit("agent-status", status);
             }));
 
             let ptys = PtyManager::new(

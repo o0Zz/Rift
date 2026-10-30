@@ -11,8 +11,32 @@ use serde_json::Value;
 /// What an agent reported through its hook.
 #[derive(Debug, Clone, PartialEq)]
 pub enum AgentEvent {
-    SessionStarted { session_id: String },
-    SessionEnded { session_id: String },
+    SessionStarted {
+        session_id: String,
+    },
+    SessionEnded {
+        session_id: String,
+    },
+    Working,
+    /// Finished its turn, waiting for the next prompt.
+    Done,
+    /// Blocked on the user (e.g. a permission prompt).
+    NeedsInput {
+        message: String,
+    },
+}
+
+impl AgentEvent {
+    /// Status shown on the tab; `None` = no agent running.
+    pub fn status(&self) -> Option<&'static str> {
+        match self {
+            AgentEvent::SessionStarted { .. } => Some("idle"),
+            AgentEvent::SessionEnded { .. } => None,
+            AgentEvent::Working => Some("working"),
+            AgentEvent::Done => Some("done"),
+            AgentEvent::NeedsInput { .. } => Some("blocked"),
+        }
+    }
 }
 
 /// An agent session bound to a tab, enough to resume it later.

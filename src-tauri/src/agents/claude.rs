@@ -7,7 +7,15 @@ use serde_json::{Map, Value, json};
 
 use super::{AgentEvent, AgentHarness};
 
-const EVENTS: [&str; 2] = ["SessionStart", "SessionEnd"];
+// PostToolUse flips "blocked" back to "working" once a permission is granted and the tool ran.
+const EVENTS: [&str; 6] = [
+    "SessionStart",
+    "SessionEnd",
+    "UserPromptSubmit",
+    "PostToolUse",
+    "Stop",
+    "Notification",
+];
 
 pub struct Claude {
     /// Usually ~/.claude/settings.json; a temp file in tests.
@@ -52,6 +60,14 @@ impl AgentHarness for Claude {
         match payload["hook_event_name"].as_str()? {
             "SessionStart" => Some(AgentEvent::SessionStarted { session_id }),
             "SessionEnd" => Some(AgentEvent::SessionEnded { session_id }),
+            "UserPromptSubmit" | "PostToolUse" => Some(AgentEvent::Working),
+            "Stop" => Some(AgentEvent::Done),
+            // idle_prompt is the "still waiting for you" reminder after a finished turn: not a block.
+            "Notification" if payload["notification_type"] != "idle_prompt" => {
+                Some(AgentEvent::NeedsInput {
+                    message: payload["message"].as_str().unwrap_or_default().into(),
+                })
+            }
             _ => None,
         }
     }
@@ -157,6 +173,63 @@ mod tests {
             })
         );
         assert_eq!(c.parse_hook(&other), None);
+    }
+
+    #[test]
+    fn parses_status_hooks() {
+        let c = Claude {
+            settings: PathBuf::new(),
+        };
+        let ev = |name: &str, extra: Value| {
+            let mut p = json!({ "hook_event_name": name, "session_id": "abc" });
+            p.as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            c.parse_hook(&p)
+        };
+        assert_eq!(
+            ev("UserPromptSubmit", json!({ "prompt": "hi" })),
+            Some(AgentEvent::Working)
+        );
+        assert_eq!(
+            ev("PostToolUse", json!({ "tool_name": "Bash" })),
+            Some(AgentEvent::Working)
+        );
+        assert_eq!(ev("Stop", json!({})), Some(AgentEvent::Done));
+        assert_eq!(
+            ev(
+                "Notification",
+                json!({ "notification_type": "permission_prompt", "message": "Claude needs your permission" })
+            ),
+            Some(AgentEvent::NeedsInput {
+                message: "Claude needs your permission".into()
+            })
+        );
+        assert_eq!(
+            ev(
+                "Notification",
+                json!({ "notification_type": "idle_prompt" })
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn older_install_without_status_hooks_is_not_complete() {
+        let dir = tempfile::tempdir().unwrap();
+        let c = claude(&dir);
+        let only_session: Value = json!({ "hooks": {
+            "SessionStart": [{ "hooks": [handler(Path::new(EXE))] }],
+            "SessionEnd": [{ "hooks": [handler(Path::new(EXE))] }],
+        }});
+        std::fs::write(&c.settings, only_session.to_string()).unwrap();
+        assert!(!c.hooks_installed(Path::new(EXE)));
+        c.install_hooks(Path::new(EXE)).unwrap();
+        assert!(c.hooks_installed(Path::new(EXE)));
+        assert_eq!(
+            read(&c)["hooks"]["SessionStart"],
+            json!([{ "hooks": [handler(Path::new(EXE))] }])
+        );
     }
 
     #[test]

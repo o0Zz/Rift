@@ -1,0 +1,65 @@
+// Pure tab-sidebar logic (order, moves, agent status). No DOM, no Solid: unit-tested in layout.test.ts.
+
+export type Group = { id: string; name: string; color?: string; collapsed: boolean };
+
+export type Status = "idle" | "working" | "done" | "blocked";
+
+export const COLORS = ["#e5534b", "#f0883e", "#d4a72c", "#57ab5a", "#39c5cf", "#539bf5", "#b083f0", "#e275ad"];
+
+type Placed = { group?: string };
+
+/** Sidebar order, also used by Ctrl+PgUp/PgDn: each group's tabs (groups in order), then ungrouped tabs. */
+export function visualOrder<T extends Placed>(tabs: T[], groups: Group[]): T[] {
+  const known = new Set(groups.map((g) => g.id));
+  return [
+    ...groups.flatMap((g) => tabs.filter((t) => t.group === g.id)),
+    ...tabs.filter((t) => !t.group || !known.has(t.group)),
+  ];
+}
+
+export type Drop<T> = { before: T } | { group: string | undefined };
+
+/**
+ * Moves `tab` before another tab (joining that tab's group) or to the end of a group
+ * (`undefined` = ungrouped). Returns the new tab order and the moved tab's new group.
+ */
+export function moveTab<T extends Placed>(tabs: T[], tab: T, drop: Drop<T>): { tabs: T[]; group: string | undefined } {
+  const rest = tabs.filter((t) => t !== tab);
+  if ("before" in drop) {
+    if (drop.before === tab) return { tabs, group: tab.group };
+    rest.splice(rest.indexOf(drop.before), 0, tab);
+    return { tabs: rest, group: drop.before.group };
+  }
+  return { tabs: [...rest, tab], group: drop.group };
+}
+
+/** Moves group `id` before group `before` (or to the end). */
+export function moveGroup(groups: Group[], id: string, before?: string): Group[] {
+  const moving = groups.find((g) => g.id === id);
+  if (!moving || id === before) return groups;
+  const rest = groups.filter((g) => g !== moving);
+  const at = before ? rest.findIndex((g) => g.id === before) : -1;
+  rest.splice(at < 0 ? rest.length : at, 0, moving);
+  return rest;
+}
+
+/** Title shown in the sidebar: the user's name, else the agent's title (Claude names the conversation), else the folder. */
+export function displayTitle(t: { name?: string; title: string; cwd?: string; status?: Status }): string {
+  if (t.name) return t.name;
+  // The shell sets its own exe path as title: never useful.
+  const title = /\.exe$/i.test(t.title) ? "" : t.title;
+  if (t.status && title) return title;
+  return t.cwd ? folderName(t.cwd) : title || "shell";
+}
+
+export function folderName(path: string): string {
+  return path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || path;
+}
+
+/**
+ * Whether a status change deserves attention (desktop notification + unread dot):
+ * only when the user is not already looking at that tab.
+ */
+export function shouldNotify(status: Status | undefined, tabVisible: boolean): boolean {
+  return (status === "done" || status === "blocked") && !tabVisible;
+}

@@ -199,6 +199,22 @@ impl PtyManager {
         }
     }
 
+    /// Closes every tab's shell (not the spare). For a freshly loaded frontend, which owns none of them.
+    pub fn close_all_tabs(&self) {
+        let spare = *self.spare.lock().unwrap();
+        let ids: Vec<TabId> = self
+            .sessions
+            .lock()
+            .unwrap()
+            .keys()
+            .copied()
+            .filter(|id| Some(*id) != spare)
+            .collect();
+        for id in ids {
+            self.close(id);
+        }
+    }
+
     fn attach(&self, id: TabId, mut on_data: OnData, on_exit: OnExit) -> Result<()> {
         let sink = self
             .sessions
@@ -414,6 +430,25 @@ mod tests {
         wait_for_output(&out, "rift-pwsh-ok");
         wait_for_output(&out, &format!("\x1b]9;9;\"{cwd}\""));
         m.close(id);
+    }
+
+    #[test]
+    fn close_all_tabs_keeps_the_spare() {
+        let m = cmd_manager();
+        let (a, _, _) = open(&m, Some(std::env::temp_dir()), None);
+        let (b, _, _) = open(&m, Some(std::env::temp_dir()), None);
+        let spare = wait_for_spare(&m);
+        m.close_all_tabs();
+        assert!(m.write(a, b"x").is_err());
+        assert!(m.write(b, b"x").is_err());
+        assert!(
+            m.write(
+                spare, b"rem
+"
+            )
+            .is_ok()
+        );
+        m.close(spare);
     }
 
     #[test]
