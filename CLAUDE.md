@@ -26,7 +26,7 @@ How we hold the budget:
 - **Tauri 2** (Rust backend, system WebView2 frontend). No Electron.
 - **Rust backend**: PTY via `portable-pty` (ConPTY), git via the `git` CLI (simple, matches user's git config/hooks), file watching via `notify`, state in `%APPDATA%\dev.rift.terminal\session.json` (Tauri app data dir).
 - **Frontend**: TypeScript + Solid — no virtual-DOM-heavy framework. Terminal: **xterm.js, DOM renderer** (WebGL measured slower for tab switching, see below).
-- **Default shell** (`shell.rs`): Windows: PowerShell 7 (`pwsh`), else Windows PowerShell. Linux/macOS: `$SHELL` (fallback zsh on macOS, bash on Linux). Choosing another shell (cmd, Git Bash, WSL, fish...) is not built yet.
+- **Default shell** (`shell.rs`): Windows: PowerShell 7 (`pwsh`), else Windows PowerShell. Linux/macOS: `$SHELL` (fallback zsh on macOS, bash on Linux). Other shells are profiles (`shell::profiles`, only those installed): Windows: PowerShell 7, Windows PowerShell, Command Prompt, Git Bash, WSL; Linux/macOS: the login shell + `/etc/shells`. Settings → Terminal → Default shell; right-click + opens a tab with another one; a new tab inherits the active tab's shell (`ui.shell`). The spare shell is only for the default shell.
 - Packaging: MSI/NSIS via Tauri bundler.
 
 ## Architecture
@@ -36,6 +36,7 @@ Target layout (✅ = exists). Add a module only when its feature is built.
 ```
 src-tauri/src/       Rust
   pty.rs ✅          spawn, resize, read/write, spare shell (Tauri-free, tested against real shells)
+  scrollback.rs ✅   per-tab terminal history (`<id>.ans`) saved on close, shown again on restore
   shell.rs ✅        per-OS shell + integration (cwd reporting, startup command), user rc files untouched
   lib.rs ✅          Tauri commands + setup
   main.rs ✅         `rift.exe hook <harness>` subcommand, else the app
@@ -49,30 +50,36 @@ src-tauri/src/       Rust
   notify/            Windows toast notifications
   shell_integration/ Explorer context menu (un)registration
 src/                 Frontend
-  tabs/ ✅  terminal/ ✅ (+ themes.ts)  panels/ ✅ (Explorer, GitPanel, diff.ts, fileIcons.ts)  ui/ ✅ (Menu, Resizer)  settings/ ✅ (settings.ts pure + tested, SettingsPage.tsx)
+  tabs/ ✅  terminal/ ✅ (+ themes.ts)  panels/ ✅ (Explorer, GitPanel, diff.ts, fileIcons.ts)  ui/ ✅ (Menu, Resizer, Icon, PromptDialog)  settings/ ✅ (settings.ts pure + tested, SettingsPage.tsx)
 ```
 
-Frontend tabs: `tabs/layout.ts` (pure logic: order, moves, titles, notify rule — unit-tested), `tabs/Tab.ts` (tab state as Solid signals behind getters), `tabs/Sidebar.tsx` (UI only), `App.tsx` (wiring: restore/save, keys, agent status).
+Frontend tabs: `tabs/layout.ts` (pure logic: order, moves, titles, notify rule — unit-tested), `tabs/Tab.ts` (tab state as Solid signals behind getters), `tabs/Sidebar.tsx` (UI only), `tabs/GitStats.tsx`, `App.tsx` (wiring: restore/save, keys, agent status).
 
 ### Terminal conveniences and agent attention (decisions already made — keep them)
+- Icons: `ui/Icon.tsx` (stroke SVG, `currentColor`), never Unicode glyphs (they render differently per OS font).
+- Menus (`ui/Menu.tsx`) work from the keyboard: ↑/↓, Enter, Esc. F2 renames the active tab. Focus goes back to the terminal after a menu, a rename or a tab click.
+- Text input (worktree branch name...) uses `ui/PromptDialog.tsx`, never `window.prompt` (blocked in WebView2).
+- Image paste into Claude: Claude reads the clipboard itself on its image key (Alt+V on Windows, which xterm passes as `ESC v`; Ctrl+V on Linux/macOS). A paste without text sends the Ctrl+V byte (0x16); on macOS Ctrl+V is not paste (Cmd+V is).
 - Find: Ctrl+Shift+F (Ctrl+F is the shell's), `FindBar` over the terminal, xterm search addon. Links: Ctrl+click only (web-links addon → `open_url`, http(s) only). Zoom: Ctrl+= / Ctrl+- / Ctrl+0 change the font size setting.
 - Shift+Enter in a tab running an agent sends ESC+CR (Claude Code's "new line"); in a plain shell it stays Enter.
 - Esc in a tab whose agent is working/blocked sets it back to idle (`statusAfterEscape`): agents fire no hook on interrupt.
 - Drag a file/folder from the files panel onto a terminal: its path is typed (`quotePath`). Drops from the OS file manager are not supported: they need Tauri's native drag-drop, which breaks HTML5 drag and drop on Windows (tabs).
 - Closing with agents working/blocked asks first (JS `onCloseRequested`, then a pending update installs). The session freezes on `WindowEvent::Destroyed`, not on close request, since the close can be cancelled.
+- A "done" badge the user has seen (tab active, window focused) fades back to the plain agent icon after 3 s (`fadeDoneWhenSeen`).
 - Attention: `needsAttention` = blocked, or done and unread. Ctrl+Shift+U goes to the next one (blocked first). Sidebar filter All / Needs me / Working (shown once an agent runs). Window title `Rift <version> — N waiting`. Taskbar flashes (`requestUserAttention`) when a tab needs the user while Rift is in the background.
 - "New Claude in a worktree…" (tab menu, tabs in a repo): `git_worktree_add` creates the branch from HEAD (or checks out an existing one) in `<repo>.worktrees/<branch>` next to the repo, then a tab there starts the agent (`pty_open` `start_agent` → `AgentHarness::start_command`).
 
 ### Settings and themes (decisions already made — keep them)
 - Settings page: overlay opened by ⚙ (tabs header) or Ctrl+,; Esc closes. While it is open, Rift's shortcuts are off so keys can be recorded.
 - `settings.ts` is the single source: `ACTIONS`, `DEFAULT_KEYS`, `mergeSettings` (any saved shape → valid settings, defaults for the rest), `comboOf` ("Ctrl+Shift+T"), `actionFor`, `bind` (moves a combo taken from another action). App dispatches shortcuts only through `actionFor(e, settings().keys)`.
-- A shortcut must use Ctrl or Alt (`isValidShortcut`): otherwise it would steal typing from the terminal.
+- A shortcut must use Ctrl, Alt or Cmd, or be F1-F12 (`isValidShortcut`): otherwise it would steal typing from the terminal.
+- macOS: default shortcuts use Cmd (`defaultKeys(mac)`), so Ctrl+letters stay with the shell like in Terminal.app; `comboOf` names the key "Cmd".
 - Themes: every UI color is a CSS variable (`:root` = dark, `:root[data-theme="light"]` overrides); add new colors as variables, never as literals. Terminal palettes in `terminal/themes.ts` (light darkens ANSI yellow/cyan/white for contrast). "System" follows `prefers-color-scheme` live.
 - Theme/font changes apply live to every terminal via `TermView.setLook`; the effect tracks only theme + font size + font family (editing a shortcut or adding a tab must not re-render all terminals). A font change re-wraps like a resize: visible tab now, hidden ones in idle time.
 - Settings load before the tabs restore, so restored terminals start with the right look. The bench uses a temp settings file (defaults).
 
 ### Side panels (decisions already made — keep them)
-- Files panel (left, Ctrl+Shift+E) and git panel (right, Ctrl+Shift+G), toggled from the sidebar header or their × button; open/closed state saved in `layout.panels`.
+- Files panel (left, Ctrl+Shift+E) and git panel (right, Ctrl+Shift+G), toggled from the sidebar header (files), the top bar's git button (git) or their × button; open/closed state saved in `layout.panels`.
 - Tabs sidebar, files and git panels are resizable (`ui/Resizer.tsx`, widths saved in `layout.widths`). While dragging, the terminal is **not** refit (re-wrap = 100+ ms per drag frame); it refits on release, then hidden tabs follow in idle time.
 - Commit (git panel): checkboxes (all checked after each load), message, Ctrl+Enter. `git::commit` commits exactly the checked files: `git add` only for untracked ones, then `git commit --only` (keeps other staged changes staged; handles deletions and both sides of a rename via `Change.orig`). Pathspecs go NUL-separated on stdin with `--literal-pathspecs` (no length limit, `[id].tsx` is not a glob).
 - ✨ Generate: `commit_message` sends the checked files' diff (capped 60 KB) to the first harness's `one_shot`. Claude: `claude -p --model haiku --tools "" --no-session-persistence` (~10 s, mostly claude startup). The prompt follows the user's commit convention (one subject line, optional body, no co-author line).
@@ -80,6 +87,8 @@ Frontend tabs: `tabs/layout.ts` (pure logic: order, moves, titles, notify rule �
 - Panels follow `panelTab`, which trails the active tab by 150 ms: holding Ctrl+PgDn never loads every tab it passes. All panel commands are `async` (off the main thread); stale answers are dropped.
 - Explorer root = the tab's repo root, else its cwd. Folders are listed when first expanded and cached until ⟳.
 - Each tab knows its repo root + branch: `git_head` reads `.git/HEAD` (worktrees too) at every prompt (OSC 9;9), so `git checkout` updates the branch shown under the tab.
+- Top bar above the terminal (Warp-style): active tab title, and on the right the git button (branch + `+added −deleted ↑ahead ↓behind`) that toggles the git panel. It follows the active tab one frame after the switch (`barTab` in rAF), and `.topbar`/`.sidebar` have `contain: layout paint style`, `.terms` `contain: strict`: without them the bar added ~4 ms per switch (layout of the whole window) and failed the bench.
+- Git stats per tab (`git_stats`: `diff --shortstat HEAD` + `rev-list --left-right --count @{u}...HEAD` in parallel, ~80 ms): refreshed 1.5 s after a prompt or an agent status change (coalesced per tab) and after a commit, **never on a tab switch**. Shown under the tab and in the top bar.
 - Width changes (panel toggle, window resize) make xterm re-wrap 10k lines of scrollback per terminal (~100-150 ms each). Hidden tabs are therefore resized in idle time, nearest first (`resizeHiddenTabs`), not on their next switch. Measured: without it, cycling tabs after opening a panel was ~149 ms p95.
 
 ### Sidebar (decisions already made — keep them)
@@ -122,6 +131,7 @@ UI and session code never mention "claude" directly; they talk to `AgentHarness`
 - A restored tab binds its session at `pty_open`, before the agent reports anything.
 - Resume only accepts UUID-shaped ids, so a tampered session file cannot inject shell commands.
 - `RIFT_BENCH` uses a temp session file so the bench never touches the user's tabs.
+- Scrollback: on close (and before an update restart) each **shell** tab's last 2000 lines are serialized with colors (`SerializeAddon`) to `scrollback/<snap>.ans` next to session.json (`snap` = UUID in `ui`). On restore they are written before the shell starts, followed by a dim "── restored ──" line. Agent tabs are skipped: `--resume` redisplays the conversation. Files of tabs that no longer exist are pruned after restore. Ids are validated (no path escape).
 - `session_restore` first closes every tab shell (`close_all_tabs`, spare kept): a freshly loaded page owns none, and dev reloads would otherwise leak shells (and resumed agents).
 - The hook pipe server handles connections **sequentially**: status depends on order (a `Stop` applied before the preceding `PostToolUse` would leave "working" stuck).
 
@@ -173,12 +183,12 @@ Blocks (actions, find, filter, sharing, sticky header), input editor (syntax hig
 ## Conventions
 - Rust: `cargo fmt`, `cargo clippy -- -D warnings`. Frontend: `tsc --noEmit`, eslint.
 - Every feature ships with tests in the same change. Prefer end-to-end: real PTY spawn, real git repo in a temp dir, real hook JSON through the named pipe.
-- Perf budget has a benchmark (`src/bench.ts`: 20 tabs x 10k lines; cycle, toggle, and cycle with both panels open while tabs alternate between two git repos — `scripts/bench.mjs` creates the second repo). Run it after any change to tabs, terminal, panels or rendering; it exits non-zero over budget.
+- Perf budget has a benchmark (`src/bench.ts`: 20 tabs x 10k lines; cycle, toggle, and cycle with both panels open while tabs alternate between two git repos — `scripts/bench.mjs` creates the second repo), then heavy output: an 8.7 MB colored file printed in a fresh tab, frame gaps p95 < 100 ms (window stays responsive). Throughput is ConPTY-bound (~0.3 MB/s in the narrow bench tab, ~1.5 MB/s at full width): reported, not budgeted. Run it after any change to tabs, terminal, panels or rendering; it exits non-zero over budget.
 - Keep it small: no abstraction until a second user of it exists — except `AgentHarness`, which is a stated requirement.
 - Commits: **Conventional Commits** (`feat(scope): description`, types feat/fix/docs/style/refactor/perf/test/build/ci/chore), one short subject line, optional brief body, no sign-off trailers. The git panel's ✨ Generate (`COMMIT_PROMPT` in lib.rs) asks Claude for the same format.
 
 ## Status
-Done: tabs + PTY + spare shell + shortcuts + copy/paste + tab-switch bench + session restore (tabs, cwd, per-tab Claude resume) + left sidebar with groups/colors/rename/drag + agent status badges + notifications + files panel + git panel (branch, changes, diff, commit selected files, AI commit message) + resizable/closable panels + settings page (theme dark/light/system, font, shortcuts) + app icon + Explorer "Open in Rift" (new tab, single instance). Next: default shell choice (pwsh/cmd/Git Bash/WSL), multi-window, session resume polish.
+Done: tabs + PTY + spare shell + shortcuts + copy/paste + tab-switch bench + session restore (tabs, cwd, per-tab Claude resume) + left sidebar with groups/colors/rename/drag + agent status badges + notifications + files panel + git panel (branch, changes, diff, commit selected files, AI commit message) + resizable/closable panels + settings page (theme dark/light/system, font, shortcuts) + app icon + Explorer "Open in Rift" (new tab, single instance) + shell profiles + top bar git button with per-tab git stats + scrollback restore + keyboard menus/F2 + Cmd shortcuts on macOS + heavy-output bench. Next: multi-window, split panes, command palette.
 
 Dev loop: keep `npm run tauri dev` running (the user watches changes live). Run tests with `CARGO_TARGET_DIR=src-tauri/target/test` so they don't fight the running app over `target/debug/rift.exe`.
 
@@ -192,5 +202,5 @@ npm run typecheck                 # tsc --noEmit
 npx tauri icon src-tauri/icons/rift.svg   # regenerate app icons from the SVG source; then delete
                                   # icons/android, icons/ios, 64x64.png and touch tauri.conf.json
                                   # (the build script only re-embeds icons when that file changes)
-npm run bench                     # tab-switch benchmark in the real WebView (keep the window visible; fails over budget)
+npm run bench                     # tab-switch + heavy-output benchmark in the real WebView (keep the window visible; fails over budget)
 ```

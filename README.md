@@ -29,7 +29,8 @@ that, and **speed beats features**: every feature has to keep switching tabs and
 | New tab | **instant**: a shell is already waiting in the current folder |
 | Windows installer / app | **2.4 MB** / 7 MB |
 
-The tab-switch benchmark ships with the code (`npm run bench`) and fails when a change goes over budget.
+The benchmark ships with the code (`npm run bench`: tab switching, and 8.7 MB of output printed without
+freezing the window) and fails when a change goes over budget.
 
 ## Features
 
@@ -43,25 +44,30 @@ The tab-switch benchmark ships with the code (`npm run bench`) and fails when a 
   the repo and starts Claude there, in one click.
 - **Each tab resumes its own session.** Close Rift, reopen it: every tab comes back in its folder, and each
   Claude session resumes where it was. Not the last one: the one that ran in that tab.
+- **Paste screenshots into Claude**: `Alt+V` on Windows, `Ctrl+V` on macOS and Linux.
 - **AI commit messages**: select files, click ✨ Generate, get a Conventional Commit written from the diff.
 - Built on an agent abstraction: Codex, Gemini CLI or OpenCode can plug in next to Claude.
 
 ### Tabs that stay out of your way
 - **Vertical tabs** with **named groups**: color them, collapse them, drag tabs between them.
-- The tab shows what matters: Claude's conversation title, the **git branch**, the folder.
+- The tab shows what matters: Claude's conversation title, the **git branch** with its changes
+  (`+12 −3`, commits ahead/behind), the folder.
 - New tabs open **in the current tab's folder**, in its group.
-- Instant switching with `Ctrl+PgUp` / `Ctrl+PgDn`.
+- Instant switching with `Ctrl+PgUp` / `Ctrl+PgDn`. `F2` renames, menus work from the keyboard.
+- **Your scrollback comes back** after a restart, colors included.
 - Find in the scrollback, `Ctrl`+click links, zoom, `Shift+Enter` for a new line in Claude, drag a file from
   the files panel to type its path.
 
 ### Everything around the terminal
 - **Files panel** with file-type icons, opened only when you want it.
-- **Git panel**: branch, changed files, colored diff, commit exactly the files you check.
+- **Git panel**, one click away on the top right: branch, changed files, colored diff, commit exactly the files you check.
 - Panels open and close with one shortcut and resize by dragging their edge.
 - **Settings**: dark, light or system theme, terminal font, and every shortcut can be rebound.
 - **Open in Rift** from the Windows File Explorer right-click menu.
 - **Auto-update** from GitHub Releases: downloads in the background, installs when you close Rift.
-- PowerShell on Windows; your own `$SHELL` (bash, zsh) on macOS and Linux, with your config untouched.
+- **Your shells**: PowerShell, Command Prompt, Git Bash or WSL on Windows; your `$SHELL` and the others
+  installed on macOS and Linux. Pick the default in Settings, or right-click `+` for a one-off. Your config
+  stays untouched.
 
 <div align="center">
 <img src="docs/screenshots/rift-light.png" alt="Rift in light theme" />
@@ -96,10 +102,12 @@ notifications and per-tab resume. Without Claude Code, Rift is simply a fast ter
 | Next tab that needs you | `Ctrl+Shift+U` |
 | Find in terminal | `Ctrl+Shift+F` |
 | Zoom in / out / reset | `Ctrl+=` / `Ctrl+-` / `Ctrl+0` |
+| Rename tab | `F2` |
 | Settings | `Ctrl+,` |
 | Copy / paste | `Ctrl+C` (with a selection) / `Ctrl+V` |
 
 All of them can be changed in Settings. `Ctrl+T` and `Ctrl+W` are left to your shell and to Claude Code.
+On macOS the defaults use `Cmd` instead of `Ctrl`.
 
 ## Build from source
 
