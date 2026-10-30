@@ -415,10 +415,15 @@ body,
   background: var(--accent);
 }
 
+/* Top-right corner of the tab, shown on hover. */
 .tab-close {
-  flex: none;
+  position: absolute;
+  top: 2px;
+  right: 3px;
   padding: 0 4px;
   border-radius: 3px;
+  font-size: 12px;
+  line-height: 16px;
   opacity: 0;
 }
 
