@@ -163,5 +163,8 @@ npm run tauri build               # package
 cd src-tauri && cargo test        # backend tests (spawn real cmd.exe)
 npm test                          # frontend tests (vitest)
 npm run typecheck                 # tsc --noEmit
+npx tauri icon src-tauri/icons/rift.svg   # regenerate app icons from the SVG source; then delete
+                                  # icons/android, icons/ios, 64x64.png and touch tauri.conf.json
+                                  # (the build script only re-embeds icons when that file changes)
 npm run bench                     # tab-switch benchmark in the real WebView (keep the window visible; fails over budget)
 ```
