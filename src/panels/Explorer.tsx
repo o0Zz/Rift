@@ -29,7 +29,9 @@ function FileIcon(p: { name: string; dir: boolean; open: boolean }) {
   );
 }
 
-const join = (dir: string, name: string) => `${dir.replace(/[\\/]+$/, "")}\\${name}`;
+/** Joins with the folder's own separator: `\\` for Windows paths, `/` otherwise. */
+const join = (dir: string, name: string) =>
+  `${dir.replace(/[\\/]+$/, "")}${dir.includes("\\") ? "\\" : "/"}${name}`;
 
 /** File tree of `root`. Each folder is listed once, when first expanded (cached until ⟳). */
 export function Explorer(props: { root?: string; onClose(): void }) {

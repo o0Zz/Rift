@@ -8,67 +8,13 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use anyhow::{Context, Result};
-use base64::Engine;
-use portable_pty::{ChildKiller, CommandBuilder, MasterPty, PtySize, native_pty_system};
+use portable_pty::{ChildKiller, MasterPty, PtySize, native_pty_system};
+
+pub use crate::shell::Shell;
 
 pub type TabId = u32;
 pub type OnData = Box<dyn FnMut(Vec<u8>) + Send>;
 pub type OnExit = Box<dyn FnOnce(TabId) + Send>;
-
-/// Runs after the user's profile: wraps their prompt so every prompt reports the cwd (OSC 9;9).
-const PWSH_INIT: &str = r#"
-$global:__riftPrompt = $function:prompt
-function global:prompt {
-  $loc = $executionContext.SessionState.Path.CurrentLocation
-  $p = & $global:__riftPrompt
-  if ($loc.Provider.Name -eq 'FileSystem') { "$([char]27)]9;9;`"$($loc.ProviderPath)`"$([char]27)\$p" } else { $p }
-}
-"#;
-
-#[derive(Clone, Debug)]
-pub enum Shell {
-    PowerShell {
-        exe: String,
-    },
-    /// Deterministic shell for tests.
-    #[cfg(test)]
-    Cmd,
-}
-
-impl Shell {
-    /// PowerShell 7 if installed, Windows PowerShell otherwise.
-    pub fn default_for_platform() -> Self {
-        let pwsh = std::env::var_os("PATH")
-            .map(|p| std::env::split_paths(&p).any(|dir| dir.join("pwsh.exe").is_file()))
-            .unwrap_or(false);
-        Shell::PowerShell {
-            exe: if pwsh { "pwsh.exe" } else { "powershell.exe" }.into(),
-        }
-    }
-
-    /// The shell command line, running `startup` (e.g. `claude --resume <id>`) once the shell is ready.
-    fn command(&self, startup: Option<&str>) -> CommandBuilder {
-        match self {
-            Shell::PowerShell { exe } => {
-                let script = format!("{PWSH_INIT}\n{}", startup.unwrap_or(""));
-                let utf16: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
-                let mut cmd = CommandBuilder::new(exe);
-                cmd.args(["-NoLogo", "-NoExit", "-EncodedCommand"]);
-                cmd.arg(base64::engine::general_purpose::STANDARD.encode(utf16));
-                cmd
-            }
-            #[cfg(test)]
-            Shell::Cmd => {
-                let mut cmd = CommandBuilder::new("cmd.exe");
-                cmd.arg("/Q");
-                if let Some(s) = startup {
-                    cmd.args(["/K", s]);
-                }
-                cmd
-            }
-        }
-    }
-}
 
 /// Where a session's output goes. A spare shell runs before any tab owns it,
 /// so its output (the prompt) is buffered and replayed on attach.
@@ -122,12 +68,16 @@ pub struct PtyManager {
     spare: Mutex<Option<(PathBuf, TabId)>>,
 }
 
-/// Windows paths: case-insensitive, trailing separator irrelevant.
+/// Same folder, ignoring a trailing separator; case-insensitive on Windows only (Linux paths are not).
 fn same_dir(a: &Path, b: &Path) -> bool {
     let norm = |p: &Path| {
-        p.to_string_lossy()
-            .trim_end_matches(['\\', '/'])
-            .to_lowercase()
+        let s = p.to_string_lossy();
+        let s = s.trim_end_matches(['\\', '/']);
+        if cfg!(windows) {
+            s.to_lowercase()
+        } else {
+            s.to_string()
+        }
     };
     norm(a) == norm(b)
 }
@@ -329,8 +279,38 @@ mod tests {
     use std::sync::mpsc;
     use std::time::{Duration, Instant};
 
-    fn cmd_manager() -> Arc<PtyManager> {
-        PtyManager::new(Shell::Cmd, std::env::temp_dir(), vec![])
+    // A small deterministic shell per OS: cmd on Windows, sh elsewhere.
+    #[cfg(windows)]
+    mod os {
+        pub const ENTER: &str = "\r\n";
+        pub const PROMPT: &str = ">";
+        pub const PRINT_TAB_ID: &str = "echo rift-%RIFT_TAB_ID%-ok";
+        pub const PRINT_CWD: &str = "cd";
+        pub fn shell() -> super::Shell {
+            super::Shell::Cmd
+        }
+    }
+
+    #[cfg(unix)]
+    mod os {
+        pub const ENTER: &str = "\r";
+        pub const PROMPT: &str = "$";
+        pub const PRINT_TAB_ID: &str = "echo rift-$RIFT_TAB_ID-ok";
+        pub const PRINT_CWD: &str = "pwd";
+        pub fn shell() -> super::Shell {
+            super::Shell::Posix {
+                exe: "/bin/sh".into(),
+            }
+        }
+    }
+
+    fn run(m: &PtyManager, id: TabId, command: &str) {
+        m.write(id, format!("{command}{}", os::ENTER).as_bytes())
+            .unwrap();
+    }
+
+    fn test_manager() -> Arc<PtyManager> {
+        PtyManager::new(os::shell(), std::env::temp_dir(), vec![])
     }
 
     fn size() -> PtySize {
@@ -363,6 +343,7 @@ mod tests {
             )
             .unwrap();
         // ConPTY asks for the cursor position (ESC[6n) on startup and waits; xterm.js answers it in the app.
+        #[cfg(windows)]
         m.write(id, b"\x1b[1;1R").unwrap();
         (id, data_rx, exit_rx)
     }
@@ -397,16 +378,16 @@ mod tests {
 
     #[test]
     fn runs_commands_and_sees_tab_id() {
-        let m = cmd_manager();
+        let m = test_manager();
         let (id, out, _) = open(&m, Some(std::env::temp_dir()), None);
-        m.write(id, b"echo rift-%RIFT_TAB_ID%-ok\r\n").unwrap();
+        run(&m, id, os::PRINT_TAB_ID);
         wait_for_output(&out, &format!("rift-{id}-ok"));
         m.close(id);
     }
 
     #[test]
     fn new_tab_takes_prewarmed_shell_and_replays_its_output() {
-        let m = cmd_manager();
+        let m = test_manager();
         m.prewarm(None);
         let spare = wait_for_spare(&m);
         // Let the spare print its prompt into the buffer before anyone attaches.
@@ -414,8 +395,8 @@ mod tests {
 
         let (id, out, _) = open(&m, None, None);
         assert_eq!(id, spare);
-        wait_for_output(&out, ">"); // buffered prompt is replayed
-        m.write(id, b"echo still-alive\r\n").unwrap();
+        wait_for_output(&out, os::PROMPT); // buffered prompt is replayed
+        run(&m, id, "echo still-alive");
         wait_for_output(&out, "still-alive");
 
         assert!(m.spare.lock().unwrap().is_none(), "the spare was used");
@@ -424,7 +405,7 @@ mod tests {
 
     #[test]
     fn spare_is_only_used_in_its_own_folder() {
-        let m = cmd_manager();
+        let m = test_manager();
         let a = tempfile::tempdir().unwrap();
         let b = tempfile::tempdir().unwrap();
         m.prewarm(Some(a.path().into()));
@@ -432,11 +413,13 @@ mod tests {
 
         let (in_b, _, _) = open(&m, Some(b.path().into()), None);
         assert_ne!(in_b, spare, "another folder spawns its own shell");
-        // Same folder, other spelling (case, trailing separator): takes the spare.
-        let a_upper = format!("{}\\", a.path().display()).to_uppercase();
-        let (in_a, out, _) = open(&m, Some(a_upper.into()), None);
+        // Same folder, other spelling (trailing separator; case too on Windows): takes the spare.
+        let other_spelling = format!("{}{}", a.path().display(), std::path::MAIN_SEPARATOR);
+        #[cfg(windows)]
+        let other_spelling = other_spelling.to_uppercase();
+        let (in_a, out, _) = open(&m, Some(other_spelling.into()), None);
         assert_eq!(in_a, spare);
-        m.write(in_a, b"cd\r\n").unwrap();
+        run(&m, in_a, os::PRINT_CWD);
         wait_for_output(&out, &a.path().file_name().unwrap().to_string_lossy());
         m.close(in_a);
         m.close(in_b);
@@ -444,7 +427,7 @@ mod tests {
 
     #[test]
     fn prewarm_keeps_a_spare_in_the_same_folder_and_replaces_another() {
-        let m = cmd_manager();
+        let m = test_manager();
         let a = tempfile::tempdir().unwrap();
         let b = tempfile::tempdir().unwrap();
         m.prewarm(Some(a.path().into()));
@@ -469,21 +452,22 @@ mod tests {
 
     #[test]
     fn reports_exit_when_shell_exits() {
-        let m = cmd_manager();
+        let m = test_manager();
         let (id, _out, exit) = open(&m, Some(std::env::temp_dir()), None);
-        m.write(id, b"exit\r\n").unwrap();
+        run(&m, id, "exit");
         assert_eq!(exit.recv_timeout(Duration::from_secs(10)).unwrap(), id);
         m.close(id);
     }
 
     #[test]
     fn startup_command_runs_in_new_shell() {
-        let m = cmd_manager();
+        let m = test_manager();
         let (id, out, _) = open(&m, Some(std::env::temp_dir()), Some("echo rift-startup-ok"));
         wait_for_output(&out, "rift-startup-ok");
         m.close(id);
     }
 
+    #[cfg(windows)]
     #[test]
     fn powershell_reports_cwd_and_runs_startup() {
         let dir = tempfile::tempdir().unwrap();
@@ -505,7 +489,7 @@ mod tests {
 
     #[test]
     fn close_all_tabs_keeps_the_spare() {
-        let m = cmd_manager();
+        let m = test_manager();
         let (a, _, _) = open(&m, Some(std::env::temp_dir()), None);
         let (b, _, _) = open(&m, Some(std::env::temp_dir()), None);
         m.prewarm(None);
@@ -513,13 +497,52 @@ mod tests {
         m.close_all_tabs();
         assert!(m.write(a, b"x").is_err());
         assert!(m.write(b, b"x").is_err());
-        assert!(m.write(spare, b"rem\r\n").is_ok());
+        assert!(m.write(spare, os::ENTER.as_bytes()).is_ok());
         m.close(spare);
+    }
+
+    /// bash/zsh integration: the user's config still loads, the startup command runs, and each prompt
+    /// reports the cwd as OSC 7.
+    #[cfg(unix)]
+    fn check_posix_integration(exe: &str) {
+        let dir = tempfile::tempdir().unwrap();
+        let m = PtyManager::new(
+            Shell::Posix { exe: exe.into() },
+            std::env::temp_dir(),
+            vec![],
+        );
+        let (id, out, _) = open(&m, Some(dir.path().into()), Some("echo rift-startup-ok"));
+        wait_for_output(&out, "rift-startup-ok");
+        // macOS temp dirs may be reported through /private: check the folder name.
+        let name = dir
+            .path()
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        let all = wait_for_output(&out, &name);
+        assert!(all.contains("\x1b]7;file://"), "no OSC 7 in: {all}");
+        m.close(id);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bash_reports_cwd_and_runs_startup() {
+        check_posix_integration("/bin/bash");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn zsh_reports_cwd_and_runs_startup() {
+        // zsh ships with macOS; Linux CI images may not have it.
+        if std::path::Path::new("/bin/zsh").exists() {
+            check_posix_integration("/bin/zsh");
+        }
     }
 
     #[test]
     fn close_removes_tab() {
-        let m = cmd_manager();
+        let m = test_manager();
         let (id, _out, _) = open(&m, Some(std::env::temp_dir()), None);
         m.close(id);
         assert!(m.write(id, b"x").is_err());

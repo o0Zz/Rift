@@ -1,6 +1,6 @@
 # Rift Terminal
 
-A fast Windows terminal built around coding agents (Claude Code first). The reason it exists:
+A fast terminal built around coding agents (Claude Code first). Windows first (developed and hand-tested there), also built and tested in CI for Linux and macOS. The reason it exists:
 Warp lags when switching tabs. **Speed beats features here. Every feature must keep tab switch
 and new tab instant.**
 
@@ -26,7 +26,7 @@ How we hold the budget:
 - **Tauri 2** (Rust backend, system WebView2 frontend). No Electron.
 - **Rust backend**: PTY via `portable-pty` (ConPTY), git via the `git` CLI (simple, matches user's git config/hooks), file watching via `notify`, state in `%APPDATA%\dev.rift.terminal\session.json` (Tauri app data dir).
 - **Frontend**: TypeScript + Solid — no virtual-DOM-heavy framework. Terminal: **xterm.js, DOM renderer** (WebGL measured slower for tab switching, see below).
-- **Default shell**: PowerShell 7 (`pwsh`). Shell is configurable per profile (pwsh, Windows PowerShell, cmd, Git Bash, WSL, Nushell). `ls`, `cat`, `rm` work in pwsh as aliases; Git Bash/WSL profiles for real coreutils.
+- **Default shell** (`shell.rs`): Windows: PowerShell 7 (`pwsh`), else Windows PowerShell. Linux/macOS: `$SHELL` (fallback zsh on macOS, bash on Linux). Choosing another shell (cmd, Git Bash, WSL, fish...) is not built yet.
 - Packaging: MSI/NSIS via Tauri bundler.
 
 ## Architecture
@@ -36,10 +36,11 @@ Target layout (✅ = exists). Add a module only when its feature is built.
 ```
 src-tauri/src/       Rust
   pty.rs ✅          spawn, resize, read/write, spare shell (Tauri-free, tested against real shells)
+  shell.rs ✅        per-OS shell + integration (cwd reporting, startup command), user rc files untouched
   lib.rs ✅          Tauri commands + setup
   main.rs ✅         `rift.exe hook <harness>` subcommand, else the app
   session.rs ✅      what to restore: tabs (cwd, title) + agent session per tab
-  hook.rs ✅         hook client (`rift.exe hook`) + named-pipe server
+  hook.rs ✅         hook client (`rift hook`) + server: named pipe (Windows) / Unix socket (Linux, macOS)
   agents/ ✅         AgentHarness trait + adapters (claude.rs ✅, later codex, gemini...)
   git.rs ✅          branch from .git/HEAD (no process); status/diff via git CLI (CREATE_NO_WINDOW)
   files.rs ✅        one directory level per call (explorer is lazy, never walks recursively)
@@ -104,8 +105,9 @@ Everything agent-specific goes through one trait so Codex/Gemini/OpenCode can be
 UI and session code never mention "claude" directly; they talk to `AgentHarness`, `AgentEvent` and `AgentSession { harness, session_id }`.
 
 ### Session restore (decisions already made — keep them)
-- Shells are spawned with `RIFT_TAB_ID` (pty id) and `RIFT_PIPE` (`rift-<pid>`, one pipe per Rift instance). The agent's hook runs `rift.exe hook <harness>`, which forwards stdin + tab id to that pipe. Outside Rift (no env) it is a silent no-op; it always exits 0.
+- Shells are spawned with `RIFT_TAB_ID` (pty id) and `RIFT_PIPE` (`rift-<pid>`, one per Rift instance: `\\.\pipe\rift-<pid>` on Windows, `$XDG_RUNTIME_DIR` or temp `/rift-<pid>.sock` on Unix). The agent's hook runs `rift hook <harness>`, which forwards stdin + tab id there. Outside Rift (no env) it is a silent no-op; it always exits 0.
 - PowerShell starts with `-NoExit -EncodedCommand <init + startup>`: init wraps the user's prompt (after their profile) to emit OSC 9;9 with the cwd; startup is e.g. `claude --resume <id>`. No file written, user profile untouched.
+- bash: `--rcfile <rift.bash>` (sources ~/.bashrc, then PROMPT_COMMAND emits OSC 7). zsh: `ZDOTDIR=<rift zsh dir>` whose .zshenv/.zprofile/.zshrc source the user's own files (VS Code's technique), then a precmd emits OSC 7. Startup command via `RIFT_STARTUP`, eval'd once after the user's config. Files are written per process under `$XDG_RUNTIME_DIR` or temp. Other shells run plain (no cwd reporting). Unix shells get `TERM=xterm-256color`.
 - Frontend owns the tab list (`session_update`); hooks own the agent binding per pty. `SessionStore` writes on every change (tmp + rename), never before the frontend's first report, never after `CloseRequested` (freeze), so killing shells on close cannot erase sessions.
 - `SessionEnded` only unbinds if it matches the bound id (`/clear` starts the new session before ending the old one).
 - A restored tab binds its session at `pty_open`, before the agent reports anything.
@@ -141,7 +143,7 @@ Blocks/rewritten input editor (would fight PowerShell's PSReadLine and cost spee
 ### Warp feature reference (for later decisions)
 Blocks (actions, find, filter, sharing, sticky header), input editor (syntax highlight, completions, autosuggestions, history search, vim keys, synchronized inputs, command corrections), tabs & vertical tabs, split panes, tab configs, launch configs, global hotkey, configurable toolbar, session restoration, themes/fonts/opacity/blur/pane dimming, settings file + sync, subshell/SSH warpify, markdown viewer, desktop notifications, bell, quit warning, URI scheme, command palette, code editor + file tree + LSP, code review panel, git worktrees, Warp Agent / CLI / cloud agents, third-party agents (Claude Code, Codex, Gemini CLI, OpenCode), Warp Drive (workflows, notebooks, prompts, env vars), team & session sharing.
 
-## Windows specifics
+## Windows specifics (Linux/macOS: no Explorer menu; the settings section is hidden)
 - Explorer menu ("Open in Rift" = new tab in the running window): Settings → Windows → Add/Remove. Writes `HKCU\Software\Classes\{Directory\shell, Directory\Background\shell, Drive\shell}\Rift` with command `"<exe>" "%V"` (no admin). On Windows 11 it is under "Show more options"; the top-level modern menu needs a sparse MSIX package + `IExplorerCommand` (later). Registered with the current exe path (in dev: target\debug\rift.exe). Tests use a throwaway `HKCU\Software\RiftTest-*` key, never the real one.
 - Single instance (`tauri-plugin-single-instance`, off in bench mode): a second `rift.exe <dir>` forwards its args to the running Rift (`open-dir` event → new tab, window focused) and exits. A first launch with `<dir>` restores the session, then opens `<dir>` as a new tab (`startup_dir`).
 - `dir_arg` fixes Explorer's drive-root quoting (`"C:\"` arrives as `C:"`) and resolves relative paths against the launching process's cwd.
@@ -149,9 +151,11 @@ Blocks (actions, find, filter, sharing, sticky header), input editor (syntax hig
 - Notifications: Windows toast via `tauri-plugin-notification`.
 
 ## Releases and auto-update
-- Repo: https://github.com/o0Zz/rift (public). CI (`.github/workflows/ci.yml`): tsc, vitest, fmt, clippy -D warnings, cargo test on windows-latest. The tab-switch bench stays local (needs a visible window).
+- Repo: https://github.com/o0Zz/rift (public). CI (`.github/workflows/ci.yml`), matrix windows-latest / ubuntu-22.04 / macos-latest: tsc, vitest, fmt, clippy -D warnings, cargo test. Pushes to master also build the installers (no updater signature) and attach them to the run as artifacts `rift-windows|linux|macos`. The tab-switch bench stays local (Windows, needs a visible window).
+- Packaging per OS (`tauri.<os>.conf.json`): Windows NSIS; macOS `.app` + `.dmg`, universal (Apple Silicon + Intel), **unsigned** (Gatekeeper: allow once in System Settings; signing needs an Apple Developer account); Linux AppImage + `.deb` (auto-update works for the AppImage).
 - Release: `npm version patch|minor|major` (bumps package.json — the single app version, tauri.conf.json points to it — commits and tags `vX.Y.Z`), then `git push --follow-tags`. `.github/workflows/release.yml` checks tag == package.json version, builds the NSIS installer with tauri-action and publishes it with `latest.json` on the GitHub Release.
 - Update signing key: `~/.tauri/rift.key` + `rift.key.password` (never in the repo). GitHub secrets `TAURI_SIGNING_PRIVATE_KEY` (key file content) and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. The public key is in tauri.conf.json `plugins.updater.pubkey`; losing the private key means installed copies can no longer update.
+- Release workflow: same 3-OS matrix; tauri-action publishes every OS on one GitHub Release and merges their entries into latest.json.
 - In-app (`src/update.ts`, not in dev/bench): checks `releases/latest/download/latest.json` at startup and every 6 h, downloads in the background, shows "Restart now"; otherwise installs when Rift closes. `session_freeze` runs first: the installer kills Rift, the session must stay as it was.
 - Local release build: `TAURI_SIGNING_PRIVATE_KEY="$(cat ~/.tauri/rift.key)" TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$(cat ~/.tauri/rift.key.password)" npx tauri build` (~10 min first time: LTO). Measured: installer 2.4 MB, exe 7.2 MB, hook call 11 ms, bench passes.
 - Installed path is per user and stable across updates, so the Claude hooks / Explorer menu registered from the installed exe keep working after updates.

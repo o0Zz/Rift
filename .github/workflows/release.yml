@@ -1,8 +1,8 @@
 name: Release
 
 # `npm version patch` (or minor/major) bumps package.json, commits and tags vX.Y.Z;
-# `git push --follow-tags` then triggers this workflow, which publishes the installer and
-# latest.json (read by the in-app updater) on the GitHub Release.
+# `git push --follow-tags` then triggers this workflow. Each OS publishes its installers on the same
+# GitHub Release, plus its entry in latest.json (read by the in-app updater).
 on:
   push:
     tags: ["v*"]
@@ -12,7 +12,16 @@ permissions:
 
 jobs:
   release:
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+          - os: ubuntu-22.04
+          - os: macos-latest
+            build-args: --target universal-apple-darwin
+            rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
 
@@ -25,12 +34,20 @@ jobs:
             exit 1
           fi
 
+      - name: Linux system libraries (WebKitGTK)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev patchelf
+
       - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-targets }}
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -47,6 +64,9 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: Rift ${{ github.ref_name }}
-          releaseBody: Install with the Rift_*_x64-setup.exe below. Installed copies update themselves.
+          releaseBody: |
+            Windows: Rift_*_x64-setup.exe. macOS: Rift_*_universal.dmg (unsigned: allow it once in System Settings > Privacy & Security). Linux: .AppImage or .deb.
+            Installed copies update themselves.
           releaseDraft: false
           prerelease: false
+          args: ${{ matrix.build-args }}

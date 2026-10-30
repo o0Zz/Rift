@@ -39,11 +39,13 @@ fn handler(exe: &Path) -> Value {
     json!({ "type": "command", "command": exe.to_string_lossy(), "args": ["hook", "claude"] })
 }
 
+/// Rift's entry, whatever the install path: `rift.exe` on Windows, `rift` on Linux/macOS.
 fn is_ours(handler: &Value) -> bool {
     handler["args"] == json!(["hook", "claude"])
-        && handler["command"]
-            .as_str()
-            .is_some_and(|c| c.to_lowercase().ends_with("rift.exe"))
+        && handler["command"].as_str().is_some_and(|c| {
+            let name = c.rsplit(['/', '\\']).next().unwrap_or(c).to_lowercase();
+            name == "rift" || name == "rift.exe"
+        })
 }
 
 /// `claude -p` for short text tasks: small fast model, no tools, not saved in the user's session list.
@@ -350,6 +352,18 @@ mod tests {
             std::fs::read_to_string(dir.path().join("settings.json.bak")).unwrap(),
             original
         );
+    }
+
+    #[test]
+    fn recognizes_its_entry_on_every_os() {
+        let ours = |cmd: &str| is_ours(&json!({ "command": cmd, "args": ["hook", "claude"] }));
+        assert!(ours(r"C:\Users\me\AppData\Local\Rift\rift.exe"));
+        assert!(ours("/usr/bin/rift"));
+        assert!(ours("/Applications/Rift.app/Contents/MacOS/rift"));
+        assert!(!ours("/usr/bin/drift"));
+        assert!(!is_ours(
+            &json!({ "command": "/usr/bin/rift", "args": ["other"] })
+        ));
     }
 
     #[test]

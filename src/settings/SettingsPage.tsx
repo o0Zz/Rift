@@ -6,15 +6,16 @@ import { ACTIONS, bind, comboOf, DEFAULT_KEYS, isValidShortcut, type Action, typ
 export function SettingsPage(props: { settings: Settings; onChange(s: Settings): void; onClose(): void }) {
   const [recording, setRecording] = createSignal<Action>();
   const [note, setNote] = createSignal<string>();
-  const [menuInstalled, setMenuInstalled] = createSignal<boolean>();
+  // `null`: no Explorer menu on this OS, the Windows section is hidden.
+  const [menuInstalled, setMenuInstalled] = createSignal<boolean | null>();
   const [menuError, setMenuError] = createSignal<string>();
-  invoke<boolean>("explorer_menu_installed").then(setMenuInstalled, (e) => setMenuError(String(e)));
+  invoke<boolean | null>("explorer_menu_installed").then(setMenuInstalled, (e) => setMenuError(String(e)));
 
   async function setExplorerMenu(enabled: boolean) {
     setMenuError(undefined);
     try {
       await invoke("explorer_menu_set", { enabled });
-      setMenuInstalled(await invoke<boolean>("explorer_menu_installed"));
+      setMenuInstalled(await invoke<boolean | null>("explorer_menu_installed"));
     } catch (e) {
       setMenuError(String(e));
     }
@@ -100,22 +101,24 @@ export function SettingsPage(props: { settings: Settings; onChange(s: Settings):
             />
           </div>
 
-          <h3>Windows</h3>
-          <div class="setting">
-            <label>
-              “Open in Rift” in the File Explorer right-click menu
-              <span class="setting-sub">
-                Opens the folder in a new tab. On Windows 11 it is under “Show more options”.
-              </span>
-            </label>
-            <Show when={menuInstalled() !== undefined}>
-              <button class="setting-btn" onClick={() => setExplorerMenu(!menuInstalled())}>
-                {menuInstalled() ? "Remove" : "Add"}
-              </button>
+          <Show when={menuInstalled() !== null}>
+            <h3>Windows</h3>
+            <div class="setting">
+              <label>
+                “Open in Rift” in the File Explorer right-click menu
+                <span class="setting-sub">
+                  Opens the folder in a new tab. On Windows 11 it is under “Show more options”.
+                </span>
+              </label>
+              <Show when={menuInstalled() !== undefined}>
+                <button class="setting-btn" onClick={() => setExplorerMenu(!menuInstalled())}>
+                  {menuInstalled() ? "Remove" : "Add"}
+                </button>
+              </Show>
+            </div>
+            <Show when={menuError()}>
+              <div class="settings-note">{menuError()}</div>
             </Show>
-          </div>
-          <Show when={menuError()}>
-            <div class="settings-note">{menuError()}</div>
           </Show>
 
           <h3>

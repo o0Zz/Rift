@@ -36,7 +36,8 @@ export const DEFAULT_KEYS: Keymap = {
 export const DEFAULTS: Settings = {
   theme: "dark",
   fontSize: 14,
-  fontFamily: "'Cascadia Mono', Consolas, monospace",
+  // Windows, macOS, Linux defaults, then whatever monospace font the system has.
+  fontFamily: "'Cascadia Mono', Consolas, Menlo, 'DejaVu Sans Mono', monospace",
   keys: DEFAULT_KEYS,
 };
 

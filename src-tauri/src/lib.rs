@@ -6,6 +6,7 @@ pub mod hook;
 mod pty;
 mod session;
 mod settings;
+mod shell;
 
 use std::sync::Arc;
 
@@ -238,20 +239,34 @@ fn startup_dir() -> Option<String> {
 }
 
 #[tauri::command]
-fn explorer_menu_installed() -> Result<bool, String> {
-    let exe = std::env::current_exe().map_err(err)?;
-    Ok(explorer_menu::ExplorerMenu::default().installed(&exe))
+fn explorer_menu_installed() -> Result<Option<bool>, String> {
+    #[cfg(windows)]
+    {
+        let exe = std::env::current_exe().map_err(err)?;
+        Ok(Some(explorer_menu::ExplorerMenu::default().installed(&exe)))
+    }
+    // `None`: no Explorer menu on this OS (the settings section is hidden).
+    #[cfg(not(windows))]
+    Ok(None)
 }
 
 /// Adds or removes "Open in Rift" in Explorer's right-click menu. Only from the user's click in settings.
 #[tauri::command]
 fn explorer_menu_set(enabled: bool) -> Result<(), String> {
-    let menu = explorer_menu::ExplorerMenu::default();
-    if enabled {
-        menu.install(&std::env::current_exe().map_err(err)?)
-            .map_err(err)
-    } else {
-        menu.uninstall().map_err(err)
+    #[cfg(windows)]
+    {
+        let menu = explorer_menu::ExplorerMenu::default();
+        if enabled {
+            menu.install(&std::env::current_exe().map_err(err)?)
+                .map_err(err)
+        } else {
+            menu.uninstall().map_err(err)
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = enabled;
+        Err("The Explorer menu only exists on Windows".into())
     }
 }
 

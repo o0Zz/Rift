@@ -1,5 +1,6 @@
-//! Agent hooks → app. The agent runs `rift.exe hook <harness>` with the hook JSON on stdin; that process
-//! forwards it, tagged with the tab id, to the Rift instance named in RIFT_PIPE.
+//! Agent hooks → app. The agent runs `rift hook <harness>` with the hook JSON on stdin; that process
+//! forwards it, tagged with the tab id, to the Rift instance named in RIFT_PIPE: a named pipe on Windows,
+//! a Unix socket elsewhere. One message per connection, handled in arrival order.
 
 use std::io::{Read, Write};
 use std::time::Duration;
@@ -7,7 +8,6 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::io::AsyncReadExt;
-use tokio::net::windows::named_pipe::ServerOptions;
 
 use crate::pty::TabId;
 
@@ -18,11 +18,7 @@ pub struct HookMessage {
     pub payload: Value,
 }
 
-pub fn pipe_path(name: &str) -> String {
-    format!(r"\\.\pipe\{name}")
-}
-
-/// Entry point of `rift.exe hook <harness>`. Never fails loudly: a broken hook must not disturb the agent.
+/// Entry point of `rift hook <harness>`. Never fails loudly: a broken hook must not disturb the agent.
 pub fn run_client(harness: &str) {
     let (Ok(tab), Ok(pipe)) = (std::env::var("RIFT_TAB_ID"), std::env::var("RIFT_PIPE")) else {
         return; // agent not running inside Rift
@@ -46,11 +42,8 @@ pub fn send(pipe: &str, msg: &HookMessage) -> std::io::Result<()> {
     let line = serde_json::to_vec(msg)?;
     // The server re-arms its pipe right after each connection; retry briefly if it is busy.
     for _ in 0..20 {
-        match std::fs::OpenOptions::new()
-            .write(true)
-            .open(pipe_path(pipe))
-        {
-            Ok(mut f) => return f.write_all(&line),
+        match transport::connect(pipe) {
+            Ok(mut conn) => return conn.write_all(&line),
             Err(_) => std::thread::sleep(Duration::from_millis(10)),
         }
     }
@@ -60,19 +53,82 @@ pub fn send(pipe: &str, msg: &HookMessage) -> std::io::Result<()> {
 /// Accepts hook connections forever, one message per connection, handled in arrival order
 /// (a `Stop` must never be applied before the `PostToolUse` that preceded it).
 pub async fn serve(name: String, on_message: impl Fn(HookMessage)) -> std::io::Result<()> {
-    let path = pipe_path(&name);
-    let mut server = ServerOptions::new()
-        .first_pipe_instance(true)
-        .create(&path)?;
+    let mut listener = transport::Listener::bind(&name)?;
     loop {
-        server.connect().await?;
-        // Re-arm first: the next hook can connect (and write into the pipe buffer) while we read.
-        let mut conn = std::mem::replace(&mut server, ServerOptions::new().create(&path)?);
+        let mut conn = listener.accept().await?;
         let mut buf = Vec::new();
         if conn.read_to_end(&mut buf).await.is_ok()
             && let Ok(msg) = serde_json::from_slice(&buf)
         {
             on_message(msg);
+        }
+    }
+}
+
+#[cfg(windows)]
+mod transport {
+    use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
+
+    fn path(name: &str) -> String {
+        format!(r"\\.\pipe\{name}")
+    }
+
+    pub fn connect(name: &str) -> std::io::Result<std::fs::File> {
+        std::fs::OpenOptions::new().write(true).open(path(name))
+    }
+
+    pub struct Listener {
+        path: String,
+        next: NamedPipeServer,
+    }
+
+    impl Listener {
+        pub fn bind(name: &str) -> std::io::Result<Self> {
+            let path = path(name);
+            let next = ServerOptions::new()
+                .first_pipe_instance(true)
+                .create(&path)?;
+            Ok(Listener { path, next })
+        }
+
+        pub async fn accept(&mut self) -> std::io::Result<NamedPipeServer> {
+            self.next.connect().await?;
+            // Re-arm first: the next hook can connect (and write into the pipe buffer) while we read.
+            let fresh = ServerOptions::new().create(&self.path)?;
+            Ok(std::mem::replace(&mut self.next, fresh))
+        }
+    }
+}
+
+#[cfg(unix)]
+mod transport {
+    use std::path::PathBuf;
+
+    use tokio::net::{UnixListener, UnixStream};
+
+    /// In the per-user runtime dir when there is one (only this user can connect).
+    fn path(name: &str) -> PathBuf {
+        let dir = std::env::var_os("XDG_RUNTIME_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(std::env::temp_dir);
+        dir.join(format!("{name}.sock"))
+    }
+
+    pub fn connect(name: &str) -> std::io::Result<std::os::unix::net::UnixStream> {
+        std::os::unix::net::UnixStream::connect(path(name))
+    }
+
+    pub struct Listener(UnixListener);
+
+    impl Listener {
+        pub fn bind(name: &str) -> std::io::Result<Self> {
+            let path = path(name);
+            let _ = std::fs::remove_file(&path); // left over by a crashed run with the same pid
+            Ok(Listener(UnixListener::bind(path)?))
+        }
+
+        pub async fn accept(&mut self) -> std::io::Result<UnixStream> {
+            Ok(self.0.accept().await?.0)
         }
     }
 }

@@ -2,6 +2,7 @@ import { Terminal, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import "@xterm/xterm/css/xterm.css";
+import { cwdFromOsc7, cwdFromOsc9 } from "./osc";
 
 export type AgentSession = { harness: string; session_id: string };
 
@@ -36,11 +37,17 @@ export class TermView {
     this.term.loadAddon(this.fit);
     this.term.open(this.el);
     this.term.onTitleChange(events.onTitle);
-    this.term.parser.registerOscHandler(9, (data) => {
-      if (!data.startsWith("9;")) return false;
-      events.onCwd(data.slice(2).replace(/^"(.*)"$/, "$1"));
-      return true;
-    });
+    // Folder reports: OSC 9;9 from PowerShell, OSC 7 from bash/zsh.
+    for (const [code, parse] of [
+      [9, cwdFromOsc9],
+      [7, cwdFromOsc7],
+    ] as const) {
+      this.term.parser.registerOscHandler(code, (data) => {
+        const cwd = parse(data);
+        if (cwd) events.onCwd(cwd);
+        return cwd !== undefined;
+      });
+    }
     this.term.onData((data) => this.pty.then((id) => invoke("pty_write", { id, data })));
     this.term.onResize(({ cols, rows }) => this.pty.then((id) => invoke("pty_resize", { id, cols, rows })));
     this.term.attachCustomKeyEventHandler((e) => {
