@@ -388,6 +388,16 @@ fn bench_dirs() -> Option<Vec<String>> {
     })
 }
 
+/// In bench mode, a big text file (RIFT_BENCH_OUTPUT) printed in a tab to measure heavy output: path and size.
+#[tauri::command]
+fn bench_output_file() -> Option<(String, u64)> {
+    let path = std::env::var("RIFT_BENCH_OUTPUT")
+        .ok()
+        .filter(|_| bench_mode())?;
+    let size = std::fs::metadata(&path).ok()?.len();
+    Some((path, size))
+}
+
 #[tauri::command]
 fn bench_done(app: AppHandle, report: String, ok: bool) {
     println!("{report}");
@@ -524,6 +534,7 @@ pub fn run() {
             settings_save,
             commit_message,
             bench_dirs,
+            bench_output_file,
             bench_done
         ])
         .run(tauri::generate_context!())

@@ -13,6 +13,8 @@ const TABS = 20;
 const LINES = 10_000; // = scrollback, so every buffer is full
 const SWITCHES = 100;
 const BUDGET = { workP95: 16, latencyP95: 50 }; // ms
+// Heavy output: the window must stay responsive (a frame at least every OUTPUT_FRAME_P95 ms, p95).
+const OUTPUT_FRAME_P95 = 100;
 
 type Sample = { work: number; latency: number };
 
@@ -65,6 +67,58 @@ function summarize(name: string, samples: Sample[]) {
   return { ok, text: `${ok ? "PASS" : "FAIL"} ${name}\n  work    ${f(work)} ms\n  latency ${f(latency)} ms` };
 }
 
+/**
+ * Prints `file` in the active tab (PowerShell) and measures throughput and the gaps between frames while
+ * the output streams: a long gap is a frozen window.
+ */
+async function heavyOutput(view: TermView, file: string, bytes: number): Promise<{ ok: boolean; text: string }> {
+  const gaps: number[] = [];
+  let streaming = true;
+  let last = performance.now();
+  const tick = (now: number) => {
+    gaps.push(now - last);
+    last = now;
+    if (streaming) requestAnimationFrame(tick);
+  };
+  const done = new Promise<void>((resolve) => {
+    const sub = view.term.onWriteParsed(() => {
+      const buf = view.term.buffer.active;
+      for (let y = buf.baseY + buf.cursorY; y >= Math.max(0, buf.baseY + buf.cursorY - 3); y--) {
+        if (buf.getLine(y)?.translateToString().includes("RIFT-BENCH-END")) {
+          sub.dispose();
+          resolve();
+          return;
+        }
+      }
+    });
+  });
+  const t0 = performance.now();
+  requestAnimationFrame(tick);
+  const path = file.replace(/'/g, "''");
+  await invoke("pty_write", {
+    id: view.ptyId,
+    data: `[Console]::Out.Write([IO.File]::ReadAllText('${path}')); 'RIFT-BENCH-' + 'END'\r`,
+  });
+  const finished = await Promise.race([done.then(() => true), sleep(90_000).then(() => false)]);
+  streaming = false;
+  if (!finished) {
+    const buf = view.term.buffer.active;
+    const end = buf.baseY + buf.cursorY;
+    const tail = Array.from({ length: 6 }, (_, i) => buf.getLine(end - 5 + i)?.translateToString().trimEnd() ?? "");
+    return { ok: false, text: `FAIL heavy output: no end marker after 90 s; last lines:\n  ${tail.join("\n  ")}` };
+  }
+  const seconds = (performance.now() - t0) / 1000;
+  const p95 = pct(gaps, 95);
+  const ok = p95 < OUTPUT_FRAME_P95;
+  const mb = bytes / 1e6;
+  return {
+    ok,
+    text:
+      `${ok ? "PASS" : "FAIL"} heavy output (${mb.toFixed(1)} MB)\n` +
+      `  ${seconds.toFixed(1)} s, ${(mb / seconds).toFixed(1)} MB/s; frame gaps p50 ${pct(gaps, 50).toFixed(0)}  p95 ${p95.toFixed(0)}  max ${Math.max(...gaps).toFixed(0)} ms (budget p95 < ${OUTPUT_FRAME_P95})`,
+  };
+}
+
 export async function run(api: BenchApi) {
   while (api.views().length < TABS) api.newTab();
   for (const v of api.views()) await fill(v);
@@ -82,9 +136,19 @@ export async function run(api: BenchApi) {
   api.setPanels(true);
   await sleep(5000);
   results.push(summarize("cycle with files + git panels open", await scenario(api, cycle.slice(0, 40), 250)));
+  const output = await invoke<[string, number] | null>("bench_output_file");
+  if (output) {
+    // A fresh tab: the others hold lines written straight into xterm, which ConPTY's own screen model does
+    // not know about, so its repaints would land in the wrong place.
+    const before = new Set(api.views());
+    api.newTab();
+    const fresh = api.views().find((v) => !before.has(v))!;
+    await sleep(3000); // shell started, prompt shown
+    results.push(await heavyOutput(fresh, ...output));
+  }
   const report = [
     `Rift tab-switch bench: ${TABS} tabs x ${LINES} lines, ${SWITCHES} switches each`,
-    `budget: work p95 < ${BUDGET.workP95} ms, latency p95 < ${BUDGET.latencyP95} ms`,
+    `budget (switching): work p95 < ${BUDGET.workP95} ms, latency p95 < ${BUDGET.latencyP95} ms`,
     ...results.map((r) => r.text),
   ].join("\n");
   await invoke("bench_done", { report, ok: results.every((r) => r.ok) });
