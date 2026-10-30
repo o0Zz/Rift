@@ -117,8 +117,19 @@ pub struct PtyManager {
     env: Vec<(String, String)>,
     next_id: AtomicU32,
     sessions: Mutex<HashMap<TabId, Session>>,
-    /// A shell started ahead of time so a new tab does not wait for shell startup.
-    spare: Mutex<Option<TabId>>,
+    /// A shell started ahead of time in a folder (the active tab's), so a new tab there does not wait
+    /// for shell startup.
+    spare: Mutex<Option<(PathBuf, TabId)>>,
+}
+
+/// Windows paths: case-insensitive, trailing separator irrelevant.
+fn same_dir(a: &Path, b: &Path) -> bool {
+    let norm = |p: &Path| {
+        p.to_string_lossy()
+            .trim_end_matches(['\\', '/'])
+            .to_lowercase()
+    };
+    norm(a) == norm(b)
 }
 
 impl PtyManager {
@@ -133,24 +144,33 @@ impl PtyManager {
         })
     }
 
-    /// Start a spare shell in the background, unless one is already waiting.
-    pub fn prewarm(self: &Arc<Self>) {
+    /// Start a spare shell in `dir` (home if `None`) in the background, replacing a spare waiting in
+    /// another folder. Nothing to do if one already waits there.
+    pub fn prewarm(self: &Arc<Self>, dir: Option<PathBuf>) {
+        let dir = dir.unwrap_or_else(|| self.home.clone());
+        if self
+            .spare
+            .lock()
+            .unwrap()
+            .as_ref()
+            .is_some_and(|(d, _)| same_dir(d, &dir))
+        {
+            return;
+        }
         let me = self.clone();
         thread::spawn(move || {
-            let Ok(id) = me.spawn(&me.home, None) else {
+            let Ok(id) = me.spawn(&dir, None) else {
                 return;
             };
-            let mut spare = me.spare.lock().unwrap();
-            if spare.is_none() {
-                *spare = Some(id);
-            } else {
-                drop(spare);
-                me.close(id);
+            let replaced = me.spare.lock().unwrap().replace((dir, id));
+            if let Some((_, old)) = replaced {
+                me.close(old);
             }
         });
     }
 
-    /// Open a tab's shell. Without `cwd` (= home) and `startup`, it takes the spare shell.
+    /// Open a tab's shell in `cwd` (home if `None`). Takes the spare shell if it waits in that folder
+    /// and there is no startup command. Refilling the spare is the caller's call (`prewarm`).
     pub fn open(
         self: &Arc<Self>,
         cwd: Option<PathBuf>,
@@ -159,18 +179,22 @@ impl PtyManager {
         on_data: OnData,
         on_exit: OnExit,
     ) -> Result<TabId> {
-        let spare = if cwd.is_none() && startup.is_none() {
-            self.spare.lock().unwrap().take()
+        let dir = cwd.unwrap_or_else(|| self.home.clone());
+        let spare = if startup.is_none() {
+            let mut spare = self.spare.lock().unwrap();
+            match spare.as_ref() {
+                Some((d, _)) if same_dir(d, &dir) => spare.take().map(|(_, id)| id),
+                _ => None,
+            }
         } else {
             None
         };
         let id = match spare {
             Some(id) => id,
-            None => self.spawn(cwd.as_deref().unwrap_or(&self.home), startup)?,
+            None => self.spawn(&dir, startup)?,
         };
         self.resize(id, size)?;
         self.attach(id, on_data, on_exit)?;
-        self.prewarm();
         Ok(id)
     }
 
@@ -201,7 +225,7 @@ impl PtyManager {
 
     /// Closes every tab's shell (not the spare). For a freshly loaded frontend, which owns none of them.
     pub fn close_all_tabs(&self) {
-        let spare = *self.spare.lock().unwrap();
+        let spare = self.spare.lock().unwrap().as_ref().map(|(_, id)| *id);
         let ids: Vec<TabId> = self
             .sessions
             .lock()
@@ -363,7 +387,7 @@ mod tests {
     fn wait_for_spare(m: &PtyManager) -> TabId {
         let deadline = Instant::now() + Duration::from_secs(10);
         while Instant::now() < deadline {
-            if let Some(id) = *m.spare.lock().unwrap() {
+            if let Some((_, id)) = *m.spare.lock().unwrap() {
                 return id;
             }
             thread::sleep(Duration::from_millis(20));
@@ -383,7 +407,7 @@ mod tests {
     #[test]
     fn new_tab_takes_prewarmed_shell_and_replays_its_output() {
         let m = cmd_manager();
-        m.prewarm();
+        m.prewarm(None);
         let spare = wait_for_spare(&m);
         // Let the spare print its prompt into the buffer before anyone attaches.
         thread::sleep(Duration::from_millis(500));
@@ -394,9 +418,53 @@ mod tests {
         m.write(id, b"echo still-alive\r\n").unwrap();
         wait_for_output(&out, "still-alive");
 
-        // Opening refills the spare.
-        assert_ne!(wait_for_spare(&m), id);
+        assert!(m.spare.lock().unwrap().is_none(), "the spare was used");
         m.close(id);
+    }
+
+    #[test]
+    fn spare_is_only_used_in_its_own_folder() {
+        let m = cmd_manager();
+        let a = tempfile::tempdir().unwrap();
+        let b = tempfile::tempdir().unwrap();
+        m.prewarm(Some(a.path().into()));
+        let spare = wait_for_spare(&m);
+
+        let (in_b, _, _) = open(&m, Some(b.path().into()), None);
+        assert_ne!(in_b, spare, "another folder spawns its own shell");
+        // Same folder, other spelling (case, trailing separator): takes the spare.
+        let a_upper = format!("{}\\", a.path().display()).to_uppercase();
+        let (in_a, out, _) = open(&m, Some(a_upper.into()), None);
+        assert_eq!(in_a, spare);
+        m.write(in_a, b"cd\r\n").unwrap();
+        wait_for_output(&out, &a.path().file_name().unwrap().to_string_lossy());
+        m.close(in_a);
+        m.close(in_b);
+    }
+
+    #[test]
+    fn prewarm_keeps_a_spare_in_the_same_folder_and_replaces_another() {
+        let m = cmd_manager();
+        let a = tempfile::tempdir().unwrap();
+        let b = tempfile::tempdir().unwrap();
+        m.prewarm(Some(a.path().into()));
+        let first = wait_for_spare(&m);
+        m.prewarm(Some(a.path().into()));
+        thread::sleep(Duration::from_millis(300));
+        assert_eq!(wait_for_spare(&m), first, "same folder: no new shell");
+
+        m.prewarm(Some(b.path().into()));
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while wait_for_spare(&m) == first && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(20));
+        }
+        let second = wait_for_spare(&m);
+        assert_ne!(second, first);
+        assert!(
+            m.write(first, b"x").is_err(),
+            "the replaced spare is closed"
+        );
+        m.close(second);
     }
 
     #[test]
@@ -420,7 +488,10 @@ mod tests {
     fn powershell_reports_cwd_and_runs_startup() {
         let dir = tempfile::tempdir().unwrap();
         let cwd = dir.path().canonicalize().unwrap();
-        let cwd = cwd.to_string_lossy().trim_start_matches(r"\?\").to_string();
+        let cwd = cwd
+            .to_string_lossy()
+            .trim_start_matches(r"\\?\")
+            .to_string();
         let m = PtyManager::new(Shell::default_for_platform(), std::env::temp_dir(), vec![]);
         let (id, out, _) = open(
             &m,
@@ -437,17 +508,12 @@ mod tests {
         let m = cmd_manager();
         let (a, _, _) = open(&m, Some(std::env::temp_dir()), None);
         let (b, _, _) = open(&m, Some(std::env::temp_dir()), None);
+        m.prewarm(None);
         let spare = wait_for_spare(&m);
         m.close_all_tabs();
         assert!(m.write(a, b"x").is_err());
         assert!(m.write(b, b"x").is_err());
-        assert!(
-            m.write(
-                spare, b"rem
-"
-            )
-            .is_ok()
-        );
+        assert!(m.write(spare, b"rem\r\n").is_ok());
         m.close(spare);
     }
 

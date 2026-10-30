@@ -79,6 +79,12 @@ fn pty_resize(ptys: Ptys, id: TabId, cols: u16, rows: u16) -> Result<(), String>
     ptys.resize(id, size(cols, rows)).map_err(err)
 }
 
+/// Keeps a spare shell ready in `cwd` (the active tab's folder): the next new tab there is instant.
+#[tauri::command]
+fn pty_prewarm(ptys: Ptys, cwd: Option<String>) {
+    ptys.prewarm(cwd.map(Into::into));
+}
+
 #[tauri::command]
 fn pty_close(ptys: Ptys, id: TabId) {
     ptys.close(id);
@@ -345,7 +351,7 @@ pub fn run() {
                 home,
                 vec![("RIFT_PIPE".into(), pipe)],
             );
-            ptys.prewarm();
+            ptys.prewarm(None);
             app.manage(ptys);
             Ok(())
         })
@@ -359,6 +365,7 @@ pub fn run() {
             pty_write,
             pty_resize,
             pty_close,
+            pty_prewarm,
             session_restore,
             session_update,
             session_freeze,

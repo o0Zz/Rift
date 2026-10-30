@@ -88,6 +88,14 @@ function App() {
     clearTimeout(panelTimer);
     panelTimer = setTimeout(() => setPanelTab(tab), 150);
   });
+  // Keep the spare shell in the active tab's folder, so a new tab there (which opens in the same
+  // folder) is instant. Only once the tab and its folder stay put: each move costs a shell start.
+  let prewarmTimer = 0;
+  createEffect(() => {
+    const cwd = active()?.cwd;
+    clearTimeout(prewarmTimer);
+    prewarmTimer = setTimeout(() => invoke("pty_prewarm", { cwd: cwd ?? null }), 1000);
+  });
   // Saving starts once restored tabs have their shells, so a half-restored state is never written.
   const [restored, setRestored] = createSignal(false);
 
@@ -120,11 +128,12 @@ function App() {
     }
   }
 
-  /** New tabs open right after the active one, in its group. */
+  /** New tabs open right after the active one, in its group and its folder. */
   function newTab(saved?: SavedTab): Promise<void> {
     const tab = new Tab();
+    const cwd = saved ? saved.cwd : active()?.cwd;
     tab.title = saved?.title ?? "shell";
-    tab.cwd = saved?.cwd;
+    tab.cwd = cwd;
     tab.name = saved?.ui?.name;
     tab.color = saved?.ui?.color;
     tab.group = saved ? saved.ui?.group : active()?.group;
@@ -138,7 +147,7 @@ function App() {
         }),
       );
     };
-    if (saved?.cwd) onCwd(saved.cwd);
+    if (cwd) onCwd(cwd);
     tab.view = new TermView(host, { onTitle: (v) => (tab.title = v), onCwd }, look());
 
     const list = [...tabs()];
@@ -148,7 +157,7 @@ function App() {
     setTabs(list);
     activate(tab);
     return tab.view
-      .start(saved?.cwd, saved?.agent)
+      .start(cwd, saved?.agent)
       .then(save) // the pty id is not reactive
       .catch((e) => void (tab.title = `error: ${e}`));
   }

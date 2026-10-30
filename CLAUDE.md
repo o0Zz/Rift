@@ -87,7 +87,8 @@ Frontend ↔ backend via Tauri commands (request/response) and events (agent sta
 ### Terminal pipeline (decisions already made — keep them)
 - `pty_open` takes a Tauri `Channel`; PTY output is sent as `InvokeResponseBody::Raw` bytes (no JSON) and fed to `term.write(Uint8Array)`. Shell exit is the `pty-exit` event (payload: pty id).
 - Exit is detected by waiting on the child, not by reader EOF: ConPTY keeps the pipe open after the shell exits.
-- Spare shell: started at launch and after every `pty_open` without `cwd`. Its output is buffered in `Sink::Buffer` and replayed on attach.
+- New tabs (shortcut, + button) open in the **active tab's folder**. Spare shell: one shell waiting in a folder (home at launch). The frontend calls `pty_prewarm(active tab's cwd)` once the active tab and its folder are stable for 1 s, so the next new tab there takes the spare and is instant; `pty_open` uses the spare only for the same folder (case/trailing-separator insensitive) and no startup command. Its output is buffered in `Sink::Buffer` and replayed on attach.
+- New tab stays on Ctrl+Shift+T by default: plain Ctrl+T belongs to the shell and to Claude Code (task list). Users can rebind it in settings.
 - ConPTY sends `ESC[6n` (cursor position request) at startup and blocks until answered. xterm.js answers it. That is why `TermView` queues input on a promise until `pty_open` returns: the replayed spare output triggers the answer *before* the id is known. Tests answer it by hand (`\x1b[1;1R`).
 - Each tab owns one `TermView` (one xterm) for its whole life; switching = `display: none` toggle, fit only on show.
 - No WebGL addon. Measured: creating a WebGL context on show made cycling 20 tabs ~54 ms p95 vs ~15 ms with the DOM renderer, and browsers cap contexts at ~16. Re-adding it needs a bench that proves a win.
