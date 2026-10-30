@@ -1,4 +1,3 @@
-// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { displayTitle, folderName, moveGroup, moveTab, ownRowColor, shouldNotify, visualOrder, type Group } from "./layout";
 

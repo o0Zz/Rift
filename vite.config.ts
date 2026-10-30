@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from "vite";
 import solid from "vite-plugin-solid";
 // @ts-expect-error type error without @types/node package
@@ -7,6 +8,9 @@ const host = process.env.TAURI_DEV_HOST;
 // https://vite.dev/config/
 export default defineConfig(() => ({
   plugins: [solid()],
+  // Tests are pure logic. vite-plugin-solid would default them to jsdom (not installed): vitest then
+  // reports a missing dependency and exits 1 even when every test passes.
+  test: { environment: "node" },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //

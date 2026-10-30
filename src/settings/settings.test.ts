@@ -1,4 +1,3 @@
-// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { actionFor, bind, comboOf, DEFAULT_KEYS, DEFAULTS, isValidShortcut, mergeSettings, resolveTheme } from "./settings";
 

@@ -1,4 +1,3 @@
-// @vitest-environment node
 import { expect, it } from "vitest";
 import { commitFiles, diffLineClass } from "./diff";
 
