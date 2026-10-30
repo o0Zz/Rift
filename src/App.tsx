@@ -2,7 +2,7 @@ import { batch, createEffect, createSignal, For, on, onCleanup, onMount, Show, u
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
-import { sendNotification } from "@tauri-apps/plugin-notification";
+import { onAction, sendNotification } from "@tauri-apps/plugin-notification";
 import { TermView, type AgentSession, type TermLook } from "./terminal/TermView";
 import { TERMINAL_THEMES } from "./terminal/themes";
 import { neighbour } from "./tabs/nav";
@@ -260,9 +260,23 @@ function App() {
     if (!shouldNotify(tab.status, visible)) return;
     tab.unread = true;
     sendNotification({
+      id: ++notificationId,
       title: `${tab.status === "done" ? "✓" : "■"} ${displayTitle(tab)}`,
       body: tab.status === "done" ? "Agent finished" : message || "Agent needs your input",
+      extra: { pty }, // brought back by a click (onAction) to open this tab
     });
+  }
+
+  let notificationId = 0;
+
+  /** A click on a notification: bring Rift to the front on the tab it was about. */
+  async function openNotifiedTab(pty: unknown) {
+    const win = getCurrentWindow();
+    await win.unminimize();
+    await win.show();
+    await win.setFocus();
+    const tab = tabs().find((t) => t.view.ptyId === pty);
+    if (tab) activate(tab);
   }
 
   async function checkIntegrations() {
@@ -311,6 +325,8 @@ function App() {
       // Another `rift.exe <dir>` was launched (Explorer menu): single-instance forwards the folder here.
       listen<string>("open-dir", (e) => newTab({ cwd: e.payload, title: "" })),
     ];
+    // Registered at startup: notifications shown before a listener exists report no click.
+    const notificationClicks = onAction((e) => openNotifiedTab(e.notification?.extra?.pty));
     let frame = 0;
     const resize = new ResizeObserver(() => {
       cancelAnimationFrame(frame);
@@ -347,6 +363,7 @@ function App() {
       window.removeEventListener("keydown", onKey, true);
       systemDark.removeEventListener("change", onSystemTheme);
       unlisten.forEach((u) => u.then((f) => f()));
+      notificationClicks.then((l) => l.unregister());
       resize.disconnect();
     });
   });
