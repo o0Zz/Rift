@@ -7,6 +7,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import "@xterm/xterm/css/xterm.css";
 import { cwdFromOsc7, cwdFromOsc9 } from "./osc";
 import { quotePath } from "./paths";
+import { IS_MAC } from "../settings/settings";
 
 export type AgentSession = { harness: string; session_id: string };
 
@@ -81,9 +82,19 @@ export class TermView {
         this.term.clearSelection();
         return false;
       }
-      // Let the browser fire its paste event, which xterm turns into input.
-      return e.key !== "v";
+      // Let the browser fire its paste event, which xterm turns into input. On macOS Cmd+V pastes: Ctrl+V goes
+      // to the shell like any other key.
+      return e.key !== "v" || IS_MAC;
     });
+    // A paste without text (an image): send the Ctrl+V key itself. Claude Code then reads the image from the
+    // clipboard (its image paste key is Ctrl+V on Linux/macOS; Alt+V on Windows, which xterm passes through).
+    this.el.addEventListener(
+      "paste",
+      (e) => {
+        if (!e.clipboardData?.getData("text/plain")) this.write("\x16");
+      },
+      true,
+    );
     // A path dragged from the files panel is typed in at the cursor (quoted when needed).
     this.el.addEventListener("dragover", (e) => {
       if (e.dataTransfer?.types.includes(PATH_DRAG_TYPE)) e.preventDefault();
