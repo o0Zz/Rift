@@ -1,6 +1,7 @@
 import { createEffect, createSignal, For, Show } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { commitFiles as files, diffLineClass, type Change } from "./diff";
+import { Icon } from "../ui/Icon";
 
 /**
  * Branch, changed files, per-file diff, and commit of the checked files.
@@ -96,17 +97,19 @@ export function GitPanel(props: { root?: string; branch?: string; onClose(): voi
       <div class="panel-head">
         <span class="panel-title">
           <Show when={props.branch} fallback="Git">
-            <span class="branch">⎇ {props.branch}</span>
+            <span class="branch">
+              <Icon name="branch" size={14} /> {props.branch}
+            </span>
           </Show>
         </span>
         <span class="head-buttons">
           <Show when={props.root}>
             <button class="icon-btn" title="Refresh" onClick={() => load(props.root!)}>
-              ⟳
+              <Icon name="refresh" />
             </button>
           </Show>
           <button class="icon-btn" title="Close (Ctrl+Shift+G)" onClick={() => props.onClose()}>
-            ×
+            <Icon name="close" />
           </button>
         </span>
       </div>

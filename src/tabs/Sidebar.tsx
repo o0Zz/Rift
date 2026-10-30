@@ -3,6 +3,7 @@ import { displayTitle, matchesFilter, ownRowColor, visualOrder, type Drop, type 
 import { createMenu, type MenuItem } from "../ui/Menu";
 import type { Tab } from "./Tab";
 import { TabIcon } from "./icons";
+import { Icon } from "../ui/Icon";
 
 export type SidebarProps = {
   tabs: Tab[];
@@ -150,7 +151,9 @@ export function Sidebar(props: SidebarProps) {
           <Show when={tab.cwd}>
             <span class="tab-sub">
               <Show when={tab.branch}>
-                <span class="tab-branch">⎇ {tab.branch}</span>
+                <span class="tab-branch">
+                  <Icon name="branch" size={11} /> {tab.branch}
+                </span>
               </Show>
               <span class="tab-path">
                 <bdo dir="ltr">{tab.cwd}</bdo>
@@ -162,7 +165,7 @@ export function Sidebar(props: SidebarProps) {
           <span class="unread" title="New agent activity" />
         </Show>
         <span class="tab-close" onMouseDown={(e) => (e.stopPropagation(), props.onClose(tab))}>
-          ×
+          <Icon name="close" size={12} />
         </span>
       </div>
     );
@@ -189,7 +192,7 @@ export function Sidebar(props: SidebarProps) {
             onClick={() => props.onTogglePanel("explorer")}
             title="Files (Ctrl+Shift+E)"
           >
-            🗀
+            <Icon name="folder" />
           </button>
           <button
             class="icon-btn"
@@ -197,13 +200,13 @@ export function Sidebar(props: SidebarProps) {
             onClick={() => props.onTogglePanel("git")}
             title="Git changes (Ctrl+Shift+G)"
           >
-            ⎇
+            <Icon name="branch" />
           </button>
           <button class="icon-btn" onClick={() => props.onOpenSettings()} title="Settings (Ctrl+,)">
-            ⚙
+            <Icon name="gear" />
           </button>
           <button class="icon-btn" onClick={() => props.onNewTab()} title="New tab (Ctrl+Shift+T)">
-            +
+            <Icon name="plus" />
           </button>
         </span>
       </div>
@@ -248,7 +251,9 @@ export function Sidebar(props: SidebarProps) {
                 onDblClick={(e) => (e.stopPropagation(), setEditing(g))}
                 onContextMenu={(e) => groupMenu(e, g)}
               >
-                <span class="chev">{g.collapsed ? "▸" : "▾"}</span>
+                <span class="chev">
+                  <Icon name={g.collapsed ? "right" : "down"} size={12} />
+                </span>
                 <span class="dot" style={{ background: g.color ?? "#777" }} />
                 <Show when={editing() === g} fallback={<span class="group-name">{g.name}</span>}>
                   <Rename value={g.name} commit={(v) => v && props.onUpdateGroup(g.id, { name: v })} />

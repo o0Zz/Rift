@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { createMenu } from "../ui/Menu";
 import { folderName } from "../tabs/layout";
 import { fileBadge } from "./fileIcons";
+import { Icon } from "../ui/Icon";
 import { PATH_DRAG_TYPE } from "../terminal/TermView";
 
 type Entry = { name: string; dir: boolean };
@@ -104,7 +105,7 @@ export function Explorer(props: { root?: string; onClose(): void }) {
                       onClick={() => (entry.dir ? toggle(path) : invoke("fs_open", { path }))}
                       onContextMenu={(e) => fileMenu(e, path)}
                     >
-                      <span class="tree-chev">{entry.dir ? (open() ? "▾" : "▸") : ""}</span>
+                      <span class="tree-chev">{entry.dir && <Icon name={open() ? "down" : "right"} size={12} />}</span>
                       <FileIcon name={entry.name} dir={entry.dir} open={open()} />
                       <span classList={{ "tree-dir": entry.dir }}>{entry.name}</span>
                     </div>
@@ -129,10 +130,10 @@ export function Explorer(props: { root?: string; onClose(): void }) {
         </span>
         <span class="head-buttons">
           <button class="icon-btn" title="Refresh" onClick={refresh}>
-            ⟳
+            <Icon name="refresh" />
           </button>
           <button class="icon-btn" title="Close (Ctrl+Shift+E)" onClick={() => props.onClose()}>
-            ×
+            <Icon name="close" />
           </button>
         </span>
       </div>

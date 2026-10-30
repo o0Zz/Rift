@@ -1,4 +1,5 @@
 import { createSignal, onMount } from "solid-js";
+import { Icon } from "./Icon";
 
 /** Search box over the terminal: Enter = next, Shift+Enter = previous, Esc = close. */
 export function FindBar(props: { find(text: string, backwards: boolean): boolean; onClose(): void }) {
@@ -25,13 +26,13 @@ export function FindBar(props: { find(text: string, backwards: boolean): boolean
         }}
       />
       <button class="icon-btn" title="Previous (Shift+Enter)" onClick={() => run(true)}>
-        ↑
+        <Icon name="up" />
       </button>
       <button class="icon-btn" title="Next (Enter)" onClick={() => run()}>
-        ↓
+        <Icon name="down" />
       </button>
       <button class="icon-btn" title="Close (Esc)" onClick={() => props.onClose()}>
-        ×
+        <Icon name="close" />
       </button>
     </div>
   );

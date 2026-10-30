@@ -1,6 +1,7 @@
 import { createSignal, For, Show, onCleanup, onMount } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
+import { Icon } from "../ui/Icon";
 import { ACTIONS, bind, comboOf, DEFAULT_KEYS, displayVersion, isValidShortcut, type Action, type Settings, type ThemeChoice } from "./settings";
 
 /** Settings overlay. While open, Rift's own shortcuts are off (App), so keys can be recorded. */
@@ -63,7 +64,7 @@ export function SettingsPage(props: { settings: Settings; onChange(s: Settings):
         <div class="settings-head">
           <span>Settings</span>
           <button class="icon-btn" title="Close (Esc)" onClick={() => props.onClose()}>
-            ×
+            <Icon name="close" />
           </button>
         </div>
         <div class="settings-body">
