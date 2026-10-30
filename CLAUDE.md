@@ -52,7 +52,8 @@ src/                 Frontend
 Frontend tabs: `tabs/layout.ts` (pure logic: order, moves, titles, notify rule — unit-tested), `tabs/Tab.ts` (tab state as Solid signals behind getters), `tabs/Sidebar.tsx` (UI only), `App.tsx` (wiring: restore/save, keys, agent status).
 
 ### Sidebar (decisions already made — keep them)
-- Vertical tabs on the left (240px). Named groups (collapsible, colored, drag to reorder); tabs have an optional color (bar; falls back to the group color) and an optional user name. Right-click menus; double-click renames.
+- Vertical tabs on the left (240px). Named groups (collapsible, colored, drag to reorder); tabs have an optional color and an optional user name. Colors fill the whole row / whole group block (Warp-style, `color-mix`); a tab's own color wins inside a colored group. Right-click menus; double-click renames.
+- Tab icon (`tabs/icons.tsx`): shell prompt, or the running agent's icon by harness id (`agent-status` carries `harness`). The icon needs the hooks (Enable banner); no process polling or title guessing.
 - One global tab array + `group` per tab; the **visual order** (`visualOrder`: groups in order, then ungrouped) drives the sidebar and Ctrl+PgUp/PgDn. Activating a tab in a collapsed group expands it. New tabs open after the active tab, in its group.
 - Title: user name > agent's terminal title (Claude names the conversation) > folder name; a title ending in `.exe` (pwsh sets its own path) is ignored.
 - Name/color/group are saved as opaque `ui` per tab and groups as `layout`: the backend never interprets them.

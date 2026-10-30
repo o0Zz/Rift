@@ -1,6 +1,7 @@
 import { createSignal, For, Show, onCleanup, onMount, type JSX } from "solid-js";
 import { COLORS, displayTitle, visualOrder, type Drop, type Group } from "./layout";
 import type { Tab } from "./Tab";
+import { TabIcon } from "./icons";
 
 export type SidebarProps = {
   tabs: Tab[];
@@ -121,8 +122,8 @@ export function Sidebar(props: SidebarProps) {
     return (
       <div
         class="tab-row"
-        classList={{ active: props.active === tab, "drop-before": dropTarget() === tab }}
-        style={{ "--tab-color": tab.color ?? groupOf(tab)?.color ?? "transparent" }}
+        classList={{ active: props.active === tab, colored: !!tab.color, "drop-before": dropTarget() === tab }}
+        style={tab.color ? { "--tab-color": tab.color } : {}}
         title={tab.cwd ?? tab.title}
         draggable={editing() !== tab}
         onDragStart={(e) => dragStart(e, { tab })}
@@ -133,8 +134,8 @@ export function Sidebar(props: SidebarProps) {
         onDblClick={() => setEditing(tab)}
         onContextMenu={(e) => tabMenu(e, tab)}
       >
-        <span class="tab-icon" classList={{ agent: !!tab.status }}>
-          {tab.status ? "✻" : ">_"}
+        <span class="tab-icon">
+          <TabIcon agent={tab.agent} />
           <Show when={tab.status && tab.status !== "idle"}>
             <span class={`badge ${tab.status}`} title={tab.status} />
           </Show>
@@ -174,7 +175,7 @@ export function Sidebar(props: SidebarProps) {
       >
         <For each={props.groups}>
           {(g) => (
-            <div class="group">
+            <div class="group" classList={{ colored: !!g.color }} style={g.color ? { "--group-color": g.color } : {}}>
               <div
                 class="group-head"
                 classList={{ "drop-into": dropTarget() === g }}

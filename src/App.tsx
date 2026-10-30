@@ -14,7 +14,7 @@ type TabUi = { name?: string; color?: string; group?: string };
 type SavedTab = { cwd?: string; title: string; agent?: AgentSession; ui?: TabUi };
 type Saved = { tabs: SavedTab[]; active: number; layout?: { groups?: Group[] } };
 type Integration = { id: string; name: string; installed: boolean };
-type AgentStatus = { pty: number; status: Status | null; message: string | null };
+type AgentStatus = { pty: number; harness: string; status: Status | null; message: string | null };
 
 function App() {
   let host!: HTMLDivElement;
@@ -136,10 +136,13 @@ function App() {
     });
   }
 
-  function onAgentStatus({ pty, status, message }: AgentStatus) {
+  function onAgentStatus({ pty, harness, status, message }: AgentStatus) {
     const tab = tabs().find((t) => t.view.ptyId === pty);
     if (!tab) return;
-    tab.status = status ?? undefined;
+    batch(() => {
+      tab.status = status ?? undefined;
+      tab.agent = status ? harness : undefined;
+    });
     const visible = active() === tab && windowFocused();
     if (!shouldNotify(tab.status, visible)) return;
     tab.unread = true;

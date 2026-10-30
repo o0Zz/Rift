@@ -101,6 +101,8 @@ fn session_update(
 #[derive(Clone, Serialize)]
 struct AgentStatus {
     pty: TabId,
+    /// Harness id, so the UI can show that agent's icon.
+    harness: String,
     status: Option<&'static str>,
     message: Option<String>,
 }
@@ -191,6 +193,7 @@ pub fn run() {
                 };
                 let status = AgentStatus {
                     pty: msg.tab,
+                    harness: msg.harness.clone(),
                     status: event.status(),
                     message,
                 };

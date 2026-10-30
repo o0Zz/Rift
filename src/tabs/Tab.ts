@@ -17,6 +17,7 @@ export class Tab {
     color: field<string | undefined>(undefined),
     group: field<string | undefined>(undefined),
     status: field<Status | undefined>(undefined),
+    agent: field<string | undefined>(undefined),
     unread: field(false),
   };
 
@@ -34,6 +35,9 @@ export class Tab {
   /** Agent status from hooks; undefined = no agent in this tab. */
   get status() { return this.f.status.get(); }
   set status(v) { this.f.status.set(v); }
+  /** Harness id of the running agent (e.g. "claude"), for its icon. */
+  get agent() { return this.f.agent.get(); }
+  set agent(v) { this.f.agent.set(v); }
   get unread() { return this.f.unread.get(); }
   set unread(v) { this.f.unread.set(v); }
 }
