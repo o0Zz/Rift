@@ -1,20 +1,22 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
-  <!-- Source of every app icon: regenerate with `npx tauri icon src-tauri/icons/rift.svg`. -->
+  <!-- Source of every app icon: regenerate with `npx tauri icon src-tauri/icons/rift.svg` (see CLAUDE.md). -->
+  <!-- A console window: title bar with the three dots, then "R_" as a prompt. -->
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#7c3aed"/>
-      <stop offset="1" stop-color="#2563eb"/>
-    </linearGradient>
-    <linearGradient id="cursor" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" stop-color="#5eead4"/>
-      <stop offset="1" stop-color="#a5f3fc"/>
-    </linearGradient>
+    <clipPath id="window">
+      <rect x="40" y="72" width="944" height="880" rx="150"/>
+    </clipPath>
   </defs>
-  <rect x="32" y="32" width="960" height="960" rx="216" fill="url(#bg)"/>
-  <rect x="32" y="32" width="960" height="960" rx="216" fill="none" stroke="#ffffff" stroke-opacity="0.18" stroke-width="12"/>
+  <g clip-path="url(#window)">
+    <rect x="40" y="72" width="944" height="880" fill="#0d1117"/>
+    <rect x="40" y="72" width="944" height="170" fill="#21262d"/>
+  </g>
+  <rect x="40" y="72" width="944" height="880" rx="150" fill="none" stroke="#3d444d" stroke-width="16"/>
+  <circle cx="190" cy="157" r="38" fill="#ff5f57"/>
+  <circle cx="310" cy="157" r="38" fill="#febc2e"/>
+  <circle cx="430" cy="157" r="38" fill="#28c840"/>
   <!-- R: stem, bowl and leg as one round-capped stroke -->
-  <path d="M290 790 V250 H520 A150 150 0 0 1 520 550 H290 M480 550 L660 790"
-        fill="none" stroke="#ffffff" stroke-width="110" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M260 830 V360 H470 A135 135 0 0 1 470 630 H260 M440 630 L610 830"
+        fill="none" stroke="#e6edf3" stroke-width="96" stroke-linecap="round" stroke-linejoin="round"/>
   <!-- Terminal cursor -->
-  <rect x="730" y="730" width="170" height="70" rx="18" fill="url(#cursor)"/>
+  <rect x="690" y="770" width="190" height="72" rx="10" fill="#3fb950"/>
 </svg>
