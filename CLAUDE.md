@@ -43,13 +43,22 @@ src-tauri/src/       Rust
   agents/ ✅         AgentHarness trait + adapters (claude.rs ✅, later codex, gemini...)
   git.rs ✅          branch from .git/HEAD (no process); status/diff via git CLI (CREATE_NO_WINDOW)
   files.rs ✅        one directory level per call (explorer is lazy, never walks recursively)
+  settings.rs ✅     settings.json (frontend owns its shape), next to session.json
   notify/            Windows toast notifications
   shell_integration/ Explorer context menu (un)registration
 src/                 Frontend
-  tabs/ ✅  terminal/ ✅  panels/ ✅ (Explorer, GitPanel, diff.ts)  ui/Menu.tsx ✅  settings/
+  tabs/ ✅  terminal/ ✅ (+ themes.ts)  panels/ ✅ (Explorer, GitPanel, diff.ts, fileIcons.ts)  ui/ ✅ (Menu, Resizer)  settings/ ✅ (settings.ts pure + tested, SettingsPage.tsx)
 ```
 
 Frontend tabs: `tabs/layout.ts` (pure logic: order, moves, titles, notify rule — unit-tested), `tabs/Tab.ts` (tab state as Solid signals behind getters), `tabs/Sidebar.tsx` (UI only), `App.tsx` (wiring: restore/save, keys, agent status).
+
+### Settings and themes (decisions already made — keep them)
+- Settings page: overlay opened by ⚙ (tabs header) or Ctrl+,; Esc closes. While it is open, Rift's shortcuts are off so keys can be recorded.
+- `settings.ts` is the single source: `ACTIONS`, `DEFAULT_KEYS`, `mergeSettings` (any saved shape → valid settings, defaults for the rest), `comboOf` ("Ctrl+Shift+T"), `actionFor`, `bind` (moves a combo taken from another action). App dispatches shortcuts only through `actionFor(e, settings().keys)`.
+- A shortcut must use Ctrl or Alt (`isValidShortcut`): otherwise it would steal typing from the terminal.
+- Themes: every UI color is a CSS variable (`:root` = dark, `:root[data-theme="light"]` overrides); add new colors as variables, never as literals. Terminal palettes in `terminal/themes.ts` (light darkens ANSI yellow/cyan/white for contrast). "System" follows `prefers-color-scheme` live.
+- Theme/font changes apply live to every terminal via `TermView.setLook`; the effect tracks only theme + font size + font family (editing a shortcut or adding a tab must not re-render all terminals). A font change re-wraps like a resize: visible tab now, hidden ones in idle time.
+- Settings load before the tabs restore, so restored terminals start with the right look. The bench uses a temp settings file (defaults).
 
 ### Side panels (decisions already made — keep them)
 - Files panel (left, Ctrl+Shift+E) and git panel (right, Ctrl+Shift+G), toggled from the sidebar header or their × button; open/closed state saved in `layout.panels`.
@@ -113,7 +122,7 @@ UI and session code never mention "claude" directly; they talk to `AgentHarness`
 ## Features
 
 ### MVP (v0.1)
-- Tabs: new / close / rename / reorder, Ctrl+Shift+T, Ctrl+Shift+W (Ctrl+T/W stay with the shell), **Ctrl+PgUp / Ctrl+PgDn**, Ctrl+(Shift+)Tab, middle-click close. Instant switch.
+- Tabs: new / close / rename / reorder, Ctrl+Shift+T, Ctrl+Shift+W (Ctrl+T/W stay with the shell), **Ctrl+PgUp / Ctrl+PgDn**, Ctrl+(Shift+)Tab, middle-click close. Instant switch. All shortcuts configurable in settings.
 - Terminal: pwsh default, profiles, copy/paste, find (Ctrl+F), links clickable, configurable font/theme.
 - Agent status icon on each tab (working / idle / needs input) + Windows toast when an agent finishes or needs input while its tab is not focused.
 - Session restore: tabs, cwd, titles, and per-tab Claude session resume.
@@ -143,7 +152,7 @@ Blocks (actions, find, filter, sharing, sticky header), input editor (syntax hig
 - Commits: one short subject line, no sign-off trailers.
 
 ## Status
-Done: tabs + PTY + spare shell + shortcuts + copy/paste + tab-switch bench + session restore (tabs, cwd, per-tab Claude resume) + left sidebar with groups/colors/rename/drag + agent status badges + notifications + files panel + git panel (branch, changes, diff, commit selected files, AI commit message) + resizable/closable panels. Next: Explorer right-click menu ("Open in Rift"), session resume polish.
+Done: tabs + PTY + spare shell + shortcuts + copy/paste + tab-switch bench + session restore (tabs, cwd, per-tab Claude resume) + left sidebar with groups/colors/rename/drag + agent status badges + notifications + files panel + git panel (branch, changes, diff, commit selected files, AI commit message) + resizable/closable panels + settings page (theme dark/light/system, font, shortcuts). Next: Explorer right-click menu ("Open in Rift"), session resume polish.
 
 Dev loop: keep `npm run tauri dev` running (the user watches changes live). Run tests with `CARGO_TARGET_DIR=src-tauri/target/test` so they don't fight the running app over `target/debug/rift.exe`.
 

@@ -1,0 +1,85 @@
+// @vitest-environment node
+import { describe, expect, it } from "vitest";
+import { actionFor, bind, comboOf, DEFAULT_KEYS, DEFAULTS, isValidShortcut, mergeSettings, resolveTheme } from "./settings";
+
+const key = (key: string, mods: { ctrl?: boolean; shift?: boolean; alt?: boolean } = {}) => ({
+  key,
+  ctrlKey: mods.ctrl ?? true,
+  shiftKey: mods.shift ?? false,
+  altKey: mods.alt ?? false,
+  metaKey: false,
+});
+
+describe("comboOf", () => {
+  it("names key presses", () => {
+    expect(comboOf(key("t", { shift: true }))).toBe("Ctrl+Shift+T");
+    expect(comboOf(key("PageDown"))).toBe("Ctrl+PageDown");
+    expect(comboOf(key(","))).toBe("Ctrl+,");
+    expect(comboOf(key(" ", { ctrl: false, alt: true }))).toBe("Alt+Space");
+    expect(comboOf(key("Control"))).toBeUndefined();
+  });
+});
+
+describe("actionFor with the default keys", () => {
+  it("maps the default shortcuts", () => {
+    expect(actionFor(key("PageDown"), DEFAULT_KEYS)).toBe("nextTab");
+    expect(actionFor(key("Tab"), DEFAULT_KEYS)).toBe("nextTab");
+    expect(actionFor(key("Tab", { shift: true }), DEFAULT_KEYS)).toBe("prevTab");
+    expect(actionFor(key("PageUp"), DEFAULT_KEYS)).toBe("prevTab");
+    expect(actionFor(key("T", { shift: true }), DEFAULT_KEYS)).toBe("newTab");
+    expect(actionFor(key("W", { shift: true }), DEFAULT_KEYS)).toBe("closeTab");
+    expect(actionFor(key("E", { shift: true }), DEFAULT_KEYS)).toBe("toggleFiles");
+    expect(actionFor(key("G", { shift: true }), DEFAULT_KEYS)).toBe("toggleGit");
+    expect(actionFor(key(","), DEFAULT_KEYS)).toBe("settings");
+  });
+
+  it("leaves shell keys alone", () => {
+    for (const k of ["w", "t", "c", "v", "r"]) expect(actionFor(key(k), DEFAULT_KEYS)).toBeUndefined();
+    expect(actionFor(key("PageDown", { ctrl: false }), DEFAULT_KEYS)).toBeUndefined();
+    expect(actionFor(key("PageDown", { alt: true }), DEFAULT_KEYS)).toBeUndefined();
+  });
+});
+
+describe("bind", () => {
+  it("adds a shortcut and takes it away from another action", () => {
+    const r = bind(DEFAULT_KEYS, "toggleGit", "Ctrl+Shift+E");
+    expect(r.takenFrom).toBe("toggleFiles");
+    expect(r.keys.toggleFiles).toEqual([]);
+    expect(r.keys.toggleGit).toEqual(["Ctrl+Shift+G", "Ctrl+Shift+E"]);
+    expect(actionFor(key("E", { shift: true }), r.keys)).toBe("toggleGit");
+  });
+
+  it("does not duplicate an existing binding", () => {
+    expect(bind(DEFAULT_KEYS, "newTab", "ctrl+shift+t").keys.newTab).toEqual(["Ctrl+Shift+T"]);
+  });
+});
+
+it("rejects shortcuts that would steal typing", () => {
+  expect(isValidShortcut("Ctrl+Shift+T")).toBe(true);
+  expect(isValidShortcut("Alt+1")).toBe(true);
+  expect(isValidShortcut("Shift+T")).toBe(false);
+  expect(isValidShortcut("T")).toBe(false);
+});
+
+describe("mergeSettings", () => {
+  it("falls back to defaults for missing or invalid values", () => {
+    expect(mergeSettings(null)).toEqual(DEFAULTS);
+    const s = mergeSettings({ theme: "neon", fontSize: 200, fontFamily: " ", keys: { newTab: "oops" } });
+    expect(s).toEqual(DEFAULTS);
+  });
+
+  it("keeps valid saved values, including an action with no shortcut", () => {
+    const s = mergeSettings({ theme: "light", fontSize: 12, keys: { newTab: ["Alt+N"], closeTab: [] } });
+    expect(s.theme).toBe("light");
+    expect(s.fontSize).toBe(12);
+    expect(s.keys.newTab).toEqual(["Alt+N"]);
+    expect(s.keys.closeTab).toEqual([]);
+    expect(s.keys.nextTab).toEqual(DEFAULT_KEYS.nextTab);
+  });
+});
+
+it("resolves the system theme", () => {
+  expect(resolveTheme("system", true)).toBe("dark");
+  expect(resolveTheme("system", false)).toBe("light");
+  expect(resolveTheme("light", true)).toBe("light");
+});

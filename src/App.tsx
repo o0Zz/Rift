@@ -1,10 +1,13 @@
-import { batch, createEffect, createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { batch, createEffect, createSignal, For, on, onCleanup, onMount, Show, untrack } from "solid-js";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import { sendNotification } from "@tauri-apps/plugin-notification";
-import { TermView, type AgentSession } from "./terminal/TermView";
-import { neighbour, tabAction } from "./tabs/nav";
+import { TermView, type AgentSession, type TermLook } from "./terminal/TermView";
+import { TERMINAL_THEMES } from "./terminal/themes";
+import { neighbour } from "./tabs/nav";
+import { actionFor, DEFAULTS, mergeSettings, resolveTheme, type Settings } from "./settings/settings";
+import { SettingsPage } from "./settings/SettingsPage";
 import { displayTitle, moveGroup, moveTab, shouldNotify, visualOrder, type Drop, type Group, type Status } from "./tabs/layout";
 import { Tab } from "./tabs/Tab";
 import { Sidebar } from "./tabs/Sidebar";
@@ -29,6 +32,39 @@ function App() {
   const [missing, setMissing] = createSignal<Integration[]>([]);
   // From Tauri's window events: document.hasFocus() is not reliable in WebView2.
   const [windowFocused, setWindowFocused] = createSignal(true);
+  const [settings, setSettings] = createSignal<Settings>(DEFAULTS);
+  const [settingsOpen, setSettingsOpen] = createSignal(false);
+  const systemDark = window.matchMedia("(prefers-color-scheme: dark)");
+  const [systemIsDark, setSystemIsDark] = createSignal(systemDark.matches);
+  const theme = () => resolveTheme(settings().theme, systemIsDark());
+  const look = (): TermLook => ({
+    theme: TERMINAL_THEMES[theme()],
+    fontSize: settings().fontSize,
+    fontFamily: settings().fontFamily,
+  });
+  createEffect(() => (document.documentElement.dataset.theme = theme()));
+  // Live: theme/font changes reach every terminal. A font change alters the cell size, so the
+  // visible tab refits now and hidden ones in idle time (same path as a panel resize).
+  // Tracks only the three values (editing a shortcut or adding a tab must not re-render every terminal).
+  createEffect(
+    on(
+      [theme, () => settings().fontSize, () => settings().fontFamily],
+      () =>
+        untrack(() => {
+          const l = look();
+          for (const t of tabs()) t.view.setLook(l);
+          active()?.view.refit();
+          resizeHiddenTabs();
+        }),
+      { defer: true },
+    ),
+  );
+
+  function changeSettings(s: Settings) {
+    setSettings(s);
+    invoke("settings_save", { value: s });
+  }
+
   const [panels, setPanels] = createSignal<Panels>({ explorer: false, git: false });
   const [widths, setWidths] = createSignal<Widths>({ tabs: 240, explorer: 240, git: 440 });
   // While a panel edge is dragged the terminal is not re-wrapped (100+ ms each): only on release.
@@ -101,7 +137,7 @@ function App() {
       );
     };
     if (saved?.cwd) onCwd(saved.cwd);
-    tab.view = new TermView(host, { onTitle: (v) => (tab.title = v), onCwd });
+    tab.view = new TermView(host, { onTitle: (v) => (tab.title = v), onCwd }, look());
 
     const list = [...tabs()];
     const after = saved ? -1 : list.indexOf(active()!);
@@ -230,15 +266,18 @@ function App() {
   }
 
   function onKey(e: KeyboardEvent) {
-    const action = tabAction(e);
+    if (settingsOpen()) return; // the settings page owns the keyboard (shortcut recording, Esc)
+    const action = actionFor(e, settings().keys);
     if (!action) return;
     // Capture phase: handled before xterm sees the key.
     e.preventDefault();
     e.stopPropagation();
-    if (action === "new") newTab();
-    else if (action === "close") active() && closeTab(active()!);
-    else if (action === "explorer" || action === "git") togglePanel(action);
-    else step(action === "next" ? 1 : -1);
+    if (action === "newTab") newTab();
+    else if (action === "closeTab") active() && closeTab(active()!);
+    else if (action === "nextTab" || action === "prevTab") step(action === "nextTab" ? 1 : -1);
+    else if (action === "toggleFiles") togglePanel("explorer");
+    else if (action === "toggleGit") togglePanel("git");
+    else if (action === "settings") setSettingsOpen(true);
   }
 
   onMount(() => {
@@ -266,7 +305,12 @@ function App() {
       });
     });
     resize.observe(host);
-    restore();
+    const onSystemTheme = (e: MediaQueryListEvent) => setSystemIsDark(e.matches);
+    systemDark.addEventListener("change", onSystemTheme);
+    // Settings first: restored terminals are created with the right theme and font.
+    invoke("settings_load")
+      .then((saved) => setSettings(mergeSettings(saved)))
+      .finally(restore);
     checkIntegrations();
     invoke<string[] | null>("bench_dirs").then(async (dirs) => {
       if (!dirs) return;
@@ -281,6 +325,7 @@ function App() {
     });
     onCleanup(() => {
       window.removeEventListener("keydown", onKey, true);
+      systemDark.removeEventListener("change", onSystemTheme);
       unlisten.forEach((u) => u.then((f) => f()));
       resize.disconnect();
     });
@@ -303,6 +348,7 @@ function App() {
         onDeleteGroup={deleteGroup}
         panels={panels()}
         onTogglePanel={togglePanel}
+        onOpenSettings={() => setSettingsOpen(true)}
       />
         <Resizer edge="right" width={widths().tabs} min={160} max={480} onResize={resizeWidth("tabs")} onDragging={onDragging} />
       </div>
@@ -318,6 +364,13 @@ function App() {
             onDragging={onDragging}
           />
         </div>
+      </Show>
+      <Show when={settingsOpen()}>
+        <SettingsPage
+          settings={settings()}
+          onChange={changeSettings}
+          onClose={() => (setSettingsOpen(false), active()?.view.show())}
+        />
       </Show>
       <main class="main">
         <For each={missing()}>

@@ -1,9 +1,12 @@
-import { Terminal } from "@xterm/xterm";
+import { Terminal, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import "@xterm/xterm/css/xterm.css";
 
 export type AgentSession = { harness: string; session_id: string };
+
+/** Visual settings, applied at creation and live from the settings page. */
+export type TermLook = { theme: ITheme; fontSize: number; fontFamily: string };
 
 export type TermEvents = {
   onTitle(title: string): void;
@@ -22,15 +25,11 @@ export class TermView {
   // output asks for the cursor position before pty_open returns, and that answer must not be lost.
   private pty: Promise<number>;
   private attached!: (id: number) => void;
-  readonly term = new Terminal({
-    fontFamily: "'Cascadia Mono', Consolas, monospace",
-    fontSize: 14,
-    scrollback: 10000,
-    theme: { background: "#1e1e1e" },
-  });
+  readonly term: Terminal;
   private fit = new FitAddon();
 
-  constructor(host: HTMLElement, events: TermEvents) {
+  constructor(host: HTMLElement, events: TermEvents, look: TermLook) {
+    this.term = new Terminal({ scrollback: 10000, ...look });
     this.pty = new Promise((resolve) => (this.attached = resolve));
     this.el.className = "term";
     host.appendChild(this.el);
@@ -77,6 +76,13 @@ export class TermView {
 
   refit() {
     this.fit.fit();
+  }
+
+  /** Theme and font. A font change alters the cell size: the caller refits and resizes hidden tabs. */
+  setLook(look: TermLook) {
+    this.term.options.theme = look.theme;
+    this.term.options.fontSize = look.fontSize;
+    this.term.options.fontFamily = look.fontFamily;
   }
 
   /** For hidden tabs (they cannot measure themselves): take the visible tab's size. */

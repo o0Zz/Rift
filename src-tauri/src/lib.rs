@@ -4,6 +4,7 @@ mod git;
 pub mod hook;
 mod pty;
 mod session;
+mod settings;
 
 use std::sync::Arc;
 
@@ -12,6 +13,7 @@ use portable_pty::PtySize;
 use pty::{PtyManager, Shell, TabId};
 use serde::Serialize;
 use session::{Saved, SessionStore, TabInfo};
+use settings::SettingsFile;
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 
@@ -204,6 +206,16 @@ async fn git_diff(root: String, path: String, untracked: bool) -> Result<String,
     git::diff(root.as_ref(), &path, untracked).map_err(err)
 }
 
+#[tauri::command]
+fn settings_load(settings: State<SettingsFile>) -> serde_json::Value {
+    settings.load()
+}
+
+#[tauri::command]
+fn settings_save(settings: State<SettingsFile>, value: serde_json::Value) -> Result<(), String> {
+    settings.save(&value).map_err(err)
+}
+
 fn bench_mode() -> bool {
     std::env::var_os("RIFT_BENCH").is_some()
 }
@@ -245,6 +257,12 @@ pub fn run() {
             };
             let _ = bench_mode() && std::fs::remove_file(&session_path).is_ok();
             app.manage(SessionStore::new(session_path));
+            // The bench runs with default settings, never the user's.
+            app.manage(SettingsFile(if bench_mode() {
+                std::env::temp_dir().join("rift-bench-settings.json")
+            } else {
+                app.path().app_data_dir()?.join("settings.json")
+            }));
             app.manage(Harnesses(vec![Box::new(Claude {
                 settings: home.join(".claude").join("settings.json"),
             })]));
@@ -304,6 +322,8 @@ pub fn run() {
             git_status,
             git_diff,
             git_commit,
+            settings_load,
+            settings_save,
             commit_message,
             bench_dirs,
             bench_done

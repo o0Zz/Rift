@@ -18,6 +18,7 @@ export type SidebarProps = {
   onDeleteGroup(id: string): void;
   panels: { explorer: boolean; git: boolean };
   onTogglePanel(panel: "explorer" | "git"): void;
+  onOpenSettings(): void;
 };
 
 type Dragged = { tab: Tab } | { group: string };
@@ -170,6 +171,9 @@ export function Sidebar(props: SidebarProps) {
             title="Git changes (Ctrl+Shift+G)"
           >
             ⎇
+          </button>
+          <button class="icon-btn" onClick={() => props.onOpenSettings()} title="Settings (Ctrl+,)">
+            ⚙
           </button>
           <button class="icon-btn" onClick={() => props.onNewTab()} title="New tab (Ctrl+Shift+T)">
             +
