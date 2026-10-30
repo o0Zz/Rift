@@ -274,6 +274,17 @@ fn explorer_menu_set(enabled: bool) -> Result<(), String> {
     }
 }
 
+/// `RIFT_DATA_DIR`: an isolated profile (own session and settings, no single instance), e.g. to try
+/// things or take screenshots without touching the user's tabs.
+fn data_dir_override() -> Option<std::path::PathBuf> {
+    std::env::var_os("RIFT_DATA_DIR").map(Into::into)
+}
+
+/// Semver build metadata as a 4th number: 1.2.3+45 -> "1.2.3.45" (same as the frontend's displayVersion).
+fn display_version(version: &str) -> String {
+    version.replace('+', ".")
+}
+
 fn bench_mode() -> bool {
     std::env::var_os("RIFT_BENCH").is_some()
 }
@@ -302,8 +313,8 @@ fn bench_done(app: AppHandle, report: String, ok: bool) {
 pub fn run() {
     let mut builder = tauri::Builder::default();
     // Single instance: a second `rift.exe <dir>` (Explorer menu) opens a tab in this window instead.
-    // Not in bench mode, where the bench app must run next to a dev instance.
-    if !bench_mode() {
+    // Not in bench mode or an isolated profile, which must run next to the user's instance.
+    if !bench_mode() && data_dir_override().is_none() {
         builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
             if let Some(dir) = explorer_menu::dir_arg(&argv, std::path::Path::new(&cwd)) {
                 let _ = app.emit("open-dir", dir.display().to_string());
@@ -326,7 +337,9 @@ pub fn run() {
             let session_path = if bench_mode() {
                 std::env::temp_dir().join("rift-bench-session.json")
             } else {
-                app.path().app_data_dir()?.join("session.json")
+                data_dir_override()
+                    .map_or_else(|| app.path().app_data_dir(), Ok)?
+                    .join("session.json")
             };
             let _ = bench_mode() && std::fs::remove_file(&session_path).is_ok();
             app.manage(SessionStore::new(session_path));
@@ -334,7 +347,9 @@ pub fn run() {
             app.manage(SettingsFile(if bench_mode() {
                 std::env::temp_dir().join("rift-bench-settings.json")
             } else {
-                app.path().app_data_dir()?.join("settings.json")
+                data_dir_override()
+                    .map_or_else(|| app.path().app_data_dir(), Ok)?
+                    .join("settings.json")
             }));
             app.manage(Harnesses(vec![Box::new(Claude {
                 settings: home.join(".claude").join("settings.json"),
@@ -364,6 +379,14 @@ pub fn run() {
                 };
                 let _ = handle.emit("agent-status", status);
             }));
+
+            // Title shows the version, CI run number as 4th number: "Rift 1.2.3.45" (dev: "Rift 0.0.0").
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.set_title(&format!(
+                    "Rift {}",
+                    display_version(&app.package_info().version.to_string())
+                ));
+            }
 
             let ptys = PtyManager::new(
                 Shell::default_for_platform(),
@@ -408,4 +431,13 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn version_shows_the_run_number_as_4th_number() {
+        assert_eq!(super::display_version("1.2.3+45"), "1.2.3.45");
+        assert_eq!(super::display_version("0.0.0"), "0.0.0");
+    }
 }
