@@ -917,3 +917,25 @@ body,
   color: var(--fg-dim);
   font-size: 12px;
 }
+
+.setting label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 0;
+}
+
+.setting-sub {
+  color: var(--fg-dim);
+  font-size: 12px;
+}
+
+.setting-btn {
+  flex: none;
+  padding: 4px 14px;
+  border: 1px solid var(--primary);
+  border-radius: 4px;
+  background: var(--primary);
+  color: #fff;
+  font: inherit;
+}

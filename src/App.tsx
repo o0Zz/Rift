@@ -161,6 +161,9 @@ function App() {
     activate(list[Math.min(saved.active, list.length - 1)]);
     await Promise.all(starts);
     setRestored(true);
+    // Launched from Explorer's "Open in Rift": that folder opens as a new tab, after the restored ones.
+    const dir = await invoke<string | null>("startup_dir");
+    if (dir) newTab({ cwd: dir, title: "" });
   }
 
   function closeTab(tab: Tab) {
@@ -294,6 +297,8 @@ function App() {
         if (tab) closeTab(tab);
       }),
       listen<AgentStatus>("agent-status", (e) => onAgentStatus(e.payload)),
+      // Another `rift.exe <dir>` was launched (Explorer menu): single-instance forwards the folder here.
+      listen<string>("open-dir", (e) => newTab({ cwd: e.payload, title: "" })),
     ];
     let frame = 0;
     const resize = new ResizeObserver(() => {

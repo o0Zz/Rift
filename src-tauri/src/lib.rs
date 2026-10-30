@@ -1,4 +1,5 @@
 mod agents;
+mod explorer_menu;
 mod files;
 mod git;
 pub mod hook;
@@ -216,6 +217,32 @@ fn settings_save(settings: State<SettingsFile>, value: serde_json::Value) -> Res
     settings.save(&value).map_err(err)
 }
 
+/// Folder Rift was launched with (`rift.exe <dir>`, e.g. from Explorer's "Open in Rift"), opened as a new tab.
+#[tauri::command]
+fn startup_dir() -> Option<String> {
+    let args: Vec<String> = std::env::args().collect();
+    let cwd = std::env::current_dir().ok()?;
+    explorer_menu::dir_arg(&args, &cwd).map(|d| d.display().to_string())
+}
+
+#[tauri::command]
+fn explorer_menu_installed() -> Result<bool, String> {
+    let exe = std::env::current_exe().map_err(err)?;
+    Ok(explorer_menu::ExplorerMenu::default().installed(&exe))
+}
+
+/// Adds or removes "Open in Rift" in Explorer's right-click menu. Only from the user's click in settings.
+#[tauri::command]
+fn explorer_menu_set(enabled: bool) -> Result<(), String> {
+    let menu = explorer_menu::ExplorerMenu::default();
+    if enabled {
+        menu.install(&std::env::current_exe().map_err(err)?)
+            .map_err(err)
+    } else {
+        menu.uninstall().map_err(err)
+    }
+}
+
 fn bench_mode() -> bool {
     std::env::var_os("RIFT_BENCH").is_some()
 }
@@ -242,7 +269,21 @@ fn bench_done(app: AppHandle, report: String, ok: bool) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default();
+    // Single instance: a second `rift.exe <dir>` (Explorer menu) opens a tab in this window instead.
+    // Not in bench mode, where the bench app must run next to a dev instance.
+    if !bench_mode() {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
+            if let Some(dir) = explorer_menu::dir_arg(&argv, std::path::Path::new(&cwd)) {
+                let _ = app.emit("open-dir", dir.display().to_string());
+            }
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+            }
+        }));
+    }
+    builder
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let home = app.path().home_dir()?;
@@ -323,6 +364,9 @@ pub fn run() {
             git_diff,
             git_commit,
             settings_load,
+            startup_dir,
+            explorer_menu_installed,
+            explorer_menu_set,
             settings_save,
             commit_message,
             bench_dirs,

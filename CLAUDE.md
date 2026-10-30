@@ -44,6 +44,7 @@ src-tauri/src/       Rust
   git.rs ✅          branch from .git/HEAD (no process); status/diff via git CLI (CREATE_NO_WINDOW)
   files.rs ✅        one directory level per call (explorer is lazy, never walks recursively)
   settings.rs ✅     settings.json (frontend owns its shape), next to session.json
+  explorer_menu.rs ✅ "Open in Rift" registry entries (HKCU) + `rift.exe <dir>` argument parsing
   notify/            Windows toast notifications
   shell_integration/ Explorer context menu (un)registration
 src/                 Frontend
@@ -140,9 +141,11 @@ Blocks/rewritten input editor (would fight PowerShell's PSReadLine and cost spee
 Blocks (actions, find, filter, sharing, sticky header), input editor (syntax highlight, completions, autosuggestions, history search, vim keys, synchronized inputs, command corrections), tabs & vertical tabs, split panes, tab configs, launch configs, global hotkey, configurable toolbar, session restoration, themes/fonts/opacity/blur/pane dimming, settings file + sync, subshell/SSH warpify, markdown viewer, desktop notifications, bell, quit warning, URI scheme, command palette, code editor + file tree + LSP, code review panel, git worktrees, Warp Agent / CLI / cloud agents, third-party agents (Claude Code, Codex, Gemini CLI, OpenCode), Warp Drive (workflows, notebooks, prompts, env vars), team & session sharing.
 
 ## Windows specifics
-- Explorer menu: register under `HKCU\Software\Classes\Directory\shell\Rift` and `...\Directory\Background\shell\Rift` (no admin). On Windows 11 this appears under "Show more options"; the top-level modern menu needs a sparse MSIX package + `IExplorerCommand` (v0.2).
-- CLI: `rift.exe <dir>` opens a new tab in the running instance (single-instance plugin), not a new window.
-- Notifications: Windows toast via `tauri-plugin-notification`; click focuses the right tab.
+- Explorer menu ("Open in Rift" = new tab in the running window): Settings → Windows → Add/Remove. Writes `HKCU\Software\Classes\{Directory\shell, Directory\Background\shell, Drive\shell}\Rift` with command `"<exe>" "%V"` (no admin). On Windows 11 it is under "Show more options"; the top-level modern menu needs a sparse MSIX package + `IExplorerCommand` (later). Registered with the current exe path (in dev: target\debug\rift.exe). Tests use a throwaway `HKCU\Software\RiftTest-*` key, never the real one.
+- Single instance (`tauri-plugin-single-instance`, off in bench mode): a second `rift.exe <dir>` forwards its args to the running Rift (`open-dir` event → new tab, window focused) and exits. A first launch with `<dir>` restores the session, then opens `<dir>` as a new tab (`startup_dir`).
+- `dir_arg` fixes Explorer's drive-root quoting (`"C:\"` arrives as `C:"`) and resolves relative paths against the launching process's cwd.
+- "New window" from Explorer: deliberately not offered until real multi-window exists (user's choice).
+- Notifications: Windows toast via `tauri-plugin-notification`.
 
 ## Conventions
 - Rust: `cargo fmt`, `cargo clippy -- -D warnings`. Frontend: `tsc --noEmit`, eslint.
@@ -152,7 +155,7 @@ Blocks (actions, find, filter, sharing, sticky header), input editor (syntax hig
 - Commits: one short subject line, no sign-off trailers.
 
 ## Status
-Done: tabs + PTY + spare shell + shortcuts + copy/paste + tab-switch bench + session restore (tabs, cwd, per-tab Claude resume) + left sidebar with groups/colors/rename/drag + agent status badges + notifications + files panel + git panel (branch, changes, diff, commit selected files, AI commit message) + resizable/closable panels + settings page (theme dark/light/system, font, shortcuts). Next: Explorer right-click menu ("Open in Rift"), session resume polish.
+Done: tabs + PTY + spare shell + shortcuts + copy/paste + tab-switch bench + session restore (tabs, cwd, per-tab Claude resume) + left sidebar with groups/colors/rename/drag + agent status badges + notifications + files panel + git panel (branch, changes, diff, commit selected files, AI commit message) + resizable/closable panels + settings page (theme dark/light/system, font, shortcuts) + app icon + Explorer "Open in Rift" (new tab, single instance). Next: default shell choice (pwsh/cmd/Git Bash/WSL), multi-window, session resume polish.
 
 Dev loop: keep `npm run tauri dev` running (the user watches changes live). Run tests with `CARGO_TARGET_DIR=src-tauri/target/test` so they don't fight the running app over `target/debug/rift.exe`.
 

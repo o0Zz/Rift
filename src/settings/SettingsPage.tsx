@@ -1,10 +1,24 @@
 import { createSignal, For, Show, onCleanup, onMount } from "solid-js";
+import { invoke } from "@tauri-apps/api/core";
 import { ACTIONS, bind, comboOf, DEFAULT_KEYS, isValidShortcut, type Action, type Settings, type ThemeChoice } from "./settings";
 
 /** Settings overlay. While open, Rift's own shortcuts are off (App), so keys can be recorded. */
 export function SettingsPage(props: { settings: Settings; onChange(s: Settings): void; onClose(): void }) {
   const [recording, setRecording] = createSignal<Action>();
   const [note, setNote] = createSignal<string>();
+  const [menuInstalled, setMenuInstalled] = createSignal<boolean>();
+  const [menuError, setMenuError] = createSignal<string>();
+  invoke<boolean>("explorer_menu_installed").then(setMenuInstalled, (e) => setMenuError(String(e)));
+
+  async function setExplorerMenu(enabled: boolean) {
+    setMenuError(undefined);
+    try {
+      await invoke("explorer_menu_set", { enabled });
+      setMenuInstalled(await invoke<boolean>("explorer_menu_installed"));
+    } catch (e) {
+      setMenuError(String(e));
+    }
+  }
   const set = (patch: Partial<Settings>) => props.onChange({ ...props.settings, ...patch });
 
   onMount(() => {
@@ -85,6 +99,24 @@ export function SettingsPage(props: { settings: Settings; onChange(s: Settings):
               onChange={(e) => e.currentTarget.value.trim() && set({ fontFamily: e.currentTarget.value })}
             />
           </div>
+
+          <h3>Windows</h3>
+          <div class="setting">
+            <label>
+              “Open in Rift” in the File Explorer right-click menu
+              <span class="setting-sub">
+                Opens the folder in a new tab. On Windows 11 it is under “Show more options”.
+              </span>
+            </label>
+            <Show when={menuInstalled() !== undefined}>
+              <button class="setting-btn" onClick={() => setExplorerMenu(!menuInstalled())}>
+                {menuInstalled() ? "Remove" : "Add"}
+              </button>
+            </Show>
+          </div>
+          <Show when={menuError()}>
+            <div class="settings-note">{menuError()}</div>
+          </Show>
 
           <h3>
             Shortcuts
