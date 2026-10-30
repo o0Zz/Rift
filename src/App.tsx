@@ -35,7 +35,7 @@ import { FindBar } from "./ui/FindBar";
 import { PromptDialog } from "./ui/PromptDialog";
 import "./App.css";
 
-type TabUi = { name?: string; color?: string; group?: string; shell?: string };
+type TabUi = { name?: string; color?: string; group?: string; shell?: string; snap?: string };
 type SavedTab = { cwd?: string; title: string; agent?: AgentSession; ui?: TabUi };
 type Panels = { explorer: boolean; git: boolean };
 type Widths = { tabs: number; explorer: number; git: number };
@@ -150,7 +150,7 @@ function App() {
         pty: t.view.ptyId >= 0 ? t.view.ptyId : null,
         cwd: t.cwd ?? null,
         title: t.title,
-        ui: { name: t.name, color: t.color, group: t.group, shell: t.shell } satisfies TabUi,
+        ui: { name: t.name, color: t.color, group: t.group, shell: t.shell, snap: t.snap } satisfies TabUi,
       })),
       active: Math.max(0, list.indexOf(active()!)),
       layout: { groups: groups(), panels: panels(), widths: widths() },
@@ -169,6 +169,15 @@ function App() {
       const root = tab.root;
       tab.stats = root ? await invoke<GitStats>("git_stats", { root }).catch(() => undefined) : undefined;
     }, 1500);
+  }
+
+  /** Saves every shell tab's history (agent tabs are redisplayed by resuming). Before closing or updating. */
+  function saveHistories() {
+    return Promise.all(
+      tabs()
+        .filter((t) => !t.agent)
+        .map((t) => invoke("scrollback_save", { id: t.snap, data: t.view.snapshot() }).catch(() => {})),
+    );
   }
 
   /** A finished agent the user has now seen goes back to the plain agent icon after a moment. */
@@ -207,6 +216,7 @@ function App() {
     tab.group = saved ? saved.ui?.group : (opts.group ?? active()?.group);
     // Like the folder, a new tab keeps the shell of the tab it was opened from.
     tab.shell = saved ? saved.ui?.shell : (opts.shell ?? active()?.shell);
+    if (saved?.ui?.snap) tab.snap = saved.ui.snap;
     const onCwd = (cwd: string) => {
       tab.cwd = cwd;
       // At every prompt: also catches `git checkout` (same cwd, new branch).
@@ -236,8 +246,14 @@ function App() {
     active()?.view.hide();
     setTabs(list);
     activate(tab);
-    return tab.view
-      .start(cwd, saved?.agent, opts.startAgent, tab.shell)
+    // A restored shell tab shows its previous history first. Not agent tabs: resuming redisplays the session.
+    const history =
+      saved?.ui?.snap && !saved.agent
+        ? invoke<string | null>("scrollback_load", { id: saved.ui.snap }).catch(() => null)
+        : Promise.resolve(null);
+    return history
+      .then((h) => h && tab.view.restoreSnapshot(h))
+      .then(() => tab.view.start(cwd, saved?.agent, opts.startAgent, tab.shell))
       .then(save) // the pty id is not reactive
       .catch((e) => void (tab.title = `error: ${e}`));
   }
@@ -252,6 +268,7 @@ function App() {
     activate(list[Math.min(saved.active, list.length - 1)]);
     await Promise.all(starts);
     setRestored(true);
+    invoke("scrollback_prune", { keep: tabs().map((t) => t.snap) });
     // Launched from Explorer's "Open in Rift": that folder opens as a new tab, after the restored ones.
     const dir = await invoke<string | null>("startup_dir");
     if (dir) newTab({ cwd: dir, title: "" });
@@ -454,6 +471,7 @@ function App() {
         event.preventDefault();
         return;
       }
+      await saveHistories();
       await updater?.installIfReady();
     });
     // Registered at startup: notifications shown before a listener exists report no click.
@@ -478,7 +496,7 @@ function App() {
     invoke<string[] | null>("bench_dirs").then(async (dirs) => {
       if (!dirs) {
         // Not in dev (would offer the latest release over local work) nor in the bench.
-        if (!import.meta.env.DEV) updater = startUpdates((version, restart) => setUpdate({ version, restart }));
+        if (!import.meta.env.DEV) updater = startUpdates((version, restart) => setUpdate({ version, restart: () => saveHistories().then(restart) }));
         return;
       }
       const bench = await import("./bench");

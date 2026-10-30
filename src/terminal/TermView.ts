@@ -2,6 +2,7 @@ import { Terminal, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
 import { WebLinksAddon } from "@xterm/addon-web-links";
+import { SerializeAddon } from "@xterm/addon-serialize";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import "@xterm/xterm/css/xterm.css";
 import { cwdFromOsc7, cwdFromOsc9 } from "./osc";
@@ -39,6 +40,7 @@ export class TermView {
   readonly term: Terminal;
   private fit = new FitAddon();
   private search = new SearchAddon();
+  private serializer = new SerializeAddon();
 
   constructor(host: HTMLElement, events: TermEvents, look: TermLook) {
     this.term = new Terminal({ scrollback: 10000, ...look });
@@ -47,6 +49,7 @@ export class TermView {
     host.appendChild(this.el);
     this.term.loadAddon(this.fit);
     this.term.loadAddon(this.search);
+    this.term.loadAddon(this.serializer);
     // Ctrl+click opens a link, like VS Code and Windows Terminal: a plain click must not open pages by accident.
     this.term.loadAddon(new WebLinksAddon((e, url) => e.ctrlKey && invoke("open_url", { url })));
     this.term.open(this.el);
@@ -121,6 +124,16 @@ export class TermView {
   /** Finds `text` in the scrollback; returns whether it was found. */
   find(text: string, backwards = false): boolean {
     return backwards ? this.search.findPrevious(text) : this.search.findNext(text);
+  }
+
+  /** The last lines of the terminal, colors included, to show again after a restart. */
+  snapshot(lines = 2000): string {
+    return this.serializer.serialize({ scrollback: lines });
+  }
+
+  /** Writes a saved history back, before the shell's own output. */
+  restoreSnapshot(data: string) {
+    this.term.write(`${data}\r\n\x1b[2m── restored ──\x1b[0m\r\n`);
   }
 
   focus() {

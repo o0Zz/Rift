@@ -26,6 +26,7 @@ export class Tab {
     unread: field(false),
     shell: field<string | undefined>(undefined),
     stats: field<GitStats | undefined>(undefined),
+    snap: field<string>(crypto.randomUUID()),
   };
 
   get title() { return this.f.title.get(); }
@@ -53,6 +54,9 @@ export class Tab {
   /** Shell profile id (see shell_profiles); undefined = the default shell. */
   get shell() { return this.f.shell.get(); }
   set shell(v) { this.f.shell.set(v); }
+  /** Id of the tab's saved history (scrollback_save/load), kept across restarts. */
+  get snap() { return this.f.snap.get(); }
+  set snap(v) { this.f.snap.set(v); }
   get stats() { return this.f.stats.get(); }
   set stats(v) { this.f.stats.set(v); }
   get unread() { return this.f.unread.get(); }

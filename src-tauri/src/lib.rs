@@ -4,6 +4,7 @@ mod files;
 mod git;
 pub mod hook;
 mod pty;
+mod scrollback;
 mod session;
 mod settings;
 mod shell;
@@ -13,6 +14,7 @@ use std::sync::Arc;
 use agents::{AgentEvent, AgentSession, Harnesses, claude::Claude};
 use portable_pty::PtySize;
 use pty::{PtyManager, Shell, TabId};
+use scrollback::Scrollback;
 use serde::Serialize;
 use session::{Saved, SessionStore, TabInfo};
 use settings::SettingsFile;
@@ -155,6 +157,31 @@ async fn git_worktree_add(root: String, branch: String) -> Result<String, String
 fn session_restore(session: State<SessionStore>, ptys: Ptys) -> Saved {
     ptys.close_all_tabs();
     session.load()
+}
+
+/// A tab's history, saved when Rift closes (`id`: the tab's snapshot id, a UUID).
+#[tauri::command]
+async fn scrollback_save(
+    store: State<'_, Scrollback>,
+    id: String,
+    data: String,
+) -> Result<(), String> {
+    store.save(&id, &data).map_err(err)
+}
+
+#[tauri::command]
+async fn scrollback_load(
+    store: State<'_, Scrollback>,
+    id: String,
+) -> Result<Option<String>, String> {
+    Ok(store.load(&id))
+}
+
+/// After restoring: histories of tabs that are gone are deleted.
+#[tauri::command]
+async fn scrollback_prune(store: State<'_, Scrollback>, keep: Vec<String>) -> Result<(), String> {
+    store.prune(&keep);
+    Ok(())
 }
 
 /// Before an update installs (the installer kills the app): keep the session as it is now.
@@ -400,6 +427,8 @@ pub fn run() {
                     .join("session.json")
             };
             let _ = bench_mode() && std::fs::remove_file(&session_path).is_ok();
+            // Tab histories live next to the session (temp folder for the bench).
+            app.manage(Scrollback(session_path.with_file_name("scrollback")));
             app.manage(SessionStore::new(session_path));
             // The bench runs with default settings, never the user's.
             app.manage(SettingsFile(if bench_mode() {
@@ -473,6 +502,9 @@ pub fn run() {
             session_restore,
             session_update,
             session_freeze,
+            scrollback_save,
+            scrollback_load,
+            scrollback_prune,
             agent_integrations,
             agent_install,
             fs_list,
