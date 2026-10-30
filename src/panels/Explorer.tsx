@@ -2,8 +2,32 @@ import { createEffect, createSignal, For, Show } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { createMenu } from "../ui/Menu";
 import { folderName } from "../tabs/layout";
+import { fileBadge } from "./fileIcons";
 
 type Entry = { name: string; dir: boolean };
+
+function FileIcon(p: { name: string; dir: boolean; open: boolean }) {
+  if (p.dir) {
+    return (
+      <svg class="file-icon" viewBox="0 0 16 16" width="16" height="16">
+        <path
+          d={p.open ? "M1.5 4h5l1.5 1.5h6.5v1H4.5L2 13H1.5z M4.5 7h11l-2.5 6.5H2z" : "M1.5 3h5l1.5 1.5h6.5v9h-13z"}
+          fill="#dcb67a"
+        />
+      </svg>
+    );
+  }
+  const badge = fileBadge(p.name);
+  return badge ? (
+    <span class="file-badge" classList={{ long: badge.label.length > 2 }} style={{ color: badge.color }}>
+      {badge.label}
+    </span>
+  ) : (
+    <svg class="file-icon" viewBox="0 0 16 16" width="16" height="16">
+      <path d="M3.5 1.5h6l3 3v10h-9z M9.5 1.5v3h3" fill="none" stroke="#8a8a8a" stroke-width="1" />
+    </svg>
+  );
+}
 
 const join = (dir: string, name: string) => `${dir.replace(/[\\/]+$/, "")}\\${name}`;
 
@@ -72,6 +96,7 @@ export function Explorer(props: { root?: string }) {
                       onContextMenu={(e) => fileMenu(e, path)}
                     >
                       <span class="tree-chev">{entry.dir ? (open() ? "▾" : "▸") : ""}</span>
+                      <FileIcon name={entry.name} dir={entry.dir} open={open()} />
                       <span classList={{ "tree-dir": entry.dir }}>{entry.name}</span>
                     </div>
                     <Show when={entry.dir && open()}>

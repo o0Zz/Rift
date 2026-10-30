@@ -466,6 +466,34 @@ body,
   color: #ddd;
 }
 
+.tree-row {
+  align-items: center;
+}
+
+.file-icon {
+  flex: none;
+}
+
+.file-badge {
+  flex: none;
+  width: 22px;
+  overflow: hidden;
+  font-family: "Segoe UI", system-ui, sans-serif;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 16px;
+  text-align: center;
+}
+
+.file-badge.long {
+  font-size: 9px;
+  letter-spacing: -0.04em;
+}
+
+.tree-row .file-icon {
+  width: 22px;
+}
+
 .tree-note {
   padding: 6px 12px;
   color: #777;
