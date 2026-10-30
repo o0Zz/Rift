@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { actionFor, bind, comboOf, DEFAULT_KEYS, DEFAULTS, isValidShortcut, mergeSettings, resolveTheme } from "./settings";
+import { actionFor, bind, comboOf, DEFAULT_KEYS, DEFAULTS, displayVersion, isValidShortcut, mergeSettings, resolveTheme } from "./settings";
 
 const key = (key: string, mods: { ctrl?: boolean; shift?: boolean; alt?: boolean } = {}) => ({
   key,
@@ -81,4 +81,10 @@ it("resolves the system theme", () => {
   expect(resolveTheme("system", true)).toBe("dark");
   expect(resolveTheme("system", false)).toBe("light");
   expect(resolveTheme("light", true)).toBe("light");
+});
+
+it("shows the CI run number as a 4th version number", () => {
+  expect(displayVersion("1.2.3+45")).toBe("1.2.3.45");
+  expect(displayVersion("0.0.0+7")).toBe("0.0.0.7");
+  expect(displayVersion("0.0.0")).toBe("0.0.0");
 });

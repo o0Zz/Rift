@@ -102,6 +102,10 @@ jobs:
         with:
           workspaces: src-tauri
       - run: npm ci
+      # Dev builds: 0.0.0+RUN (shown as 0.0.0.RUN); tagged releases get X.Y.Z+RUN from release.yml.
+      - name: Version from run number
+        shell: bash
+        run: npm pkg set version="0.0.0+${{ github.run_number }}"
       - name: Build installers
         shell: bash
         run: npx tauri build ${{ matrix.build-args }} --config '{"bundle":{"createUpdaterArtifacts":false}}'

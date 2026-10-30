@@ -1,6 +1,7 @@
 import { createSignal, For, Show, onCleanup, onMount } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
-import { ACTIONS, bind, comboOf, DEFAULT_KEYS, isValidShortcut, type Action, type Settings, type ThemeChoice } from "./settings";
+import { getVersion } from "@tauri-apps/api/app";
+import { ACTIONS, bind, comboOf, DEFAULT_KEYS, displayVersion, isValidShortcut, type Action, type Settings, type ThemeChoice } from "./settings";
 
 /** Settings overlay. While open, Rift's own shortcuts are off (App), so keys can be recorded. */
 export function SettingsPage(props: { settings: Settings; onChange(s: Settings): void; onClose(): void }) {
@@ -9,6 +10,8 @@ export function SettingsPage(props: { settings: Settings; onChange(s: Settings):
   // `null`: no Explorer menu on this OS, the Windows section is hidden.
   const [menuInstalled, setMenuInstalled] = createSignal<boolean | null>();
   const [menuError, setMenuError] = createSignal<string>();
+  const [version, setVersion] = createSignal<string>();
+  getVersion().then((v) => setVersion(displayVersion(v)));
   invoke<boolean | null>("explorer_menu_installed").then(setMenuInstalled, (e) => setMenuError(String(e)));
 
   async function setExplorerMenu(enabled: boolean) {
@@ -156,7 +159,13 @@ export function SettingsPage(props: { settings: Settings; onChange(s: Settings):
               </div>
             )}
           </For>
-          <p class="settings-hint">Saved in settings.json next to session.json, so it can also be edited by hand.</p>
+          <p class="settings-hint">
+            Saved in settings.json next to session.json, so it can also be edited by hand.
+            <Show when={version()}>
+              <br />
+              Rift {version()}
+            </Show>
+          </p>
         </div>
       </div>
     </div>

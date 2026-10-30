@@ -95,6 +95,11 @@ export function bind(keys: Keymap, action: Action, combo: string): { keys: Keyma
   return { keys: next, takenFrom };
 }
 
+/** Semver build metadata as a 4th number: "1.2.3+45" -> "1.2.3.45" (CI puts the run number there). */
+export function displayVersion(version: string): string {
+  return version.replace("+", ".");
+}
+
 export function resolveTheme(choice: ThemeChoice, systemDark: boolean): "dark" | "light" {
   return choice === "system" ? (systemDark ? "dark" : "light") : choice;
 }
