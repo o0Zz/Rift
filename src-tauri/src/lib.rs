@@ -343,6 +343,22 @@ fn settings_save(settings: State<SettingsFile>, value: serde_json::Value) -> Res
     settings.save(&value).map_err(err)
 }
 
+/// Prompts prepared in advance (prompts.json, per repo): a JSON file the frontend owns, like settings.
+struct PromptsFile(SettingsFile);
+
+#[tauri::command]
+fn prompts_load(prompts: State<PromptsFile>) -> serde_json::Value {
+    prompts.0.load()
+}
+
+#[tauri::command]
+async fn prompts_save(
+    prompts: State<'_, PromptsFile>,
+    value: serde_json::Value,
+) -> Result<(), String> {
+    prompts.0.save(&value).map_err(err)
+}
+
 /// Folder Rift was launched with (`rift.exe <dir>`, e.g. from Explorer's "Open in Rift"), opened as a new tab.
 #[tauri::command]
 fn startup_dir() -> Option<String> {
@@ -465,13 +481,17 @@ pub fn run() {
             app.manage(Scrollback(session_path.with_file_name("scrollback")));
             app.manage(SessionStore::new(session_path));
             // The bench runs with default settings, never the user's.
+            let data_dir = data_dir_override().map_or_else(|| app.path().app_data_dir(), Ok)?;
             app.manage(SettingsFile(if bench_mode() {
                 std::env::temp_dir().join("rift-bench-settings.json")
             } else {
-                data_dir_override()
-                    .map_or_else(|| app.path().app_data_dir(), Ok)?
-                    .join("settings.json")
+                data_dir.join("settings.json")
             }));
+            app.manage(PromptsFile(SettingsFile(if bench_mode() {
+                std::env::temp_dir().join("rift-bench-prompts.json")
+            } else {
+                data_dir.join("prompts.json")
+            })));
             app.manage(Harnesses(vec![Box::new(Claude {
                 settings: home.join(".claude").join("settings.json"),
             })]));
@@ -570,6 +590,8 @@ pub fn run() {
             explorer_menu_installed,
             explorer_menu_set,
             settings_save,
+            prompts_load,
+            prompts_save,
             commit_message,
             bench_dirs,
             bench_output_file,

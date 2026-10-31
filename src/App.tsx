@@ -33,6 +33,8 @@ import { limitsLabel, limitsTitle, type Limit, type Limits } from "./tabs/usage"
 import { Icon } from "./ui/Icon";
 import { Explorer } from "./panels/Explorer";
 import { GitPanel } from "./panels/GitPanel";
+import { Prompts } from "./panels/Prompts";
+import { addPrompt, editPrompt, mergePrompts, promptKey, removePrompt, type PromptLists } from "./panels/promptLists";
 import { Resizer } from "./ui/Resizer";
 import { FindBar } from "./ui/FindBar";
 import { PromptDialog } from "./ui/PromptDialog";
@@ -40,8 +42,8 @@ import "./App.css";
 
 type TabUi = { name?: string; color?: string; group?: string; shell?: string; snap?: string; docs?: string[]; doc?: number };
 type SavedTab = { cwd?: string; title: string; agent?: AgentSession; ui?: TabUi };
-type Panels = { explorer: boolean; git: boolean };
-type Widths = { tabs: number; explorer: number; git: number };
+type Panels = { explorer: boolean; git: boolean; prompts: boolean };
+type Widths = { tabs: number; explorer: number; git: number; prompts: number };
 type Saved = { tabs: SavedTab[]; active: number; layout?: { groups?: Group[]; panels?: Panels; widths?: Widths } };
 type Integration = { id: string; name: string; installed: boolean };
 type AgentStatus = { pty: number; harness: string; status: Status | null; message: string | null };
@@ -121,8 +123,15 @@ function App() {
     invoke("settings_save", { value: s });
   }
 
-  const [panels, setPanels] = createSignal<Panels>({ explorer: false, git: false });
-  const [widths, setWidths] = createSignal<Widths>({ tabs: 240, explorer: 240, git: 440 });
+  const [panels, setPanels] = createSignal<Panels>({ explorer: false, git: false, prompts: false });
+  const [widths, setWidths] = createSignal<Widths>({ tabs: 240, explorer: 240, git: 440, prompts: 320 });
+  // Prompts prepared in advance, per repo; saved on each change (a user action, never in the background).
+  const [promptLists, setPromptLists] = createSignal<PromptLists>({});
+  const promptRepo = () => panelTab()?.root ?? panelTab()?.cwd;
+  const changePrompts = (next: PromptLists) => {
+    setPromptLists(next);
+    invoke("prompts_save", { value: next });
+  };
   // While a panel edge is dragged the terminal is not re-wrapped (100+ ms each): only on release.
   let dragging = false;
   const resizeWidth = (key: keyof Widths) => (w: number) => setWidths({ ...widths(), [key]: w });
@@ -298,8 +307,8 @@ function App() {
   async function restore() {
     const saved = await invoke<Saved>("session_restore");
     setGroups(saved.layout?.groups ?? []);
-    if (saved.layout?.panels) setPanels(saved.layout.panels);
-    if (saved.layout?.widths) setWidths(saved.layout.widths);
+    if (saved.layout?.panels) setPanels({ ...panels(), ...saved.layout.panels });
+    if (saved.layout?.widths) setWidths({ ...widths(), ...saved.layout.widths });
     const starts = batch(() => (saved.tabs.length ? saved.tabs : [undefined]).map(newTab));
     const list = tabs();
     activate(list[Math.min(saved.active, list.length - 1)]);
@@ -530,6 +539,7 @@ function App() {
     else if (action === "nextTab" || action === "prevTab") step(action === "nextTab" ? 1 : -1);
     else if (action === "toggleFiles") togglePanel("explorer");
     else if (action === "toggleGit") togglePanel("git");
+    else if (action === "togglePrompts") togglePanel("prompts");
     else if (action === "settings") setSettingsOpen(true);
     else if (action === "find") setFinding(true);
     else if (action === "renameTab") active() && setRenameRequest({ tab: active()! });
@@ -609,6 +619,7 @@ function App() {
       .then((saved) => setSettings(mergeSettings(saved)))
       .finally(restore);
     checkIntegrations();
+    invoke("prompts_load").then((saved) => setPromptLists(mergePrompts(saved)));
     invoke<string[] | null>("bench_dirs").then(async (dirs) => {
       if (!dirs) {
         // Not in dev (would offer the latest release over local work) nor in the bench.
@@ -621,7 +632,7 @@ function App() {
         newTab: () => newTab(dirs.length ? { cwd: dirs[tabs().length % dirs.length], title: "" } : undefined),
         views: () => tabs().map((t) => t.view),
         activate: (i) => activate(tabs()[i]),
-        setPanels: (open) => setPanels({ explorer: open, git: open }),
+        setPanels: (open) => setPanels({ ...panels(), explorer: open, git: open }),
         openDoc: (i, file) => openDoc(`${dirs[0]}/${file}`, tabs()[i]),
         showsDoc: (i) => tabs()[i].current >= 0,
       });
@@ -754,6 +765,14 @@ function App() {
             )}
           </Show>
           <button
+            class="icon-btn"
+            classList={{ on: panels().prompts }}
+            onClick={() => togglePanel("prompts")}
+            title="Prompts (Ctrl+Shift+O)"
+          >
+            <Icon name="list" />
+          </button>
+          <button
             class="git-button"
             classList={{ on: panels().git }}
             onClick={() => togglePanel("git")}
@@ -796,6 +815,28 @@ function App() {
           </Show>
         </div>
       </main>
+      <Show when={panels().prompts}>
+        <div class="pane" style={{ width: `${widths().prompts}px` }}>
+          <Resizer edge="left" width={widths().prompts} min={220} max={800} onResize={resizeWidth("prompts")} onDragging={onDragging} />
+          <Prompts
+            repo={promptRepo()}
+            prompts={promptLists()[promptKey(promptRepo() ?? "")] ?? []}
+            onAdd={(text) => changePrompts(addPrompt(promptLists(), promptKey(promptRepo()!), text))}
+            onEdit={(i, text) => changePrompts(editPrompt(promptLists(), promptKey(promptRepo()!), i, text))}
+            onRemove={(i) => changePrompts(removePrompt(promptLists(), promptKey(promptRepo()!), i))}
+            onSend={(i) => {
+              const tab = active();
+              const key = promptKey(promptRepo()!);
+              const text = promptLists()[key]?.[i];
+              if (!tab || !text) return;
+              if (tab.current >= 0) showDoc(tab, -1);
+              tab.view.paste(text);
+              changePrompts(removePrompt(promptLists(), key, i));
+            }}
+            onClose={() => togglePanel("prompts")}
+          />
+        </div>
+      </Show>
       <Show when={panels().git}>
         <div class="pane" style={{ width: `${widths().git}px` }}>
           <Resizer edge="left" width={widths().git} min={280} max={1000} onResize={resizeWidth("git")} onDragging={onDragging} />

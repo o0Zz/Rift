@@ -66,6 +66,8 @@ freezing the window) and fails when a change goes over budget.
   highlighting, save with `Ctrl+S`. Markdown opens in a reader made for reading: large text, clear headings,
   striped tables. One document at a time, or a new sub-tab per file (Settings).
 - **Git panel**, one click away on the top right: branch, changed files, colored diff, commit exactly the files you check.
+- **Prompts panel**: write your next prompts ahead of time, one list per repo. Edit them as ideas come; click one
+  to paste it into the terminal (you press Enter) and it leaves the list.
 - Panels open and close with one shortcut and resize by dragging their edge.
 - **Settings**: dark, light or system theme, terminal font, and every shortcut can be rebound.
 - **Open in Rift** from the Windows File Explorer right-click menu.
@@ -104,6 +106,7 @@ notifications and per-tab resume. Without Claude Code, Rift is simply a fast ter
 | Next / previous tab | `Ctrl+PgDn` / `Ctrl+PgUp`, `Ctrl+Tab` / `Ctrl+Shift+Tab` |
 | Files panel | `Ctrl+Shift+E` |
 | Git panel | `Ctrl+Shift+G` |
+| Prompts panel | `Ctrl+Shift+O` |
 | Next tab that needs you | `Ctrl+Shift+U` |
 | Find in terminal | `Ctrl+Shift+F` |
 | Zoom in / out / reset | `Ctrl+=` / `Ctrl+-` / `Ctrl+0` |

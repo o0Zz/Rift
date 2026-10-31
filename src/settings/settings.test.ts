@@ -41,6 +41,7 @@ describe("actionFor with the default keys", () => {
     expect(actionFor(key("W", { shift: true }), DEFAULT_KEYS)).toBe("closeTab");
     expect(actionFor(key("E", { shift: true }), DEFAULT_KEYS)).toBe("toggleFiles");
     expect(actionFor(key("G", { shift: true }), DEFAULT_KEYS)).toBe("toggleGit");
+    expect(actionFor(key("O", { shift: true }), DEFAULT_KEYS)).toBe("togglePrompts");
     expect(actionFor(key(","), DEFAULT_KEYS)).toBe("settings");
     expect(actionFor(key("U", { shift: true }), DEFAULT_KEYS)).toBe("nextAttention");
     expect(actionFor(key("F", { shift: true }), DEFAULT_KEYS)).toBe("find");

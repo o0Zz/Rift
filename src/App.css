@@ -560,8 +560,65 @@ body,
   border-right: 1px solid var(--line);
 }
 
-.panel.git {
+.panel.git,
+.panel.prompts {
   border-left: 1px solid var(--line);
+}
+
+.prompt-list {
+  flex: 1;
+  overflow: auto;
+  padding: 6px;
+}
+
+.prompt {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  margin-bottom: 6px;
+  padding: 6px 4px 6px 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.prompt:hover {
+  border-color: var(--accent);
+  background: var(--hover);
+}
+
+.prompt-text {
+  flex: 1;
+  min-width: 0;
+  color: var(--fg-bright);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.prompt-buttons {
+  display: flex;
+  flex: none;
+  opacity: 0;
+}
+
+.prompt:hover .prompt-buttons {
+  opacity: 1;
+}
+
+.prompt-edit {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 80px;
+  margin-bottom: 6px;
+  padding: 6px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  outline: none;
+  resize: vertical;
+  background: var(--input-bg);
+  color: var(--fg-bright);
+  font: inherit;
 }
 
 .panel-head {

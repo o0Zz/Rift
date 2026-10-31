@@ -108,6 +108,12 @@ export class TermView {
     });
   }
 
+  /** Pastes `text` into the shell or agent (bracketed paste when enabled), without pressing Enter. */
+  paste(text: string) {
+    this.term.paste(text);
+    this.term.focus();
+  }
+
   private write(data: string) {
     this.pty.then((id) => invoke("pty_write", { id, data }));
   }

@@ -9,6 +9,7 @@ export const ACTIONS = {
   prevTab: "Previous tab",
   toggleFiles: "Show / hide files panel",
   toggleGit: "Show / hide git panel",
+  togglePrompts: "Show / hide prompts panel",
   nextAttention: "Next tab that needs me",
   find: "Find in terminal",
   zoomIn: "Zoom in",
@@ -48,6 +49,7 @@ export function defaultKeys(mac: boolean): Keymap {
       prevTab: ["Cmd+Shift+{", "Cmd+Alt+ArrowLeft", "Ctrl+Shift+Tab"],
       toggleFiles: ["Cmd+Shift+E"],
       toggleGit: ["Cmd+Shift+G"],
+      togglePrompts: ["Cmd+Shift+O"],
       nextAttention: ["Cmd+Shift+U"],
       find: ["Cmd+F"],
       zoomIn: ["Cmd+=", "Cmd++", "Cmd+Shift++"],
@@ -65,6 +67,7 @@ export function defaultKeys(mac: boolean): Keymap {
     prevTab: ["Ctrl+PageUp", "Ctrl+Shift+Tab"],
     toggleFiles: ["Ctrl+Shift+E"],
     toggleGit: ["Ctrl+Shift+G"],
+    togglePrompts: ["Ctrl+Shift+O"],
     nextAttention: ["Ctrl+Shift+U"],
     find: ["Ctrl+Shift+F"], // Ctrl+F is the shell's (bash: forward one character)
     zoomIn: ["Ctrl+=", "Ctrl++", "Ctrl+Shift++"],
