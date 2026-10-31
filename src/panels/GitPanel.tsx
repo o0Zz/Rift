@@ -4,6 +4,7 @@ import { commitFiles as files, commitRange, diffLineClass, inRange, keepChecked,
 import { Icon } from "../ui/Icon";
 import { createMenu } from "../ui/Menu";
 import { PromptDialog } from "../ui/PromptDialog";
+import { Resizer } from "../ui/Resizer";
 
 type Commit = { hash: string; short: string; author: string; date: string; subject: string };
 type Branch = { name: string; current: boolean };
@@ -23,6 +24,13 @@ export function GitPanel(props: {
   onHeadChanged?(): void;
 }) {
   const [view, setView] = createSignal<"changes" | "history">("changes");
+  // Heights of the commit list and the file list, once dragged (until then CSS sizes them).
+  const [logHeight, setLogHeight] = createSignal<number>();
+  const [filesHeight, setFilesHeight] = createSignal<number>();
+  const sized = (h: number | undefined) => (h === undefined ? {} : { height: `${h}px`, "max-height": "none" });
+  const handle = (h: () => number | undefined, set: (h: number) => void) => (
+    <Resizer edge="bottom" size={h()} min={40} max={window.innerHeight * 0.7} onResize={set} />
+  );
   const [changes, setChanges] = createSignal<Change[] | string>();
   const [checked, setChecked] = createSignal(new Set<string>());
   const [selected, setSelected] = createSignal<Change>();
@@ -282,7 +290,8 @@ export function GitPanel(props: {
         <Show
           when={view() === "history"}
           fallback={
-            <div class="git-files">
+            <>
+            <div class="git-files" style={sized(filesHeight())}>
               <Show when={changes()} fallback={<div class="tree-note">Loading…</div>}>
                 {(c) =>
                   typeof c() === "string" ? (
@@ -303,9 +312,11 @@ export function GitPanel(props: {
                 }
               </Show>
             </div>
+            {handle(filesHeight, setFilesHeight)}
+            </>
           }
         >
-          <div class="git-files git-log">
+          <div class="git-files git-log" style={sized(logHeight())}>
             <Show when={commits()} fallback={<div class="tree-note">Loading…</div>}>
               {(c) =>
                 typeof c() === "string" ? (
@@ -333,9 +344,11 @@ export function GitPanel(props: {
               }
             </Show>
           </div>
+          {handle(logHeight, setLogHeight)}
           <Show when={range()}>
             {(r) => (
-              <div class="git-files">
+              <>
+              <div class="git-files" style={sized(filesHeight())}>
                 <div class="git-file all">
                   {r().from
                     ? `${r().count} commits, ${short(r().from)} to ${short(r().to)}`
@@ -351,6 +364,8 @@ export function GitPanel(props: {
                   }
                 </Show>
               </div>
+              {handle(filesHeight, setFilesHeight)}
+              </>
             )}
           </Show>
         </Show>

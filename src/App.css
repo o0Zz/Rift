@@ -197,6 +197,18 @@ body,
   left: -3px;
 }
 
+/* Between two boxes of a panel: sets the height of the one above. */
+.resizer.bottom {
+  position: relative;
+  top: auto;
+  bottom: auto;
+  flex: none;
+  width: auto;
+  height: 5px;
+  margin: -3px 0 -2px;
+  cursor: row-resize;
+}
+
 .resizer:hover,
 .resizer:active {
   background: var(--accent);
@@ -939,6 +951,7 @@ body,
 
 .diff {
   flex: 1;
+  min-height: 60px;
   overflow: auto;
   padding: 4px 0;
   font-family: "Cascadia Mono", Consolas, monospace;

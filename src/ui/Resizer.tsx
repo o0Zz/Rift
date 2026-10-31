@@ -1,29 +1,33 @@
+import { resized } from "./resize";
+
 /**
- * Drag handle on a panel's edge. `edge` is the side of the panel it sits on: a left-side panel has its
- * handle on its right edge (dragging right widens it), the right-side git panel on its left edge.
+ * Drag handle on a box's edge. `edge` is the side of the box it sits on: a left-side panel has its handle on
+ * its right edge (dragging right widens it), the right-side git panel on its left edge. A `bottom` handle
+ * goes right after its box (in the flow) and sets its height; without a `size` yet it starts from the
+ * box's rendered height.
  */
 export function Resizer(props: {
-  edge: "left" | "right";
-  width: number;
+  edge: "left" | "right" | "bottom";
+  size?: number;
   min: number;
   max: number;
-  onResize(width: number): void;
-  onDragging(dragging: boolean): void;
+  onResize(size: number): void;
+  onDragging?(dragging: boolean): void;
 }) {
   function down(e: PointerEvent) {
     e.preventDefault();
     const el = e.currentTarget as HTMLElement;
     el.setPointerCapture(e.pointerId);
-    const startX = e.clientX;
-    const startWidth = props.width;
-    const sign = props.edge === "right" ? 1 : -1;
-    props.onDragging(true);
-    const move = (ev: PointerEvent) =>
-      props.onResize(Math.min(props.max, Math.max(props.min, startWidth + sign * (ev.clientX - startX))));
+    const vertical = props.edge === "bottom";
+    const at = (ev: PointerEvent) => (vertical ? ev.clientY : ev.clientX);
+    const from = at(e);
+    const start = props.size ?? (el.previousElementSibling as HTMLElement).offsetHeight;
+    props.onDragging?.(true);
+    const move = (ev: PointerEvent) => props.onResize(resized(props.edge, start, at(ev) - from, props.min, props.max));
     const up = () => {
       el.removeEventListener("pointermove", move);
       el.removeEventListener("pointerup", up);
-      props.onDragging(false);
+      props.onDragging?.(false);
     };
     el.addEventListener("pointermove", move);
     el.addEventListener("pointerup", up);

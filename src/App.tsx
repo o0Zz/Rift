@@ -677,7 +677,7 @@ function App() {
         rename={renameRequest()}
         onFocusTerminal={() => active()?.shown.focus()}
       />
-        <Resizer edge="right" width={widths().tabs} min={160} max={480} onResize={resizeWidth("tabs")} onDragging={onDragging} />
+        <Resizer edge="right" size={widths().tabs} min={160} max={480} onResize={resizeWidth("tabs")} onDragging={onDragging} />
       </div>
       <Show when={panels().explorer}>
         <div class="pane" style={{ width: `${widths().explorer}px` }}>
@@ -696,7 +696,7 @@ function App() {
           />
           <Resizer
             edge="right"
-            width={widths().explorer}
+            size={widths().explorer}
             min={160}
             max={600}
             onResize={resizeWidth("explorer")}
@@ -828,7 +828,7 @@ function App() {
       </main>
       <Show when={panels().prompts}>
         <div class="pane" style={{ width: `${widths().prompts}px` }}>
-          <Resizer edge="left" width={widths().prompts} min={220} max={800} onResize={resizeWidth("prompts")} onDragging={onDragging} />
+          <Resizer edge="left" size={widths().prompts} min={220} max={800} onResize={resizeWidth("prompts")} onDragging={onDragging} />
           <Prompts
             repo={promptRepo()}
             prompts={promptLists()[promptKey(promptRepo() ?? "")] ?? []}
@@ -850,7 +850,7 @@ function App() {
       </Show>
       <Show when={panels().git}>
         <div class="pane" style={{ width: `${widths().git}px` }}>
-          <Resizer edge="left" width={widths().git} min={280} max={1000} onResize={resizeWidth("git")} onDragging={onDragging} />
+          <Resizer edge="left" size={widths().git} min={280} max={1000} onResize={resizeWidth("git")} onDragging={onDragging} />
           <GitPanel
             root={panelTab()?.root}
             branch={panelTab()?.branch}
