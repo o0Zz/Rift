@@ -1,6 +1,10 @@
-//! Everything agent-specific (Claude Code today, Codex/Gemini later) sits behind `AgentHarness`.
+//! Everything agent-specific (Claude Code, Codex, Gemini CLI, Copilot CLI) sits behind `AgentHarness`.
 
 pub mod claude;
+pub mod codex;
+mod config;
+pub mod copilot;
+pub mod gemini;
 
 use std::path::Path;
 
@@ -94,6 +98,8 @@ pub struct AgentSession {
 pub trait AgentHarness: Send + Sync {
     fn id(&self) -> &'static str;
     fn name(&self) -> &'static str;
+    /// Whether the agent looks used on this machine (its config folder exists): only those offer "Enable".
+    fn detected(&self) -> bool;
     /// Translates a hook payload into an event; `None` for events Rift does not use.
     fn parse_hook(&self, payload: &Value) -> Option<AgentEvent>;
     /// Shell command resuming `session_id`; `None` if the id looks malformed.
@@ -101,6 +107,10 @@ pub trait AgentHarness: Send + Sync {
     /// Whether the agent is configured to call `exe hook <id>`.
     fn hooks_installed(&self, exe: &Path) -> bool;
     fn install_hooks(&self, exe: &Path) -> Result<()>;
+    /// What the user still has to do after `install_hooks`, if anything.
+    fn install_note(&self) -> Option<&'static str> {
+        None
+    }
     /// Runs the agent non-interactively in `cwd`: `prompt` as instruction, `input` on stdin; returns its answer.
     fn one_shot(&self, cwd: &Path, prompt: &str, input: &str) -> Result<String>;
     /// Shell command starting a new interactive session (e.g. `claude`).

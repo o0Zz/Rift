@@ -11,7 +11,10 @@ mod shell;
 
 use std::sync::Arc;
 
-use agents::{AgentEvent, AgentSession, Harnesses, claude::Claude};
+use agents::{
+    AgentEvent, AgentSession, Harnesses, claude::Claude, codex::Codex, copilot::Copilot,
+    gemini::Gemini,
+};
 use portable_pty::PtySize;
 use pty::{PtyManager, Shell, TabId};
 use scrollback::Scrollback;
@@ -222,6 +225,7 @@ struct AgentUsage {
 struct Integration {
     id: &'static str,
     name: &'static str,
+    detected: bool,
     installed: bool,
 }
 
@@ -234,20 +238,20 @@ fn agent_integrations(harnesses: State<Harnesses>) -> Result<Vec<Integration>, S
         .map(|h| Integration {
             id: h.id(),
             name: h.name(),
+            detected: h.detected(),
             installed: h.hooks_installed(&exe),
         })
         .collect())
 }
 
 /// Writes the agent's hook config (e.g. ~/.claude/settings.json). Only called from the user's explicit click.
+/// Returns what the user still has to do in the agent, if anything.
 #[tauri::command]
-fn agent_install(harnesses: State<Harnesses>, id: String) -> Result<(), String> {
+fn agent_install(harnesses: State<Harnesses>, id: String) -> Result<Option<&'static str>, String> {
     let exe = std::env::current_exe().map_err(err)?;
-    harnesses
-        .get(&id)
-        .ok_or("unknown agent")?
-        .install_hooks(&exe)
-        .map_err(err)
+    let agent = harnesses.get(&id).ok_or("unknown agent")?;
+    agent.install_hooks(&exe).map_err(err)?;
+    Ok(agent.install_note())
 }
 
 // Explorer and git panel. All async: they run off the main thread and never delay a tab switch.
@@ -316,7 +320,7 @@ For a breaking change, add `!` before the colon and a `BREAKING CHANGE:` footer.
 Optionally a blank line and a brief body. No co-author or sign-off lines. \
 Output only the message, without quotes or code fences.";
 
-/// AI commit message for the selected files, written by the first agent harness (Claude today).
+/// AI commit message for the selected files, written by the first agent used on this machine.
 #[tauri::command]
 async fn commit_message(
     harnesses: State<'_, Harnesses>,
@@ -327,7 +331,12 @@ async fn commit_message(
     if diff.trim().is_empty() {
         return Err("Nothing to describe: the selected files have no diff".into());
     }
-    let agent = harnesses.0.first().ok_or("no agent configured")?;
+    let agent = harnesses
+        .0
+        .iter()
+        .find(|h| h.detected())
+        .or(harnesses.0.first())
+        .ok_or("no agent configured")?;
     agent
         .one_shot(root.as_ref(), COMMIT_PROMPT, &diff)
         .map_err(err)
@@ -547,9 +556,23 @@ pub fn run() {
             } else {
                 data_dir.join("prompts.json")
             })));
-            app.manage(Harnesses(vec![Box::new(Claude {
-                settings: home.join(".claude").join("settings.json"),
-            })]));
+            let copilot_home = std::env::var_os("COPILOT_HOME")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| home.join(".copilot"));
+            app.manage(Harnesses(vec![
+                Box::new(Claude {
+                    settings: home.join(".claude").join("settings.json"),
+                }),
+                Box::new(Codex {
+                    hooks: home.join(".codex").join("hooks.json"),
+                }),
+                Box::new(Gemini {
+                    settings: home.join(".gemini").join("settings.json"),
+                }),
+                Box::new(Copilot {
+                    hooks: copilot_home.join("hooks").join("rift.json"),
+                }),
+            ]));
 
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(hook::serve(pipe.clone(), move |msg| {

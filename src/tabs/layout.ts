@@ -2,6 +2,9 @@
 
 export type Group = { id: string; name: string; color?: string; collapsed: boolean };
 
+/** A coding agent Rift knows (harness id + display name). */
+export type Agent = { id: string; name: string };
+
 export type Status = "idle" | "working" | "done" | "blocked";
 
 export const COLORS = ["#e5534b", "#f0883e", "#d4a72c", "#57ab5a", "#39c5cf", "#539bf5", "#b083f0", "#e275ad"];

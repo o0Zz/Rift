@@ -1,5 +1,5 @@
 import { createEffect, createSignal, For, Show, onMount, type JSX } from "solid-js";
-import { displayTitle, matchesFilter, ownRowColor, visualOrder, type Drop, type Group, type TabFilter } from "./layout";
+import { displayTitle, matchesFilter, ownRowColor, visualOrder, type Agent, type Drop, type Group, type TabFilter } from "./layout";
 import { createMenu, type MenuItem } from "../ui/Menu";
 import type { Tab } from "./Tab";
 import { TabIcon } from "./icons";
@@ -28,7 +28,9 @@ export type SidebarProps = {
   /** Sidebar filter: all tabs, those that need the user, or those whose agent is working. */
   filter: TabFilter;
   onFilter(filter: TabFilter): void;
-  onNewWorktree(tab: Tab): void;
+  /** Agents used on this machine, offered for a new worktree. */
+  agents: Agent[];
+  onNewWorktree(tab: Tab, agent: Agent): void;
   /** Gives the keyboard back to the active terminal. */
   onFocusTerminal(): void;
   /** Set to start renaming a tab (F2); a new object each time. */
@@ -66,7 +68,12 @@ export function Sidebar(props: SidebarProps) {
       { label: "Rename", run: () => setEditing(tab) },
       { colors: (c) => (tab.color = c) },
       "separator",
-      ...(tab.root ? [{ label: "New Claude in a worktree…", run: () => props.onNewWorktree(tab) }] : []),
+      ...(tab.root
+        ? props.agents.map((agent) => ({
+            label: `New ${agent.name} in a worktree…`,
+            run: () => props.onNewWorktree(tab, agent),
+          }))
+        : []),
       { label: "New group from this tab", run: () => props.onNewGroup(tab) },
       ...props.groups
         .filter((g) => g.id !== tab.group)

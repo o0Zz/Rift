@@ -45,7 +45,7 @@ src-tauri/src/
   session.rs        what to restore: tabs (cwd, opaque ui) + agent session per tab
   scrollback.rs     per-tab history (`<id>.ans`) saved on close, shown again on restore
   hook.rs           `rift hook` client + server: named pipe (Windows) / Unix socket
-  agents/           AgentHarness trait + adapters (claude.rs; later codex, gemini...)
+  agents/           AgentHarness trait + adapters (claude, codex, gemini, copilot); config.rs: shared hook-file and one-shot helpers
   git.rs            branch from .git/HEAD (no process); status/diff/stats/commit/worktree via git CLI (CREATE_NO_WINDOW)
   files.rs          one directory level per call (never walks recursively)
   settings.rs       settings.json (frontend owns its shape)
@@ -80,8 +80,8 @@ Frontend ↔ backend: Tauri commands, the PTY `Channel`, and events (`pty-exit`,
 - Drag a file from the files panel onto a terminal types its path (`quotePath`). OS file-manager drops are not supported: Tauri's native drag-drop breaks HTML5 drag and drop on Windows (`dragDropEnabled: false`).
 - Closing with agents working/blocked asks first (`onCloseRequested`). The session freezes on `WindowEvent::Destroyed`, not on close request (cancellable).
 - `needsAttention` = blocked, or done and unread. Ctrl+Shift+U goes to the next one (blocked first). Sidebar filter All / Needs me / Working. Window title `Rift <version> — N waiting`. Taskbar flashes (`requestUserAttention`) when in the background. A seen "done" badge fades after 3 s (`fadeDoneWhenSeen`).
-- "New Claude in a worktree…": `git_worktree_add` creates/checks out the branch in `<repo>.worktrees/<branch>`, then a tab there starts the agent (`start_agent` → `AgentHarness::start_command`).
-- UI: icons from `ui/Icon.tsx` (SVG, `currentColor`), never Unicode glyphs. Menus work from the keyboard (↑/↓, Enter, Esc); F2 renames. Focus returns to the terminal after a menu, rename or tab click. Text input uses `ui/PromptDialog.tsx`, never `window.prompt` (blocked in WebView2).
+- "New <agent> in a worktree…" (one entry per agent used on this machine): `git_worktree_add` creates/checks out the branch in `<repo>.worktrees/<branch>`, then a tab there starts the agent (`start_agent` → `AgentHarness::start_command`).
+- UI: icons from `ui/Icon.tsx` (SVG, `currentColor`), never Unicode glyphs. Menus work from the keyboard (↑/↓, Enter, Esc) and render in a `Portal` (the sidebar's `contain: paint` clipped them); F2 renames. Focus returns to the terminal after a menu, rename or tab click. Text input uses `ui/PromptDialog.tsx`, never `window.prompt` (blocked in WebView2).
 
 ### Sidebar
 - Vertical tabs on the left. Named groups (collapsible, colored, draggable); tabs have optional color and name. Colors fill the whole row / group block (`color-mix`); **a colored group's color always wins** (`ownRowColor`); a tab keeps its own color for outside the group.
@@ -102,7 +102,7 @@ Frontend ↔ backend: Tauri commands, the PTY `Channel`, and events (`pty-exit`,
 - Git actions, all on a click (nothing in the background): branch menu in the panel header (last 30 local branches, most recent first: `git switch`; "New branch…" = `git switch -c` from HEAD), Pull (`git pull`, the user's merge/rebase config), Push (`git push`; no upstream → `-u <first remote> HEAD`), Commit & Push. `GIT_TERMINAL_PROMPT=0`: git never waits on an invisible prompt. Results show under the header; `onHeadChanged` re-reads branch + stats of every tab of that repo.
 - History view (Changes | History): `git log -n200`. Click = that commit's files (`git show --name-status`), Shift+click = the range from the clicked one, both ends included (diff from the oldest's parent, or the empty tree; `pickCommits`, `commitRange`, `inRange`); a file → its diff. Commit ids are checked hex before reaching git. The commit list and the file list resize in height (bottom `Resizer`, not saved).
 - GitPanel loads on `on(() => props.root)` only: `load()` reads the list it replaces, and a plain effect re-ran it on every answer (git in a loop while the panel was open).
-- ✨ Generate: the checked files' diff (capped 60 KB) → first harness's `one_shot` (Claude: `claude -p --model haiku --tools "" --no-session-persistence`, ~10 s). Conventional Commits, no co-author line (`COMMIT_PROMPT`).
+- ✨ Generate: the checked files' diff (capped 60 KB) → `one_shot` of the first agent used on this machine, in the order Claude, Codex, Gemini, Copilot (Claude: `claude -p --model haiku --tools "" --no-session-persistence`, ~10 s). Conventional Commits, no co-author line (`COMMIT_PROMPT`).
 
 ### Documents (files opened in a tab)
 - A click in the files panel opens the file **in the tab**, shown instead of its terminal; the top bar becomes sub-tabs `Terminal | file × | ...` (the bar's height never changes, so terminals never refit for it). "Open with default app" is in the file's menu. The click selects the row and keeps focus in the panel (as VS Code), so Delete (macOS: also Cmd+Backspace) or the menu's Delete moves it to the Recycle Bin / Trash (`fs_trash`, `trash` crate; never a permanent delete) after a confirm; its documents close (`isUnder`). Not text (binary, not UTF-8, > 5 MB, `files::read_text`) → default app.
@@ -129,10 +129,16 @@ Frontend ↔ backend: Tauri commands, the PTY `Channel`, and events (`pty-exit`,
 - `session_restore` first closes every tab shell (spare kept): dev reloads would leak shells. Bench mode uses temp session/settings files; `RIFT_DATA_DIR` gives an isolated profile (and disables single instance) for demos.
 
 ### Agent harness
-- Everything agent-specific goes through `AgentHarness` (`agents/mod.rs`): `id`, `name`, `parse_hook`, `resume_command`, `start_command`, `hooks_installed`, `install_hooks`, `one_shot`. UI and session code never mention "claude"; they use `AgentHarness`, `AgentEvent`, `AgentSession { harness, session_id }`.
+- Everything agent-specific goes through `AgentHarness` (`agents/mod.rs`): `id`, `name`, `detected` (its config folder exists: only those get "Enable" and a worktree entry), `parse_hook`, `resume_command`, `start_command`, `hooks_installed`, `install_hooks`, `install_note`, `one_shot`. UI and session code never mention "claude"; they use `AgentHarness`, `AgentEvent`, `AgentSession { harness, session_id }`.
 - Claude hooks: in `~/.claude/settings.json`, **exec form** (`"command": "<path>\rift.exe", "args": ["hook", "claude"]`; shell form would go through Git Bash). Installed only on the user's "Enable" click; other settings and key order kept, `.bak` written, older Rift entries replaced. `SessionStart` → idle + bind, `SessionEnd` → unbind, `UserPromptSubmit`/`PostToolUse` → working, `Stop` → done, `Notification` → blocked (except `idle_prompt`). Hook call ~25 ms. Never edit that file without the user's click; uninstall not built.
 - Usage: the same click sets `statusLine` to `rift status claude` (a shell command: forward slashes, quoted only with a space), unless the user has their own (kept, and counts as installed; hooks without any `statusLine` ask to Enable again). It prints `ctx 34% · 5h 23% · 7d 41%` back into Claude and forwards the JSON through the pipe → `agent-usage` (`agents::parse_usage`): context on the tab, 5h/7d plan limits in the top bar. Event-driven only (Claude debounces at 300 ms); no polling.
-- Resume per tab: each tab runs `claude --resume <its own session_id>` in its cwd.
+- Other agents (built from their docs/source; not run live here, none installed or logged in):
+  - Codex: `~/.codex/hooks.json` (own file, merged like Claude's), command line through `cmd /C` / `$SHELL -lc`. `PermissionRequest` → blocked. Codex skips new hooks until trusted: `install_note` tells the user to approve them with `/hooks` (Rift never writes trust hashes). Resume `codex resume <id>`; one-shot `codex exec --ephemeral --sandbox read-only`.
+  - Gemini CLI: `~/.gemini/settings.json`, command line through PowerShell (`& '<exe>' hook gemini`) / bash. `BeforeAgent`/`AfterTool` → working, `AfterAgent` → done, `Notification` (ToolPermission) → blocked. Hooks must print nothing and never exit 2 (= block). Resume `gemini --resume <id>`; one-shot `gemini -p … -m flash-lite`.
+  - Copilot CLI: Rift's own file `~/.copilot/hooks/rift.json` (or `$COPILOT_HOME`), rewritten whole, exec form. PascalCase event names so payloads are Claude-shaped; `Notification` matcher `permission_prompt|elicitation_dialog` → blocked. Resume `copilot --resume=<id>`; one-shot reads instructions + diff from stdin (`-p` ignores stdin).
+  - No status line / usage for them (none offers one to external commands). Shift+Enter (ESC+CR) and image paste are Claude's keys; untested in the others.
+  - OpenCode: not built. Its plugins run in a shared background server (no tab environment) and its plugin API is mid-rewrite (V1 docs vs V2 source).
+- Resume per tab: each tab runs `<agent> resume <its own session_id>` in its cwd (`claude --resume <id>` for Claude).
 
 ## Windows specifics
 - Explorer menu ("Open in Rift" = new tab in the running window): Settings → Windows. `HKCU\Software\Classes\{Directory\shell, Directory\Background\shell, Drive\shell}\Rift`, command `"<exe>" "%V"`. Windows 11: under "Show more options" (top level needs MSIX + `IExplorerCommand`, later). Tests use `HKCU\Software\RiftTest-*`. No "new window" entry until multi-window exists.
@@ -148,7 +154,7 @@ Frontend ↔ backend: Tauri commands, the PTY `Channel`, and events (`pty-exit`,
 - Measured release: installer 2.4 MB, exe 7.2 MB, hook call 11 ms.
 
 ## Scope
-- Done: tabs, spare shell, shell profiles, session + per-tab Claude resume, scrollback restore, grouped vertical tabs, agent status + notifications + attention tools, files and git panels (diff, commit selected files, AI message, stats, top bar), worktrees, documents in tabs (editor + Markdown reader), settings (themes, fonts, shortcuts, Cmd on macOS), Explorer menu, auto-update, benches.
+- Done: tabs, spare shell, shell profiles, session + per-tab agent resume (Claude Code, Codex, Gemini CLI, Copilot CLI), scrollback restore, grouped vertical tabs, agent status + notifications + attention tools, files and git panels (diff, commit selected files, AI message, stats, top bar), worktrees, documents in tabs (editor + Markdown reader), settings (themes, fonts, shortcuts, Cmd on macOS), Explorer menu, auto-update, benches.
 - Next: multi-window, split panes, command palette (Ctrl+Shift+P), launch configurations, global hotkey, stage hunks, review comments sent to the tab's agent.
 - Out of scope (cost speed or not the product): Warp blocks / rewritten input editor (fights PSReadLine), built-in AI agent, Warp Drive / notebooks / team or session sharing, cloud agents, IDE features in the editor (LSP, autocomplete, project search), accounts. Revisit only if asked.
 

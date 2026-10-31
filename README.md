@@ -42,13 +42,14 @@ freezing the window) and fails when a change goes over budget.
   the taskbar icon flashes too.
 - **Never lose track**: `Ctrl+Shift+U` jumps to the next tab that needs you, the sidebar filters *Needs me* /
   *Working*, and the window title counts the sessions waiting for you.
-- **Parallel agents without conflicts**: *New Claude in a worktree…* creates a branch and a git worktree next to
-  the repo and starts Claude there, in one click.
+- **Parallel agents without conflicts**: *New Claude Code in a worktree…* (or Codex, Gemini CLI, Copilot CLI)
+  creates a branch and a git worktree next to the repo and starts the agent there, in one click.
 - **Each tab resumes its own session.** Close Rift, reopen it: every tab comes back in its folder, and each
   Claude session resumes where it was. Not the last one: the one that ran in that tab.
 - **Paste screenshots into Claude**: `Alt+V` on Windows, `Ctrl+V` on macOS and Linux.
 - **AI commit messages**: select files, click ✨ Generate, get a Conventional Commit written from the diff.
-- Built on an agent abstraction: Codex, Gemini CLI or OpenCode can plug in next to Claude.
+- **Also Codex, Gemini CLI and GitHub Copilot CLI**: status on the tab, notifications, per-tab resume and
+  commit messages. Context and plan usage are Claude Code only.
 
 ### Tabs that stay out of your way
 - **Vertical tabs** with **named groups**: color them, collapse them, drag tabs between them.
@@ -95,10 +96,13 @@ Download the latest version from [**Releases**](https://github.com/o0Zz/rift/rel
 
 Installed copies update themselves.
 
-### Turn on the Claude Code integration
-On first launch Rift offers **Enable**: it adds Rift's hooks to `~/.claude/settings.json` (your other settings
-are kept, and a `.bak` copy is written). Claude sessions started after that get status icons,
-notifications and per-tab resume. Without Claude Code, Rift is simply a fast terminal.
+### Turn on the agent integrations
+For each agent you use (Claude Code, Codex, Gemini CLI, Copilot CLI), Rift offers **Enable** on first launch: it
+adds Rift's hooks to that agent's settings (`~/.claude/settings.json`, `~/.codex/hooks.json`,
+`~/.gemini/settings.json`, or its own `~/.copilot/hooks/rift.json`). Your other settings are kept, and a `.bak`
+copy is written. Sessions started after that get status icons, notifications and per-tab resume. Codex asks you
+to trust new hooks once: type `/hooks` in Codex and approve Rift's. Without an agent, Rift is simply a fast
+terminal.
 
 ## Keyboard shortcuts
 

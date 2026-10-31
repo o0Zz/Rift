@@ -19,6 +19,7 @@ import {
   shouldNotify,
   statusAfterEscape,
   visualOrder,
+  type Agent,
   type Drop,
   type Group,
   type Status,
@@ -46,7 +47,7 @@ type SavedTab = { cwd?: string; title: string; agent?: AgentSession; ui?: TabUi 
 type Panels = { explorer: boolean; git: boolean; prompts: boolean };
 type Widths = { tabs: number; explorer: number; git: number; prompts: number };
 type Saved = { tabs: SavedTab[]; active: number; layout?: { groups?: Group[]; panels?: Panels; widths?: Widths } };
-type Integration = { id: string; name: string; installed: boolean };
+type Integration = { id: string; name: string; detected: boolean; installed: boolean };
 type AgentStatus = { pty: number; harness: string; status: Status | null; message: string | null };
 type AgentUsage = { pty: number; context: number | null } & { [K in keyof Limits]: Limit | null };
 
@@ -77,7 +78,7 @@ function App() {
     const tab = active();
     requestAnimationFrame(() => setBarTab(tab));
   });
-  const [worktreeFrom, setWorktreeFrom] = createSignal<Tab>();
+  const [worktreeFrom, setWorktreeFrom] = createSignal<{ tab: Tab; agent: Agent }>();
   let updater: Updater | undefined;
 
   // Window title: version, plus how many tabs need the user ("Rift 1.2.3.45 — 2 waiting").
@@ -496,28 +497,29 @@ function App() {
   }
 
   async function checkIntegrations() {
-    const all = await invoke<Integration[]>("agent_integrations");
-    setAgents(all);
-    setMissing(all.filter((i) => !i.installed));
+    // Only the agents used on this machine (their config folder exists) are offered.
+    const used = (await invoke<Integration[]>("agent_integrations")).filter((i) => i.detected);
+    setAgents(used);
+    setMissing(used.filter((i) => !i.installed));
   }
 
   async function enable(id: string) {
     try {
-      await invoke("agent_install", { id });
+      const note = await invoke<string | null>("agent_install", { id });
       await checkIntegrations();
+      if (note) alert(note);
     } catch (e) {
       alert(`Could not enable integration: ${e}`);
     }
   }
 
-  /** A parallel agent: new branch + git worktree next to the repo, opened in a tab running a new Claude. */
-  async function newWorktree(from: Tab, branch: string) {
+  /** A parallel agent: new branch + git worktree next to the repo, opened in a tab running a new `agent`. */
+  async function newWorktree(from: Tab, agent: Agent, branch: string) {
     setWorktreeFrom(undefined);
     if (!from.root) return;
-    const harness = from.agent ?? agents()[0]?.id;
     try {
       const dir = await invoke<string>("git_worktree_add", { root: from.root, branch });
-      newTab(undefined, { cwd: dir, name: branch, group: from.group, startAgent: harness });
+      newTab(undefined, { cwd: dir, name: branch, group: from.group, startAgent: agent.id });
     } catch (e) {
       alert(`Could not create the worktree: ${e}`);
       active()?.shown.focus();
@@ -673,7 +675,8 @@ function App() {
         onOpenSettings={() => setSettingsOpen(true)}
         filter={filter()}
         onFilter={setFilter}
-        onNewWorktree={setWorktreeFrom}
+        agents={agents()}
+        onNewWorktree={(tab, agent) => setWorktreeFrom({ tab, agent })}
         rename={renameRequest()}
         onFocusTerminal={() => active()?.shown.focus()}
       />
@@ -707,11 +710,11 @@ function App() {
       <Show when={worktreeFrom()}>
         {(from) => (
           <PromptDialog
-            title="New Claude in a worktree"
+            title={`New ${from().agent.name} in a worktree`}
             placeholder="Branch name, e.g. feature/login"
-            hint={`A new branch from the current commit, checked out next to the repo in ${from().root?.split(/[\\/]/).pop()}.worktrees/, with a new agent session.`}
+            hint={`A new branch from the current commit, checked out next to the repo in ${from().tab.root?.split(/[\\/]/).pop()}.worktrees/, with a new agent session.`}
             confirm="Create"
-            onSubmit={(branch) => newWorktree(from(), branch)}
+            onSubmit={(branch) => newWorktree(from().tab, from().agent, branch)}
             onCancel={() => (setWorktreeFrom(undefined), active()?.shown.focus())}
           />
         )}
@@ -808,9 +811,8 @@ function App() {
           {(i) => (
             <div class="banner">
               <span>
-                Enable <b>{i.name}</b> integration: tab status icons, notifications, each tab's session restored on
-                restart, context and plan usage. Adds Rift hooks and a status line to its settings (your own status
-                line is kept; a .bak copy is written).
+                Enable <b>{i.name}</b> integration: tab status icons, notifications and each tab's session restored
+                on restart. Adds Rift's hooks to its settings (your own settings are kept; a .bak copy is written).
               </span>
               <button onClick={() => enable(i.id)}>Enable</button>
               <button onClick={() => setMissing(missing().filter((m) => m !== i))}>Not now</button>

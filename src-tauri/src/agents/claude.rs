@@ -2,9 +2,10 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, bail};
-use serde_json::{Map, Value, json};
+use anyhow::{Context, Result};
+use serde_json::{Value, json};
 
+use super::config;
 use super::{AgentEvent, AgentHarness, Limit, Usage};
 
 // PostToolUse flips "blocked" back to "working" once a permission is granted and the tool ran.
@@ -22,30 +23,14 @@ pub struct Claude {
     pub settings: PathBuf,
 }
 
-impl Claude {
-    fn read_settings(&self) -> Result<Value> {
-        match std::fs::read_to_string(&self.settings) {
-            Ok(text) => {
-                serde_json::from_str(&text).context("~/.claude/settings.json is not valid JSON")
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(json!({})),
-            Err(e) => Err(e.into()),
-        }
-    }
-}
-
 /// Rift's hook handler: exec form, so no shell (Git Bash on Windows) is involved.
 fn handler(exe: &Path) -> Value {
     json!({ "type": "command", "command": exe.to_string_lossy(), "args": ["hook", "claude"] })
 }
 
-/// Rift's entry, whatever the install path: `rift.exe` on Windows, `rift` on Linux/macOS.
+#[cfg(test)]
 fn is_ours(handler: &Value) -> bool {
-    handler["args"] == json!(["hook", "claude"])
-        && handler["command"].as_str().is_some_and(|c| {
-            let name = c.rsplit(['/', '\\']).next().unwrap_or(c).to_lowercase();
-            name == "rift" || name == "rift.exe"
-        })
+    config::is_ours(handler, "claude")
 }
 
 /// Rift's status line: a shell command (Claude runs it through Git Bash or PowerShell on Windows), so
@@ -62,11 +47,8 @@ fn status_line(exe: &Path) -> Value {
 
 fn is_our_status_line(line: &Value) -> bool {
     line["command"].as_str().is_some_and(|c| {
-        c.strip_suffix(" status claude").is_some_and(|exe| {
-            let exe = exe.trim_matches('"');
-            let name = exe.rsplit(['/', '\\']).next().unwrap_or(exe);
-            name.eq_ignore_ascii_case("rift") || name.eq_ignore_ascii_case("rift.exe")
-        })
+        c.strip_suffix(" status claude")
+            .is_some_and(|exe| config::is_rift(exe.trim_matches('"')))
     })
 }
 
@@ -131,38 +113,9 @@ impl AgentHarness for Claude {
     }
 
     fn one_shot(&self, cwd: &Path, prompt: &str, input: &str) -> Result<String> {
-        use std::io::Write;
-        use std::process::{Command, Stdio};
-        let mut cmd = Command::new("claude");
-        cmd.current_dir(cwd)
-            .args(one_shot_args(prompt))
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-        }
-        let mut child = cmd
-            .spawn()
-            .context("could not run `claude` (is Claude Code installed and on PATH?)")?;
-        let mut stdin = child.stdin.take().unwrap();
-        let input = input.to_string();
-        // Write from another thread: a large diff must not deadlock against claude's own output.
-        let writer = std::thread::spawn(move || stdin.write_all(input.as_bytes()));
-        let out = child.wait_with_output()?;
-        let _ = writer.join();
-        if !out.status.success() {
-            let err = String::from_utf8_lossy(&out.stderr);
-            let err = if err.trim().is_empty() {
-                String::from_utf8_lossy(&out.stdout)
-            } else {
-                err
-            };
-            bail!("claude failed: {}", err.trim());
-        }
-        Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+        let args = one_shot_args(prompt);
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        config::run("claude", &args, cwd, input)
     }
 
     fn start_command(&self) -> String {
@@ -178,62 +131,28 @@ impl AgentHarness for Claude {
         valid.then(|| format!("claude --resume {session_id}"))
     }
 
-    fn hooks_installed(&self, exe: &Path) -> bool {
-        let Ok(settings) = self.read_settings() else {
-            return false;
-        };
-        let wanted = handler(exe);
-        // The status line counts as set up when it is anyone's: Rift never replaces the user's own.
-        settings.get("statusLine").is_some()
-            && EVENTS.iter().all(|event| {
-                settings["hooks"][event].as_array().is_some_and(|groups| {
-                    groups
-                        .iter()
-                        .any(|g| g["hooks"].as_array().is_some_and(|hs| hs.contains(&wanted)))
-                })
-            })
+    fn detected(&self) -> bool {
+        self.settings.parent().is_some_and(Path::is_dir)
     }
 
-    /// Adds Rift's handler to each event, replacing an older Rift entry (e.g. another exe path).
-    /// Everything else in the file is kept; the previous file is saved as settings.json.bak.
+    fn hooks_installed(&self, exe: &Path) -> bool {
+        let Ok(settings) = config::read_json(&self.settings) else {
+            return false;
+        };
+        // The status line counts as set up when it is anyone's: Rift never replaces the user's own.
+        settings.get("statusLine").is_some() && config::has_hooks(&settings, &EVENTS, &handler(exe))
+    }
+
+    /// Adds Rift's handler to each event and its status line (unless the user has one). Everything else in
+    /// the file is kept; the previous file is saved as settings.json.bak.
     fn install_hooks(&self, exe: &Path) -> Result<()> {
-        let mut settings = self.read_settings()?;
-        let root = settings
-            .as_object_mut()
-            .context("settings.json is not a JSON object")?;
-        let hooks = root.entry("hooks").or_insert_with(|| json!({}));
-        let hooks = hooks
-            .as_object_mut()
-            .context("\"hooks\" is not an object")?;
-        for event in EVENTS {
-            let groups = hooks.entry(event).or_insert_with(|| json!([]));
-            let groups = groups
-                .as_array_mut()
-                .context("hook event is not an array")?;
-            for group in groups.iter_mut() {
-                if let Some(hs) = group.get_mut("hooks").and_then(Value::as_array_mut) {
-                    hs.retain(|h| !is_ours(h));
-                }
-            }
-            groups.retain(|g| g["hooks"].as_array().is_none_or(|hs| !hs.is_empty()));
-            let mut group = Map::new();
-            group.insert("hooks".into(), json!([handler(exe)]));
-            groups.push(Value::Object(group));
-        }
+        let mut settings = config::read_json(&self.settings)?;
+        config::add_hooks(&mut settings, &EVENTS, &handler(exe), "claude")?;
+        let root = settings.as_object_mut().context("not a JSON object")?;
         if root.get("statusLine").is_none_or(is_our_status_line) {
             root.insert("statusLine".into(), status_line(exe));
         }
-
-        if self.settings.exists() {
-            std::fs::copy(&self.settings, self.settings.with_extension("json.bak"))?;
-        } else if let Some(dir) = self.settings.parent() {
-            std::fs::create_dir_all(dir)?;
-        }
-        std::fs::write(
-            &self.settings,
-            serde_json::to_string_pretty(&settings)? + "\n",
-        )?;
-        Ok(())
+        config::write_json(&self.settings, &settings)
     }
 }
 
