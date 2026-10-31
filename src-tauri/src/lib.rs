@@ -284,6 +284,11 @@ async fn fs_reveal(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn fs_trash(path: String) -> Result<(), String> {
+    files::trash(path.as_ref()).map_err(err)
+}
+
+#[tauri::command]
 async fn git_head(cwd: String) -> Option<git::Head> {
     git::head(cwd.as_ref())
 }
@@ -578,6 +583,7 @@ pub fn run() {
             fs_write_text,
             fs_mtime,
             fs_reveal,
+            fs_trash,
             git_head,
             git_status,
             git_diff,

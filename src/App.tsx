@@ -32,6 +32,7 @@ import { GitStatsView } from "./tabs/GitStats";
 import { limitsLabel, limitsTitle, type Limit, type Limits } from "./tabs/usage";
 import { Icon } from "./ui/Icon";
 import { Explorer } from "./panels/Explorer";
+import { isUnder } from "./panels/fileOps";
 import { GitPanel } from "./panels/GitPanel";
 import { Prompts } from "./panels/Prompts";
 import { addPrompt, editPrompt, mergePrompts, promptKey, removePrompt, type PromptLists } from "./panels/promptLists";
@@ -684,6 +685,13 @@ function App() {
             root={panelTab()?.root ?? panelTab()?.cwd}
             refresh={filesRefresh()}
             onOpenFile={(path) => openDoc(path)}
+            onDeleted={(path) => {
+              // Its documents close (asking first about unsaved changes); the git panel shows the deletion.
+              for (const tab of tabs()) {
+                for (let i = tab.docs.length - 1; i >= 0; i--) if (isUnder(tab.docs[i].path, path)) closeDoc(tab, i);
+              }
+              if (panels().git) setGitRefresh(gitRefresh() + 1);
+            }}
             onClose={() => togglePanel("explorer")}
           />
           <Resizer

@@ -67,9 +67,37 @@ fn millis(meta: &std::fs::Metadata) -> u64 {
         .map_or(0, |d| d.as_millis() as u64)
 }
 
+/// Moves a file or folder to the Recycle Bin / Trash (never a permanent delete: a misclick can be undone).
+pub fn trash(path: &Path) -> Result<(), trash::Error> {
+    #[allow(unused_mut)]
+    let mut trash = trash::TrashContext::default();
+    // Finder (the default) needs automation rights and plays a sound; the file manager API needs neither.
+    #[cfg(target_os = "macos")]
+    {
+        use trash::macos::{DeleteMethod, TrashContextExtMacos};
+        trash.set_delete_method(DeleteMethod::NsFileManager);
+    }
+    trash.delete(path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn trash_moves_files_and_folders_away() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("rift-trash-test.txt");
+        let folder = dir.path().join("rift-trash-test");
+        std::fs::write(&file, "x").unwrap();
+        std::fs::create_dir(&folder).unwrap();
+        std::fs::write(folder.join("inner.txt"), "y").unwrap();
+
+        trash(&file).unwrap();
+        trash(&folder).unwrap();
+        assert!(!file.exists() && !folder.exists());
+        assert!(trash(&file).is_err(), "nothing left to delete");
+    }
 
     #[test]
     fn lists_folders_first_and_hides_git() {

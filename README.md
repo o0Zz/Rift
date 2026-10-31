@@ -61,7 +61,8 @@ freezing the window) and fails when a change goes over budget.
   the files panel to type its path.
 
 ### Everything around the terminal
-- **Files panel** with file-type icons, opened only when you want it.
+- **Files panel** with file-type icons, opened only when you want it. Delete a file or folder with the Delete key
+  or its right-click menu: it goes to the Recycle Bin / Trash.
 - **Open files right in the tab**: a click shows the file above your terminal, as a sub-tab. Edit code with syntax
   highlighting, save with `Ctrl+S`. Markdown opens in a reader made for reading: large text, clear headings,
   striped tables. One document at a time, or a new sub-tab per file (Settings).

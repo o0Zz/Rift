@@ -5,6 +5,7 @@ import { folderName } from "../tabs/layout";
 import { fileBadge } from "./fileIcons";
 import { Icon } from "../ui/Icon";
 import { PATH_DRAG_TYPE } from "../terminal/TermView";
+import { isDeleteKey, isUnder, TRASH_NAME } from "./fileOps";
 
 type Entry = { name: string; dir: boolean };
 
@@ -36,11 +37,22 @@ const join = (dir: string, name: string) =>
   `${dir.replace(/[\\/]+$/, "")}${dir.includes("\\") ? "\\" : "/"}${name}`;
 
 /** File tree of `root`. Each folder is listed once, when first expanded (cached until ⟳). */
-/** Files of the tab's repo (or folder). A click opens a file in the tab (`onOpenFile`), not in another app. */
-export function Explorer(props: { root?: string; refresh?: number; onOpenFile(path: string): void; onClose(): void }) {
+/**
+ * Files of the tab's repo (or folder). A click opens a file in the tab (`onOpenFile`), not in another app, and
+ * selects it: focus stays here, so Delete moves it to the trash (`onDeleted` closes its documents).
+ */
+export function Explorer(props: {
+  root?: string;
+  refresh?: number;
+  onOpenFile(path: string): void;
+  onDeleted(path: string): void;
+  onClose(): void;
+}) {
   const [listings, setListings] = createSignal(new Map<string, Entry[] | string>());
   const [expanded, setExpanded] = createSignal(new Set<string>());
+  const [selected, setSelected] = createSignal<{ path: string; parent: string }>();
   const menu = createMenu();
+  let body!: HTMLDivElement;
 
   async function load(dir: string) {
     let result: Entry[] | string;
@@ -72,12 +84,29 @@ export function Explorer(props: { root?: string; refresh?: number; onOpenFile(pa
   }
   createEffect(on(() => props.refresh, refresh, { defer: true }));
 
-  function fileMenu(e: MouseEvent, path: string) {
+  async function remove(path: string, parent: string) {
+    const name = path.split(/[\\/]/).pop();
+    if (!confirm(`Move ${name} to the ${TRASH_NAME}?`)) return;
+    try {
+      await invoke("fs_trash", { path });
+    } catch (e) {
+      return alert(`Could not delete ${name}: ${e}`);
+    }
+    setSelected(undefined);
+    setExpanded(new Set([...expanded()].filter((dir) => !isUnder(dir, path))));
+    load(parent);
+    props.onDeleted(path);
+  }
+
+  function fileMenu(e: MouseEvent, path: string, parent: string) {
+    setSelected({ path, parent });
     menu.open(e, [
       { label: "Open", run: () => props.onOpenFile(path) },
       { label: "Open with default app", run: () => invoke("fs_open", { path }) },
       { label: "Reveal in File Explorer", run: () => invoke("fs_reveal", { path }) },
       { label: "Copy path", run: () => navigator.clipboard.writeText(path) },
+      "separator",
+      { label: `Delete (move to ${TRASH_NAME})`, run: () => remove(path, parent) },
     ]);
   }
 
@@ -97,6 +126,7 @@ export function Explorer(props: { root?: string; refresh?: number; onOpenFile(pa
                   <>
                     <div
                       class="tree-row"
+                      classList={{ selected: selected()?.path === path }}
                       style={{ "padding-left": `${p.depth * 12 + 8}px` }}
                       title={path}
                       draggable={true}
@@ -105,8 +135,13 @@ export function Explorer(props: { root?: string; refresh?: number; onOpenFile(pa
                         e.dataTransfer!.setData("text/plain", path);
                         e.dataTransfer!.effectAllowed = "copy";
                       }}
-                      onClick={() => (entry.dir ? toggle(path) : props.onOpenFile(path))}
-                      onContextMenu={(e) => fileMenu(e, path)}
+                      onClick={() => {
+                        setSelected({ path, parent: p.dir });
+                        if (entry.dir) return toggle(path);
+                        props.onOpenFile(path);
+                        body.focus({ preventScroll: true });
+                      }}
+                      onContextMenu={(e) => fileMenu(e, path, p.dir)}
                     >
                       <span class="tree-chev">{entry.dir && <Icon name={open() ? "down" : "right"} size={12} />}</span>
                       <FileIcon name={entry.name} dir={entry.dir} open={open()} />
@@ -140,7 +175,18 @@ export function Explorer(props: { root?: string; refresh?: number; onOpenFile(pa
           </button>
         </span>
       </div>
-      <div class="panel-body">
+      <div
+        class="panel-body"
+        ref={body}
+        tabIndex={-1}
+        onKeyDown={(e) => {
+          const sel = selected();
+          if (sel && isDeleteKey(e)) {
+            e.preventDefault();
+            remove(sel.path, sel.parent);
+          }
+        }}
+      >
         <Show when={props.root} fallback={<div class="tree-note">No folder</div>}>
           {(root) => <Folder dir={root()} depth={0} />}
         </Show>

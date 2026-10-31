@@ -685,6 +685,15 @@ body,
   background: var(--hover);
 }
 
+.tree-row.selected {
+  background: var(--hover);
+  box-shadow: inset 2px 0 var(--accent);
+}
+
+.panel-body:focus {
+  outline: none;
+}
+
 .tree-chev {
   flex: none;
   width: 10px;
