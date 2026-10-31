@@ -92,7 +92,7 @@ Frontend ↔ backend: Tauri commands, the PTY `Channel`, and events (`pty-exit`,
 
 ### Side panels and top bar
 - Files (left, Ctrl+Shift+E) and git (right, Ctrl+Shift+G), toggled from the sidebar header / the top bar's git button / their ×; resizable (`ui/Resizer.tsx`). State and widths saved in `layout`.
-- **Not live**: panels load when shown, when the shown tab changes, or on ⟳. They follow `panelTab`, which trails the active tab by 150 ms (holding Ctrl+PgDn never loads every tab passed). All commands async; stale answers dropped. Explorer root = repo root, else cwd; folders listed on first expand, cached until ⟳.
+- **Not live**: panels load when shown, when the shown tab changes, or on ⟳. The git panel also reloads when its tab's agent finishes ("done"), keeping the checks and the open diff (`keepChecked`). They follow `panelTab`, which trails the active tab by 150 ms (holding Ctrl+PgDn never loads every tab passed). All commands async; stale answers dropped. Explorer root = repo root, else cwd; folders listed on first expand, cached until ⟳.
 - Each tab knows its repo root + branch: `git_head` reads `.git/HEAD` at every prompt (OSC 9;9 / OSC 7).
 - Top bar (Warp-style): active tab title, git button on the right (branch + `+added −deleted ↑ahead ↓behind`). It updates one frame after the switch (`barTab` in rAF), and `.topbar`/`.sidebar` have `contain: layout paint style`, `.terms` `contain: strict`: without them it cost ~4 ms per switch and failed the bench.
 - Git stats (`git_stats`, two git commands in parallel, ~80 ms): 1.5 s after a prompt or agent status change (coalesced per tab) and after a commit, **never on a tab switch**.

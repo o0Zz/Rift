@@ -132,6 +132,7 @@ function App() {
   // The tab the side panels show. Follows the active tab only once it stays put for a moment,
   // so holding Ctrl+PgDn never makes the panels load each tab it passes.
   const [panelTab, setPanelTab] = createSignal<Tab>();
+  const [gitRefresh, setGitRefresh] = createSignal(0); // bumped when the git panel's agent finishes
   let panelTimer = 0;
   createEffect(() => {
     const tab = active();
@@ -434,6 +435,7 @@ function App() {
       tab.agent = status ? harness : undefined;
     });
     refreshStats(tab); // an agent at work changes files
+    if (tab.status === "done" && panels().git && panelTab() === tab) setGitRefresh(gitRefresh() + 1);
     const visible = active() === tab && windowFocused();
     if (visible) fadeDoneWhenSeen(tab);
     if (!shouldNotify(tab.status, visible)) return;
@@ -756,6 +758,7 @@ function App() {
           <GitPanel
             root={panelTab()?.root}
             branch={panelTab()?.branch}
+            refresh={gitRefresh()}
             onClose={() => togglePanel("git")}
             onCommitted={() => panelTab() && refreshStats(panelTab()!)}
           />

@@ -9,6 +9,12 @@ export function diffLineClass(line: string): string {
 
 export type Change = { path: string; status: string; orig?: string };
 
+/** Checked files after a reload: unchecked ones stay unchecked, new ones come checked. */
+export function keepChecked(checked: Set<string>, before: Change[], after: Change[]): Set<string> {
+  const known = new Set(before.map((c) => c.path));
+  return new Set(after.map((c) => c.path).filter((p) => checked.has(p) || !known.has(p)));
+}
+
 /** `(path, untracked)` pairs for the backend; a rename also commits its old path. */
 export function commitFiles(changes: Change[]): [string, boolean][] {
   return changes.flatMap((c) => [

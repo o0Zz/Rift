@@ -1,13 +1,20 @@
-import { createEffect, createSignal, For, Show } from "solid-js";
+import { createEffect, createSignal, For, on, Show } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
-import { commitFiles as files, diffLineClass, type Change } from "./diff";
+import { commitFiles as files, diffLineClass, keepChecked, type Change } from "./diff";
 import { Icon } from "../ui/Icon";
 
 /**
  * Branch, changed files, per-file diff, and commit of the checked files.
- * Not live: loads when shown, when the shown repo changes, after a commit, or on ⟳.
+ * Not live: loads when shown, when the shown repo changes, after a commit, on ⟳, or when `refresh` changes
+ * (its agent finished).
  */
-export function GitPanel(props: { root?: string; branch?: string; onClose(): void; onCommitted?(): void }) {
+export function GitPanel(props: {
+  root?: string;
+  branch?: string;
+  refresh?: number;
+  onClose(): void;
+  onCommitted?(): void;
+}) {
   const [changes, setChanges] = createSignal<Change[] | string>();
   const [checked, setChecked] = createSignal(new Set<string>());
   const [selected, setSelected] = createSignal<Change>();
@@ -20,11 +27,16 @@ export function GitPanel(props: { root?: string; branch?: string; onClose(): voi
   const list = () => (Array.isArray(changes()) ? (changes() as Change[]) : []);
   const picked = () => list().filter((c) => checked().has(c.path));
 
-  async function load(root: string) {
+  /** `keep`: same repo, newer state. The list, checks and open diff stay put instead of starting over. */
+  async function load(root: string, keep = false) {
     const id = ++request;
-    setChanges(undefined);
-    setSelected(undefined);
-    setDiff(undefined);
+    const before = list();
+    const open = selected();
+    if (!keep) {
+      setChanges(undefined);
+      setSelected(undefined);
+      setDiff(undefined);
+    }
     let result: Change[] | string;
     try {
       result = await invoke<Change[]>("git_status", { root });
@@ -33,7 +45,15 @@ export function GitPanel(props: { root?: string; branch?: string; onClose(): voi
     }
     if (id !== request) return;
     setChanges(result);
-    setChecked(new Set(Array.isArray(result) ? result.map((c) => c.path) : []));
+    const now = Array.isArray(result) ? result : [];
+    setChecked(keep ? keepChecked(checked(), before, now) : new Set(now.map((c) => c.path)));
+    if (!keep) return;
+    const still = now.find((c) => c.path === open?.path);
+    if (still) show(still);
+    else {
+      setSelected(undefined);
+      setDiff(undefined);
+    }
   }
 
   async function show(change: Change) {
@@ -92,6 +112,7 @@ export function GitPanel(props: { root?: string; branch?: string; onClose(): voi
     setNote(undefined);
     if (props.root) load(props.root);
   });
+  createEffect(on(() => props.refresh, () => props.root && load(props.root, true), { defer: true }));
 
   return (
     <aside class="panel git">

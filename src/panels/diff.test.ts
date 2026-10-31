@@ -1,5 +1,11 @@
 import { expect, it } from "vitest";
-import { commitFiles, diffLineClass } from "./diff";
+import { commitFiles, diffLineClass, keepChecked } from "./diff";
+
+it("keeps the user's unchecks across a reload and checks new files", () => {
+  const before = [{ path: "a", status: "M" }, { path: "b", status: "M" }, { path: "gone", status: "M" }];
+  const after = [{ path: "a", status: "M" }, { path: "b", status: "M" }, { path: "new", status: "?" }];
+  expect([...keepChecked(new Set(["a", "gone"]), before, after)]).toEqual(["a", "new"]);
+});
 
 it("classifies unified diff lines", () => {
   const diff = [
