@@ -587,7 +587,7 @@ mod tests {
             vec![],
         );
         let (id, out, _) = open(&m, Some(dir.path().into()), Some("echo rift-startup-ok"));
-        wait_for_output(&out, "rift-startup-ok");
+        let first = wait_for_output(&out, "rift-startup-ok");
         // macOS temp dirs may be reported through /private: check the folder name.
         let name = dir
             .path()
@@ -595,7 +595,12 @@ mod tests {
             .unwrap()
             .to_string_lossy()
             .to_string();
-        let all = wait_for_output(&out, &name);
+        // The prompt's OSC 7 may have come in the same read as the startup output.
+        let all = if first.contains(&name) {
+            first
+        } else {
+            wait_for_output(&out, &name)
+        };
         assert!(all.contains("\x1b]7;file://"), "no OSC 7 in: {all}");
         m.close(id);
     }
