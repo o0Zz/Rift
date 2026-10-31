@@ -68,6 +68,9 @@ fn git_with_input(
     let mut cmd = Command::new("git");
     cmd.current_dir(root)
         .args(args)
+        // Never wait on a terminal prompt nobody sees (push/pull): fail, or let the credential helper's
+        // own window ask.
+        .env("GIT_TERMINAL_PROMPT", "0")
         .stdin(if input.is_some() {
             Stdio::piped()
         } else {
@@ -296,6 +299,206 @@ pub fn status(root: &Path) -> Result<Vec<Change>> {
 
 const MAX_DIFF: usize = 512 * 1024;
 
+fn capped_diff(out: &std::process::Output) -> String {
+    let mut text = String::from_utf8_lossy(&out.stdout).into_owned();
+    if text.len() > MAX_DIFF {
+        let cut = (0..=MAX_DIFF)
+            .rev()
+            .find(|&i| text.is_char_boundary(i))
+            .unwrap_or(0);
+        text.truncate(cut);
+        text.push_str("\n… diff truncated\n");
+    }
+    text
+}
+
+#[derive(Debug, PartialEq, Serialize)]
+pub struct Branch {
+    pub name: String,
+    pub current: bool,
+}
+
+/// Local branches, most recently committed first.
+pub fn branches(root: &Path) -> Result<Vec<Branch>> {
+    let out = check(git(
+        root,
+        &[
+            "branch",
+            "--sort=-committerdate",
+            "--format=%(HEAD)%00%(refname:short)",
+        ],
+    )?)?;
+    Ok(String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|l| l.split_once('\0'))
+        .map(|(head, name)| Branch {
+            name: name.to_string(),
+            current: head == "*",
+        })
+        .collect())
+}
+
+fn valid_branch(root: &Path, name: &str) -> Result<()> {
+    check(git(root, &["check-ref-format", "--branch", name])?).context("invalid branch name")?;
+    Ok(())
+}
+
+/// Switches to an existing local branch. Git refuses (and says why) if local changes would be lost.
+pub fn switch(root: &Path, branch: &str) -> Result<()> {
+    valid_branch(root, branch)?;
+    check(git(root, &["switch", branch])?)?;
+    Ok(())
+}
+
+/// Creates `branch` from the current commit and switches to it (local changes come along).
+pub fn create_branch(root: &Path, branch: &str) -> Result<()> {
+    valid_branch(root, branch)?;
+    check(git(root, &["switch", "-c", branch])?)?;
+    Ok(())
+}
+
+/// Last line git printed (push/pull talk on stderr), as a short summary.
+fn summary(out: &std::process::Output, fallback: &str) -> String {
+    let text = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    text.lines()
+        .map(str::trim)
+        .rfind(|l| !l.is_empty())
+        .unwrap_or(fallback)
+        .to_string()
+}
+
+/// `git push`; a branch without upstream is pushed to the first remote and tracks it from then on.
+pub fn push(root: &Path) -> Result<String> {
+    let has_upstream = git(root, &["rev-parse", "--abbrev-ref", "@{upstream}"])?
+        .status
+        .success();
+    let out = if has_upstream {
+        check(git(root, &["push"])?)?
+    } else {
+        let remotes = check(git(root, &["remote"])?)?;
+        let remotes = String::from_utf8_lossy(&remotes.stdout);
+        let remote = remotes.lines().next().context("no remote to push to")?;
+        check(git(root, &["push", "-u", remote, "HEAD"])?)?
+    };
+    Ok(summary(&out, "Pushed"))
+}
+
+/// `git pull`, with the user's own settings (merge or rebase): git explains when it cannot.
+pub fn pull(root: &Path) -> Result<String> {
+    Ok(summary(&check(git(root, &["pull"])?)?, "Pulled"))
+}
+
+#[derive(Debug, PartialEq, Serialize)]
+pub struct Commit {
+    pub hash: String,
+    pub short: String,
+    pub author: String,
+    /// Relative, e.g. "3 hours ago".
+    pub date: String,
+    pub subject: String,
+}
+
+/// The last `max` commits of HEAD; empty for a repository without commits.
+pub fn log(root: &Path, max: usize) -> Result<Vec<Commit>> {
+    let out = git(
+        root,
+        &[
+            "log",
+            &format!("-n{max}"),
+            "--format=%H%x1f%h%x1f%an%x1f%ar%x1f%s%x1e",
+        ],
+    )?;
+    if !out.status.success() {
+        let none = git(root, &["rev-parse", "--verify", "--quiet", "HEAD"])?;
+        return if none.status.success() {
+            check(out).map(|_| Vec::new())
+        } else {
+            Ok(Vec::new())
+        };
+    }
+    Ok(String::from_utf8_lossy(&out.stdout)
+        .split('\x1e')
+        .filter_map(|record| {
+            let f: Vec<_> = record.trim_start_matches('\n').split('\x1f').collect();
+            (f.len() == 5).then(|| Commit {
+                hash: f[0].into(),
+                short: f[1].into(),
+                author: f[2].into(),
+                date: f[3].into(),
+                subject: f[4].into(),
+            })
+        })
+        .collect())
+}
+
+fn valid_rev(rev: &str) -> Result<()> {
+    if rev.is_empty() || !rev.chars().all(|c| c.is_ascii_hexdigit()) {
+        bail!("not a commit id: {rev}");
+    }
+    Ok(())
+}
+
+/// `git diff --name-status -z` -> changes ("R100\0old\0new" for a rename).
+fn parse_name_status(text: &str) -> Vec<Change> {
+    let mut fields = text.split('\0').filter(|f| !f.is_empty());
+    let mut changes = Vec::new();
+    while let Some(status) = fields.next() {
+        let letter = status.chars().next().unwrap_or('M');
+        let orig = if letter == 'R' || letter == 'C' {
+            fields.next().map(String::from)
+        } else {
+            None
+        };
+        let Some(path) = fields.next() else { break };
+        changes.push(Change {
+            path: path.to_string(),
+            status: letter.to_string(),
+            orig,
+        });
+    }
+    changes
+}
+
+/// Files changed by commit `to` (`from` None), or between commits `from` and `to`.
+pub fn commit_files(root: &Path, from: Option<&str>, to: &str) -> Result<Vec<Change>> {
+    valid_rev(to)?;
+    let out = match from {
+        Some(from) => {
+            valid_rev(from)?;
+            check(git(root, &["diff", "--name-status", "-z", "-M", from, to])?)?
+        }
+        // `show` also works for the first commit, which has no parent to diff against.
+        None => check(git(
+            root,
+            &["show", "--format=", "--name-status", "-z", "-M", to],
+        )?)?,
+    };
+    Ok(parse_name_status(&String::from_utf8_lossy(&out.stdout)))
+}
+
+/// Diff of one file in commit `to`, or between commits `from` and `to`.
+pub fn commit_diff(root: &Path, from: Option<&str>, to: &str, path: &str) -> Result<String> {
+    valid_rev(to)?;
+    let out = match from {
+        Some(from) => {
+            valid_rev(from)?;
+            check(git(
+                root,
+                &["diff", "--no-color", "-M", from, to, "--", path],
+            )?)?
+        }
+        None => check(git(
+            root,
+            &["show", "--format=", "--no-color", "-M", to, "--", path],
+        )?)?,
+    };
+    Ok(capped_diff(&out))
+}
+
 /// Diff of one file against HEAD (staged + unstaged). Untracked files show as fully added.
 pub fn diff(root: &Path, path: &str, untracked: bool) -> Result<String> {
     let out = if untracked {
@@ -312,16 +515,7 @@ pub fn diff(root: &Path, path: &str, untracked: bool) -> Result<String> {
             git(root, &["diff", "--no-color", "--cached", "--", path])? // no commit yet
         }
     };
-    let mut text = String::from_utf8_lossy(&out.stdout).into_owned();
-    if text.len() > MAX_DIFF {
-        let cut = (0..=MAX_DIFF)
-            .rev()
-            .find(|&i| text.is_char_boundary(i))
-            .unwrap_or(0);
-        text.truncate(cut);
-        text.push_str("\n… diff truncated\n");
-    }
-    Ok(text)
+    Ok(capped_diff(&out))
 }
 
 #[cfg(test)]
@@ -539,6 +733,142 @@ mod tests {
         let s = stats(r).unwrap();
         assert_eq!((s.added, s.deleted), (2, 2));
         assert_eq!((s.ahead, s.behind), (0, 0));
+    }
+
+    #[test]
+    fn branches_switch_and_create() {
+        let dir = repo();
+        let r = dir.path();
+        run(r, &["branch", "other"]);
+        let names: Vec<_> = branches(r)
+            .unwrap()
+            .into_iter()
+            .map(|b| (b.name, b.current))
+            .collect();
+        assert!(names.contains(&("main".into(), true)), "{names:?}");
+        assert!(names.contains(&("other".into(), false)), "{names:?}");
+
+        switch(r, "other").unwrap();
+        assert_eq!(head(r).unwrap().branch, "other");
+        create_branch(r, "feature/new").unwrap();
+        assert_eq!(head(r).unwrap().branch, "feature/new");
+        assert!(create_branch(r, "feature/new").is_err(), "exists already");
+        assert!(create_branch(r, "bad..name").is_err());
+        assert!(switch(r, "nope").is_err());
+        assert!(switch(r, "-f").is_err(), "never an option");
+    }
+
+    #[test]
+    fn switch_refuses_to_lose_local_changes() {
+        let dir = repo();
+        let r = dir.path();
+        run(r, &["switch", "-q", "-c", "other"]);
+        std::fs::write(r.join("kept.txt"), "on other\n").unwrap();
+        run(r, &["commit", "-q", "-am", "other"]);
+        std::fs::write(r.join("kept.txt"), "local edit\n").unwrap();
+        let err = switch(r, "main").unwrap_err().to_string();
+        assert!(err.contains("kept.txt"), "{err}");
+        assert_eq!(head(r).unwrap().branch, "other");
+    }
+
+    #[test]
+    fn push_sets_upstream_then_pull_brings_commits_back() {
+        let parent = tempfile::tempdir().unwrap();
+        let remote = parent.path().join("remote.git");
+        let remote_arg = remote.to_string_lossy().into_owned();
+        run(
+            parent.path(),
+            &["init", "-q", "--bare", "-b", "main", &remote_arg],
+        );
+        let dir = repo();
+        let r = dir.path();
+        run(r, &["remote", "add", "origin", &remote_arg]);
+
+        push(r).unwrap(); // no upstream yet: -u origin HEAD
+        std::fs::write(r.join("kept.txt"), "second\n").unwrap();
+        run(r, &["commit", "-q", "-am", "second"]);
+        push(r).unwrap(); // tracked now: plain push
+
+        let other = parent.path().join("other");
+        let other_arg = other.to_string_lossy().into_owned();
+        run(parent.path(), &["clone", "-q", &remote_arg, &other_arg]);
+        run(&other, &["config", "user.email", "t@t"]);
+        run(&other, &["config", "user.name", "t"]);
+        std::fs::write(other.join("kept.txt"), "third\n").unwrap();
+        run(&other, &["commit", "-q", "-am", "third"]);
+        push(&other).unwrap();
+
+        pull(r).unwrap();
+        assert_eq!(log(r, 1).unwrap()[0].subject, "third");
+    }
+
+    #[test]
+    fn push_without_remote_says_so() {
+        let dir = repo();
+        assert!(push(dir.path()).unwrap_err().to_string().contains("remote"));
+    }
+
+    #[test]
+    fn log_lists_commits_newest_first() {
+        let dir = repo();
+        let r = dir.path();
+        std::fs::write(r.join("kept.txt"), "changed\n").unwrap();
+        run(r, &["commit", "-q", "-am", "Second | with a pipe"]);
+        let commits = log(r, 10).unwrap();
+        let subjects: Vec<_> = commits.iter().map(|c| c.subject.as_str()).collect();
+        assert_eq!(subjects, ["Second | with a pipe", "init"]);
+        assert_eq!(commits[0].hash.len(), 40);
+        assert!(commits[0].hash.starts_with(&commits[0].short));
+        assert_eq!(log(r, 1).unwrap().len(), 1);
+
+        let empty = tempfile::tempdir().unwrap();
+        run(empty.path(), &["init", "-q"]);
+        assert!(log(empty.path(), 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn files_and_diffs_of_a_commit_and_between_two() {
+        let dir = repo();
+        let r = dir.path();
+        std::fs::write(r.join("kept.txt"), "one\nTWO\n").unwrap();
+        run(r, &["commit", "-q", "-am", "edit"]);
+        run(r, &["mv", "gone.txt", "moved.txt"]);
+        std::fs::write(r.join("new.txt"), "new\n").unwrap();
+        run(r, &["add", "."]);
+        run(r, &["commit", "-q", "-m", "move and add"]);
+        let commits = log(r, 10).unwrap();
+        let (last, edit, first) = (&commits[0].hash, &commits[1].hash, &commits[2].hash);
+        let summary = |changes: Vec<Change>| -> Vec<(String, String, Option<String>)> {
+            changes
+                .into_iter()
+                .map(|c| (c.status, c.path, c.orig))
+                .collect()
+        };
+
+        assert_eq!(
+            summary(commit_files(r, None, edit).unwrap()),
+            [("M".into(), "kept.txt".into(), None)]
+        );
+        assert_eq!(
+            summary(commit_files(r, None, first).unwrap()).len(),
+            2,
+            "the first commit has no parent"
+        );
+        assert_eq!(
+            summary(commit_files(r, Some(first), last).unwrap()),
+            [
+                ("M".into(), "kept.txt".into(), None),
+                ("R".into(), "moved.txt".into(), Some("gone.txt".into())),
+                ("A".into(), "new.txt".into(), None),
+            ]
+        );
+
+        let d = commit_diff(r, None, edit, "kept.txt").unwrap();
+        assert!(d.contains("-two") && d.contains("+TWO"), "{d}");
+        let d = commit_diff(r, Some(first), last, "new.txt").unwrap();
+        assert!(d.contains("+new"), "{d}");
+        assert!(commit_files(r, None, "HEAD; rm -rf").is_err());
+        assert!(commit_diff(r, Some("--output=x"), last, "a").is_err());
     }
 
     #[test]

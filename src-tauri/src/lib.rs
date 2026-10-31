@@ -339,6 +339,56 @@ async fn git_diff(root: String, path: String, untracked: bool) -> Result<String,
 }
 
 #[tauri::command]
+async fn git_branches(root: String) -> Result<Vec<git::Branch>, String> {
+    git::branches(root.as_ref()).map_err(err)
+}
+
+#[tauri::command]
+async fn git_switch(root: String, branch: String) -> Result<(), String> {
+    git::switch(root.as_ref(), branch.trim()).map_err(err)
+}
+
+#[tauri::command]
+async fn git_create_branch(root: String, branch: String) -> Result<(), String> {
+    git::create_branch(root.as_ref(), branch.trim()).map_err(err)
+}
+
+#[tauri::command]
+async fn git_push(root: String) -> Result<String, String> {
+    git::push(root.as_ref()).map_err(err)
+}
+
+#[tauri::command]
+async fn git_pull(root: String) -> Result<String, String> {
+    git::pull(root.as_ref()).map_err(err)
+}
+
+/// History panel: the last 200 commits (enough to browse; no paging until someone needs it).
+#[tauri::command]
+async fn git_log(root: String) -> Result<Vec<git::Commit>, String> {
+    git::log(root.as_ref(), 200).map_err(err)
+}
+
+#[tauri::command]
+async fn git_commit_files(
+    root: String,
+    from: Option<String>,
+    to: String,
+) -> Result<Vec<git::Change>, String> {
+    git::commit_files(root.as_ref(), from.as_deref(), &to).map_err(err)
+}
+
+#[tauri::command]
+async fn git_commit_diff(
+    root: String,
+    from: Option<String>,
+    to: String,
+    path: String,
+) -> Result<String, String> {
+    git::commit_diff(root.as_ref(), from.as_deref(), &to, &path).map_err(err)
+}
+
+#[tauri::command]
 fn settings_load(settings: State<SettingsFile>) -> serde_json::Value {
     settings.load()
 }
@@ -587,6 +637,14 @@ pub fn run() {
             git_head,
             git_status,
             git_diff,
+            git_branches,
+            git_switch,
+            git_create_branch,
+            git_push,
+            git_pull,
+            git_log,
+            git_commit_files,
+            git_commit_diff,
             git_commit,
             git_worktree_add,
             git_stats,

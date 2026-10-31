@@ -15,6 +15,21 @@ export function keepChecked(checked: Set<string>, before: Change[], after: Chang
   return new Set(after.map((c) => c.path).filter((p) => checked.has(p) || !known.has(p)));
 }
 
+/** History: a click picks one commit; Ctrl+click adds a second one to compare (or unpicks a picked one). */
+export function pickCommits(picks: string[], hash: string, add: boolean): string[] {
+  if (!add) return [hash];
+  if (picks.includes(hash)) return picks.filter((h) => h !== hash);
+  return [...picks.slice(-1), hash];
+}
+
+/** What to show for the picked commits: one commit's own changes, or older → newer of two (`order`: newest first). */
+export function commitRange(order: string[], picks: string[]): { from?: string; to: string } | undefined {
+  if (picks.length === 1) return { to: picks[0] };
+  if (picks.length !== 2) return;
+  const [a, b] = picks;
+  return order.indexOf(a) > order.indexOf(b) ? { from: a, to: b } : { from: b, to: a };
+}
+
 /** `(path, untracked)` pairs for the backend; a rename also commits its old path. */
 export function commitFiles(changes: Change[]): [string, boolean][] {
   return changes.flatMap((c) => [

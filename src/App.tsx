@@ -856,7 +856,15 @@ function App() {
             branch={panelTab()?.branch}
             refresh={gitRefresh()}
             onClose={() => togglePanel("git")}
-            onCommitted={() => panelTab() && refreshStats(panelTab()!)}
+            onHeadChanged={() => {
+              // A switch, commit, pull or push: every tab of this repo shows the new branch and stats.
+              const root = panelTab()?.root;
+              for (const tab of tabs()) {
+                if (!root || tab.root !== root || !tab.cwd) continue;
+                invoke<{ branch: string } | null>("git_head", { cwd: tab.cwd }).then((head) => (tab.branch = head?.branch));
+                refreshStats(tab);
+              }
+            }}
           />
         </div>
       </Show>

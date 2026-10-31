@@ -66,7 +66,9 @@ freezing the window) and fails when a change goes over budget.
 - **Open files right in the tab**: a click shows the file above your terminal, as a sub-tab. Edit code with syntax
   highlighting, save with `Ctrl+S`. Markdown opens in a reader made for reading: large text, clear headings,
   striped tables. One document at a time, or a new sub-tab per file (Settings).
-- **Git panel**, one click away on the top right: branch, changed files, colored diff, commit exactly the files you check.
+- **Git panel**, one click away on the top right: changed files, colored diff, commit exactly the files you check
+  (or commit and push), pull, push, switch or create a branch, and a history: click a commit to see its changes,
+  Ctrl+click a second one to compare them.
 - **Prompts panel**: write your next prompts ahead of time, one list per repo. Click one to edit it (Enter saves,
   Shift+Enter for a new line); its ← arrow, or dragging it onto the terminal, pastes it there (you press Enter) and it leaves the list.
 - Panels open and close with one shortcut and resize by dragging their edge.
