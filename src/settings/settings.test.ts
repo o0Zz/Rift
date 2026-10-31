@@ -127,13 +127,20 @@ it("rejects shortcuts that would steal typing", () => {
 describe("mergeSettings", () => {
   it("falls back to defaults for missing or invalid values", () => {
     expect(mergeSettings(null)).toEqual(DEFAULTS);
-    const s = mergeSettings({ theme: "neon", fontSize: 200, fontFamily: " ", docs: "x", keys: { newTab: "oops" } });
+    const s = mergeSettings({ theme: "neon", fontSize: 200, fontFamily: " ", docs: "x", tabSize: "huge", keys: { newTab: "oops" } });
     expect(s).toEqual(DEFAULTS);
   });
 
   it("keeps valid saved values, including an action with no shortcut", () => {
-    const s = mergeSettings({ theme: "light", fontSize: 12, docs: "tabs", keys: { newTab: ["Alt+N"], closeTab: [] } });
+    const s = mergeSettings({
+      theme: "light",
+      fontSize: 12,
+      docs: "tabs",
+      tabSize: "large",
+      keys: { newTab: ["Alt+N"], closeTab: [] },
+    });
     expect(s.theme).toBe("light");
+    expect(s.tabSize).toBe("large");
     expect(s.docs).toBe("tabs");
     expect(s.fontSize).toBe(12);
     expect(s.keys.newTab).toEqual(["Alt+N"]);

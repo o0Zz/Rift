@@ -2,7 +2,7 @@ import { createSignal, For, Show, onCleanup, onMount } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 import { Icon } from "../ui/Icon";
-import { ACTIONS, bind, comboOf, DEFAULT_KEYS, displayVersion, isValidShortcut, type Action, type Settings, type ThemeChoice } from "./settings";
+import { ACTIONS, bind, comboOf, DEFAULT_KEYS, displayVersion, isValidShortcut, type Action, type Settings, type TabSize, type ThemeChoice } from "./settings";
 
 /** Settings overlay. While open, Rift's own shortcuts are off (App), so keys can be recorded. */
 export function SettingsPage(props: { settings: Settings; onChange(s: Settings): void; onClose(): void }) {
@@ -59,6 +59,11 @@ export function SettingsPage(props: { settings: Settings; onChange(s: Settings):
     ["light", "Light"],
     ["system", "System"],
   ];
+  const tabSizes: [TabSize, string][] = [
+    ["compact", "Compact"],
+    ["comfortable", "Comfortable"],
+    ["large", "Large"],
+  ];
 
   return (
     <div class="settings-backdrop" onMouseDown={(e) => e.target === e.currentTarget && props.onClose()}>
@@ -99,6 +104,18 @@ export function SettingsPage(props: { settings: Settings; onChange(s: Settings):
               <For each={themes}>
                 {([value, label]) => (
                   <button classList={{ on: props.settings.theme === value }} onClick={() => set({ theme: value })}>
+                    {label}
+                  </button>
+                )}
+              </For>
+            </div>
+          </div>
+          <div class="setting">
+            <label>Tab size</label>
+            <div class="segmented">
+              <For each={tabSizes}>
+                {([value, label]) => (
+                  <button classList={{ on: props.settings.tabSize === value }} onClick={() => set({ tabSize: value })}>
                     {label}
                   </button>
                 )}

@@ -7,7 +7,7 @@ import { onAction, sendNotification } from "@tauri-apps/plugin-notification";
 import { TermView, type AgentSession, type TermLook } from "./terminal/TermView";
 import { TERMINAL_THEMES } from "./terminal/themes";
 import { neighbour } from "./tabs/nav";
-import { actionFor, DEFAULTS, displayVersion, isReloadKey, mergeSettings, resolveTheme, type Settings } from "./settings/settings";
+import { actionFor, DEFAULTS, displayVersion, isReloadKey, mergeSettings, resolveTheme, TAB_ROW_HEIGHT, type Settings } from "./settings/settings";
 import { SettingsPage } from "./settings/SettingsPage";
 import { startUpdates, type Updater } from "./update";
 import {
@@ -101,6 +101,9 @@ function App() {
     document.documentElement.style.setProperty("--doc-mono", settings().fontFamily);
     document.documentElement.style.setProperty("--doc-mono-size", `${settings().fontSize}px`);
   });
+  createEffect(() =>
+    document.documentElement.style.setProperty("--tab-row", `${TAB_ROW_HEIGHT[settings().tabSize]}px`),
+  );
   // Live: theme/font changes reach every terminal. A font change alters the cell size, so the
   // visible tab refits now and hidden ones in idle time (same path as a panel resize).
   // Tracks only the three values (editing a shortcut or adding a tab must not re-render every terminal).

@@ -113,6 +113,7 @@ Frontend ↔ backend: Tauri commands, the PTY `Channel`, and events (`pty-exit`,
 ### Settings and themes
 - Overlay (⚙ or Ctrl+,; Esc closes); Rift's shortcuts are off while it is open.
 - `settings.ts` is the single source: `ACTIONS`, `defaultKeys(mac)`, `mergeSettings` (any saved shape → valid), `comboOf`, `actionFor`, `bind`. Shortcuts dispatch only through `actionFor`. A shortcut needs Ctrl, Alt or Cmd, or is F1-F12 (`isValidShortcut`). macOS defaults use Cmd.
+- Tab size (Compact / Comfortable / Large = 36 / 44 / 52 px rows, `TAB_ROW_HEIGHT`) sets the `--tab-row` CSS variable: no terminal refit.
 - Every UI color is a CSS variable (`:root` dark, `[data-theme="light"]`), never a literal. Terminal palettes in `terminal/themes.ts`. "System" follows `prefers-color-scheme` live.
 - Theme/font apply live via `TermView.setLook`; the effect tracks only theme + font (a shortcut edit must not re-render terminals). A font change re-wraps: visible tab now, hidden ones in idle time. Settings load before tabs restore.
 

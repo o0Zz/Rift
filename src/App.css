@@ -326,7 +326,7 @@ body,
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 44px;
+  min-height: var(--tab-row, 44px);
   padding: 4px 6px 4px 10px;
   border-left: 3px solid transparent;
 }

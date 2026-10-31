@@ -31,8 +31,14 @@ export type Settings = {
   shell: string;
   /** Opening a file: "single" replaces the shown document, "tabs" adds one each time. */
   docs: "single" | "tabs";
+  /** Height of a sidebar tab row. */
+  tabSize: TabSize;
   keys: Keymap;
 };
+
+export type TabSize = "compact" | "comfortable" | "large";
+/** Tab row height in px per size (compact = the original 36 px). */
+export const TAB_ROW_HEIGHT: Record<TabSize, number> = { compact: 36, comfortable: 44, large: 52 };
 
 export const IS_MAC = typeof navigator !== "undefined" && /Mac/i.test(navigator.platform);
 
@@ -88,6 +94,7 @@ export const DEFAULTS: Settings = {
   fontFamily: "'Cascadia Mono', Consolas, Menlo, 'DejaVu Sans Mono', monospace",
   shell: "",
   docs: "single",
+  tabSize: "comfortable",
   keys: DEFAULT_KEYS,
 };
 
@@ -105,6 +112,7 @@ export function mergeSettings(saved: unknown): Settings {
     fontFamily: typeof s.fontFamily === "string" && s.fontFamily.trim() ? s.fontFamily : DEFAULTS.fontFamily,
     shell: typeof s.shell === "string" ? s.shell : DEFAULTS.shell,
     docs: s.docs === "tabs" ? "tabs" : DEFAULTS.docs,
+    tabSize: s.tabSize && s.tabSize in TAB_ROW_HEIGHT ? s.tabSize : DEFAULTS.tabSize,
     keys,
   };
 }
