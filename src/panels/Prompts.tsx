@@ -1,5 +1,6 @@
 import { createSignal, For, Show } from "solid-js";
 import { folderName } from "../tabs/layout";
+import { PROMPT_DRAG_TYPE } from "../terminal/TermView";
 import { Icon } from "../ui/Icon";
 import { isSaveKey } from "./promptLists";
 
@@ -51,16 +52,27 @@ export function Prompts(props: {
                 <Show
                   when={editing() === i()}
                   fallback={
-                    <div class="prompt" title="Click to edit" onClick={() => setEditing(i())}>
+                    <div
+                      class="prompt"
+                      title="Click to edit, drag onto the terminal to paste"
+                      draggable={true}
+                      onDragStart={(e) => {
+                        e.dataTransfer!.setData(PROMPT_DRAG_TYPE, text);
+                        e.dataTransfer!.effectAllowed = "copy";
+                      }}
+                      // Dropped on a terminal (the only target accepting it): it leaves the list, like the arrow.
+                      onDragEnd={(e) => e.dataTransfer?.dropEffect !== "none" && props.onRemove(i())}
+                      onClick={() => setEditing(i())}
+                    >
+                      <button
+                        class="icon-btn"
+                        title="Paste into the terminal"
+                        onClick={(e) => (e.stopPropagation(), props.onSend(i()))}
+                      >
+                        <Icon name="send" size={14} />
+                      </button>
                       <span class="prompt-text">{text}</span>
                       <span class="prompt-buttons">
-                        <button
-                          class="icon-btn"
-                          title="Paste into the terminal"
-                          onClick={(e) => (e.stopPropagation(), props.onSend(i()))}
-                        >
-                          <Icon name="send" size={14} />
-                        </button>
                         <button
                           class="icon-btn"
                           title="Delete"

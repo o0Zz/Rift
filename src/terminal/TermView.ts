@@ -16,6 +16,7 @@ export type TermLook = { theme: ITheme; fontSize: number; fontFamily: string };
 
 /** Drag type of a path dragged from Rift's files panel; dropped on a terminal, it is typed in. */
 export const PATH_DRAG_TYPE = "application/x-rift-path";
+export const PROMPT_DRAG_TYPE = "application/x-rift-prompt";
 
 export type TermEvents = {
   onTitle(title: string): void;
@@ -95,16 +96,18 @@ export class TermView {
       },
       true,
     );
-    // A path dragged from the files panel is typed in at the cursor (quoted when needed).
+    // A path dragged from the files panel is typed in at the cursor (quoted when needed); a prompt from the
+    // prompts panel is pasted as is.
     this.el.addEventListener("dragover", (e) => {
-      if (e.dataTransfer?.types.includes(PATH_DRAG_TYPE)) e.preventDefault();
+      const types = e.dataTransfer?.types ?? [];
+      if (types.includes(PATH_DRAG_TYPE) || types.includes(PROMPT_DRAG_TYPE)) e.preventDefault();
     });
     this.el.addEventListener("drop", (e) => {
       const path = e.dataTransfer?.getData(PATH_DRAG_TYPE);
-      if (!path) return;
+      const text = path ? quotePath(path) + " " : e.dataTransfer?.getData(PROMPT_DRAG_TYPE);
+      if (!text) return;
       e.preventDefault();
-      this.term.paste(quotePath(path) + " ");
-      this.term.focus();
+      this.paste(text);
     });
   }
 
