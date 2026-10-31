@@ -2,3 +2,14 @@ node_modules
 dist
 .vscode/*
 !.vscode/extensions.json
+
+# Rust build output, wherever CARGO_TARGET_DIR puts it (e.g. src-tauri/src-tauri/target)
+target/
+
+# Local env and editor/OS files
+.env
+*.local
+*.log
+.idea/
+.DS_Store
+Thumbs.db
