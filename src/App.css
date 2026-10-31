@@ -150,8 +150,9 @@ body,
   padding: 4px 0 0 6px;
 }
 
-/* xterm's scrollbar (14px, the width fit() reserves) stays shown instead of fading out, and easy to see. */
-.term .xterm-scrollable-element > .scrollbar.vertical {
+/* xterm's scrollbar (14px, the width fit() reserves) stays shown instead of fading out, and easy to see.
+   `.fade` = needed but idle; a scrollbar with nothing to scroll is `.invisible` without it and stays hidden. */
+.term .xterm-scrollable-element > .scrollbar.vertical.fade {
   opacity: 1 !important;
   pointer-events: auto !important;
 }
@@ -324,9 +325,9 @@ body,
   position: relative;
   display: flex;
   align-items: center;
-  gap: 8px;
-  min-height: 36px;
-  padding: 2px 6px 2px 10px;
+  gap: 10px;
+  min-height: 44px;
+  padding: 4px 6px 4px 10px;
   border-left: 3px solid transparent;
 }
 
@@ -360,8 +361,14 @@ body,
   position: relative;
   display: flex;
   flex: none;
-  width: 18px;
+  width: 26px;
+  height: 26px;
+  box-sizing: border-box;
+  align-items: center;
   justify-content: center;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--fg) 7%, transparent);
 }
 
 /* Agent status badge, bottom-right of the icon (Warp-style). */
