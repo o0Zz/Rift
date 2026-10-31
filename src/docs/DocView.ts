@@ -1,5 +1,5 @@
 import { createSignal } from "solid-js";
-import { invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import type { Editor } from "./editor";
 
 type Text = { text: string; mtime: number };
@@ -128,10 +128,15 @@ export class DocView {
         onSave: () => void this.save(),
       });
     } else {
-      const { renderMarkdown } = await import("./markdown");
+      const { localImage, renderMarkdown } = await import("./markdown");
       const page = document.createElement("article");
       page.className = "md";
       page.innerHTML = renderMarkdown(this.text);
+      // Relative images load from disk next to the file (Tauri's asset protocol), not from the app's origin.
+      for (const img of page.querySelectorAll("img")) {
+        const file = localImage(img.getAttribute("src") ?? "", this.path);
+        if (file) img.src = convertFileSrc(file);
+      }
       this.el.tabIndex = -1;
       this.el.appendChild(page);
     }

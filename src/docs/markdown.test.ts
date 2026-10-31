@@ -1,6 +1,19 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { renderMarkdown } from "./markdown";
+import { localImage, renderMarkdown } from "./markdown";
+
+describe("localImage", () => {
+  it("resolves relative images next to the Markdown file", () => {
+    expect(localImage("docs/shot%201.png", "C:\\repo\\README.md")).toBe("C:\\repo\\docs/shot 1.png");
+    expect(localImage("../x.svg?raw", "/home/me/repo/docs/a.md")).toBe("/home/me/repo/docs/../x.svg");
+  });
+
+  it("leaves web, data and absolute images alone", () => {
+    for (const src of ["https://x.dev/a.png", "data:image/png;base64,AA", "/abs.png", "#x", ""]) {
+      expect(localImage(src, "C:\\repo\\README.md")).toBeUndefined();
+    }
+  });
+});
 
 describe("renderMarkdown", () => {
   it("renders headings, tables and inline code", () => {
