@@ -15,6 +15,7 @@ export const ACTIONS = {
   zoomOut: "Zoom out",
   zoomReset: "Reset zoom",
   renameTab: "Rename tab",
+  refreshPanels: "Refresh files and git panels",
   settings: "Open settings",
 } as const;
 
@@ -53,6 +54,7 @@ export function defaultKeys(mac: boolean): Keymap {
       zoomOut: ["Cmd+-"],
       zoomReset: ["Cmd+0"],
       renameTab: ["F2"],
+      refreshPanels: ["F5"],
       settings: ["Cmd+,"],
     };
   }
@@ -69,6 +71,7 @@ export function defaultKeys(mac: boolean): Keymap {
     zoomOut: ["Ctrl+-"],
     zoomReset: ["Ctrl+0"],
     renameTab: ["F2"], // note: PowerShell 7 uses F2 to switch its prediction view; rebindable
+    refreshPanels: ["F5"],
     settings: ["Ctrl+,"],
   };
 }
@@ -127,6 +130,15 @@ export function actionFor(e: KeyLike, keys: Keymap, mac = IS_MAC): Action | unde
   const combo = comboOf(e, mac)?.toLowerCase();
   if (!combo) return;
   return (Object.keys(keys) as Action[]).find((a) => keys[a].some((c) => c.toLowerCase() === combo));
+}
+
+/**
+ * The webview's reload keys (F5, Ctrl+R, Cmd+R on macOS): they would reload the whole app and restart every
+ * shell. Ctrl+R typed in a terminal is the shell's history search; xterm consumes it before the webview.
+ */
+export function isReloadKey(e: KeyLike, mac = IS_MAC): boolean {
+  const key = e.key.toLowerCase();
+  return key === "f5" || (key === "r" && (mac ? e.metaKey : e.ctrlKey));
 }
 
 /**

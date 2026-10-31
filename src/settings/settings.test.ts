@@ -7,6 +7,7 @@ import {
   DEFAULTS,
   defaultKeys,
   displayVersion,
+  isReloadKey,
   isValidShortcut,
   mergeSettings,
   resolveTheme,
@@ -48,6 +49,7 @@ describe("actionFor with the default keys", () => {
     expect(actionFor(key("-"), DEFAULT_KEYS)).toBe("zoomOut");
     expect(actionFor(key("0"), DEFAULT_KEYS)).toBe("zoomReset");
     expect(actionFor({ key: "F2", ctrlKey: false, shiftKey: false, altKey: false, metaKey: false }, DEFAULT_KEYS)).toBe("renameTab");
+    expect(actionFor({ key: "F5", ctrlKey: false, shiftKey: false, altKey: false, metaKey: false }, DEFAULT_KEYS)).toBe("refreshPanels");
   });
 
   it("leaves shell keys alone", () => {
@@ -95,6 +97,19 @@ describe("macOS", () => {
       for (const combos of Object.values(keys)) expect(combos.length).toBeGreaterThan(0);
     }
   });
+});
+
+it("recognizes the webview's reload keys", () => {
+  const k = (key: string, mods: Partial<Record<"ctrlKey" | "shiftKey" | "metaKey", boolean>> = {}) => ({
+    key, ctrlKey: false, shiftKey: false, altKey: false, metaKey: false, ...mods,
+  });
+  expect(isReloadKey(k("F5"), false)).toBe(true);
+  expect(isReloadKey(k("F5", { ctrlKey: true }), false)).toBe(true);
+  expect(isReloadKey(k("r", { ctrlKey: true }), false)).toBe(true);
+  expect(isReloadKey(k("R", { ctrlKey: true, shiftKey: true }), false)).toBe(true);
+  expect(isReloadKey(k("r", { metaKey: true }), true)).toBe(true);
+  expect(isReloadKey(k("r", { ctrlKey: true }), true)).toBe(false); // macOS: Ctrl+R is the shell's
+  expect(isReloadKey(k("r"), false)).toBe(false);
 });
 
 it("rejects shortcuts that would steal typing", () => {

@@ -106,6 +106,7 @@ notifications and per-tab resume. Without Claude Code, Rift is simply a fast ter
 | Find in terminal | `Ctrl+Shift+F` |
 | Zoom in / out / reset | `Ctrl+=` / `Ctrl+-` / `Ctrl+0` |
 | Rename tab | `F2` |
+| Refresh the files and git panels | `F5` (never reloads Rift) |
 | Settings | `Ctrl+,` |
 | Copy / paste | `Ctrl+C` (with a selection) / `Ctrl+V` |
 

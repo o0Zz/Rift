@@ -7,7 +7,7 @@ import { onAction, sendNotification } from "@tauri-apps/plugin-notification";
 import { TermView, type AgentSession, type TermLook } from "./terminal/TermView";
 import { TERMINAL_THEMES } from "./terminal/themes";
 import { neighbour } from "./tabs/nav";
-import { actionFor, DEFAULTS, displayVersion, mergeSettings, resolveTheme, type Settings } from "./settings/settings";
+import { actionFor, DEFAULTS, displayVersion, isReloadKey, mergeSettings, resolveTheme, type Settings } from "./settings/settings";
 import { SettingsPage } from "./settings/SettingsPage";
 import { startUpdates, type Updater } from "./update";
 import {
@@ -148,6 +148,7 @@ function App() {
   // moved. Switching tabs reloads the panel only for those, so a switch where nothing happened costs nothing.
   const changedRepos = new Set<string>();
   const [gitRefresh, setGitRefresh] = createSignal(0); // bumped to reload the git panel in place
+  const [filesRefresh, setFilesRefresh] = createSignal(0); // bumped to reload the files panel (F5)
   // Keep the spare shell in the active tab's folder, so a new tab there (which opens in the same
   // folder) is instant. Only once the tab and its folder stay put: each move costs a shell start.
   let prewarmTimer = 0;
@@ -511,6 +512,8 @@ function App() {
   }
 
   function onKey(e: KeyboardEvent) {
+    // Never reload the app (it would restart every shell); in a terminal xterm takes the key first.
+    if (isReloadKey(e) && !(e.target as Element).closest?.(".xterm")) e.preventDefault();
     if (settingsOpen()) return; // the settings page owns the keyboard (shortcut recording, Esc)
     const action = actionFor(e, settings().keys);
     if (!action) return;
@@ -528,6 +531,12 @@ function App() {
     else if (action === "zoomIn") zoom(1);
     else if (action === "zoomOut") zoom(-1);
     else if (action === "zoomReset") zoom(0);
+    else if (action === "refreshPanels") {
+      const root = panelTab()?.root;
+      if (root) changedRepos.delete(root);
+      setGitRefresh(gitRefresh() + 1);
+      setFilesRefresh(filesRefresh() + 1);
+    }
     else if (action === "nextAttention") {
       const next = nextNeedingAttention(visualOrder(tabs(), groups()), active());
       if (next) activate(next);
@@ -648,6 +657,7 @@ function App() {
         <div class="pane" style={{ width: `${widths().explorer}px` }}>
           <Explorer
             root={panelTab()?.root ?? panelTab()?.cwd}
+            refresh={filesRefresh()}
             onOpenFile={(path) => openDoc(path)}
             onClose={() => togglePanel("explorer")}
           />

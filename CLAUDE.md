@@ -73,6 +73,7 @@ Frontend ↔ backend: Tauri commands, the PTY `Channel`, and events (`pty-exit`,
 - Shortcuts are handled in a capture-phase `keydown` listener (`tabs/nav.ts`) so xterm never sees them. New tab = Ctrl+Shift+T, close = Ctrl+Shift+W: plain Ctrl+T/W belong to the shell and to Claude Code.
 
 ### Terminal conveniences and agent attention
+- The webview never reloads: F5 / Ctrl+R / Cmd+R are blocked outside a terminal (`isReloadKey`; a reload restarts every shell). F5 = refresh the files and git panels.
 - Find: Ctrl+Shift+F (`FindBar`, search addon). Links: Ctrl+click only (`open_url`, http(s) only). Zoom: Ctrl+= / - / 0.
 - Shift+Enter in an agent tab sends ESC+CR (Claude's new line); in a shell it stays Enter. Esc in a working/blocked agent tab sets it idle (`statusAfterEscape`): agents fire no hook on interrupt.
 - Image paste into Claude: Claude reads the clipboard on its own key (Alt+V on Windows, passed by xterm as `ESC v`; Ctrl+V on Linux/macOS). A paste without text sends the Ctrl+V byte (0x16); on macOS Ctrl+V is not paste (Cmd+V is).

@@ -1,4 +1,4 @@
-import { createEffect, createSignal, For, Show } from "solid-js";
+import { createEffect, createSignal, For, on, Show } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { createMenu } from "../ui/Menu";
 import { folderName } from "../tabs/layout";
@@ -37,7 +37,7 @@ const join = (dir: string, name: string) =>
 
 /** File tree of `root`. Each folder is listed once, when first expanded (cached until ⟳). */
 /** Files of the tab's repo (or folder). A click opens a file in the tab (`onOpenFile`), not in another app. */
-export function Explorer(props: { root?: string; onOpenFile(path: string): void; onClose(): void }) {
+export function Explorer(props: { root?: string; refresh?: number; onOpenFile(path: string): void; onClose(): void }) {
   const [listings, setListings] = createSignal(new Map<string, Entry[] | string>());
   const [expanded, setExpanded] = createSignal(new Set<string>());
   const menu = createMenu();
@@ -70,6 +70,7 @@ export function Explorer(props: { root?: string; onOpenFile(path: string): void;
     if (root) load(root);
     for (const dir of expanded()) load(dir);
   }
+  createEffect(on(() => props.refresh, refresh, { defer: true }));
 
   function fileMenu(e: MouseEvent, path: string) {
     menu.open(e, [
