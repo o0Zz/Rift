@@ -1,4 +1,5 @@
 import { createSignal, For, Show, onCleanup, onMount } from "solid-js";
+import { Portal } from "solid-js/web";
 import { COLORS } from "../tabs/layout";
 import { Icon } from "./Icon";
 
@@ -29,7 +30,9 @@ export function createMenu(onClosed?: () => void) {
       window.addEventListener("mousedown", onDown);
       onCleanup(() => window.removeEventListener("mousedown", onDown));
     });
+    // In <body>: the sidebar's `contain: paint` would clip a menu rendered inside it.
     return (
+      <Portal>
       <Show when={menu()}>
         {(m) => {
           const actions = () => m().items.filter(isAction);
@@ -86,6 +89,7 @@ export function createMenu(onClosed?: () => void) {
           );
         }}
       </Show>
+      </Portal>
     );
   }
 
