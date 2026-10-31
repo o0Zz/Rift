@@ -1,10 +1,11 @@
 import { createSignal, For, Show } from "solid-js";
 import { folderName } from "../tabs/layout";
 import { Icon } from "../ui/Icon";
+import { isSaveKey } from "./promptLists";
 
 /**
- * Prompts prepared in advance for the shown tab's repo. Click one: it is pasted into the active terminal
- * (not sent: Enter stays the user's) and leaves the list.
+ * Prompts prepared in advance for the shown tab's repo. Click one to edit it; its arrow pastes it into the
+ * active terminal (not sent: Enter stays the user's) and it leaves the list.
  */
 export function Prompts(props: {
   repo?: string;
@@ -50,15 +51,15 @@ export function Prompts(props: {
                 <Show
                   when={editing() === i()}
                   fallback={
-                    <div class="prompt" title="Click to paste into the terminal" onClick={() => props.onSend(i())}>
+                    <div class="prompt" title="Click to edit" onClick={() => setEditing(i())}>
                       <span class="prompt-text">{text}</span>
                       <span class="prompt-buttons">
                         <button
                           class="icon-btn"
-                          title="Edit"
-                          onClick={(e) => (e.stopPropagation(), setEditing(i()))}
+                          title="Paste into the terminal"
+                          onClick={(e) => (e.stopPropagation(), props.onSend(i()))}
                         >
-                          <Icon name="edit" size={14} />
+                          <Icon name="send" size={14} />
                         </button>
                         <button
                           class="icon-btn"
@@ -77,7 +78,10 @@ export function Prompts(props: {
                     value={text}
                     onKeyDown={(e) => {
                       if (e.key === "Escape") setEditing(undefined);
-                      else if (e.key === "Enter" && e.ctrlKey) finishEdit(i(), e.currentTarget.value);
+                      else if (isSaveKey(e)) {
+                        e.preventDefault();
+                        finishEdit(i(), e.currentTarget.value);
+                      }
                     }}
                     onBlur={(e) => finishEdit(i(), e.currentTarget.value)}
                   />
@@ -88,10 +92,15 @@ export function Prompts(props: {
         </div>
         <div class="commit-box">
           <textarea
-            placeholder="New prompt (Ctrl+Enter to add)"
+            placeholder="New prompt (Enter to add, Shift+Enter for a new line)"
             value={draft()}
             onInput={(e) => setDraft(e.currentTarget.value)}
-            onKeyDown={(e) => e.key === "Enter" && e.ctrlKey && add()}
+            onKeyDown={(e) => {
+              if (isSaveKey(e)) {
+                e.preventDefault();
+                add();
+              }
+            }}
           />
           <div class="commit-actions">
             <button class="primary" disabled={!draft().trim()} onClick={add}>

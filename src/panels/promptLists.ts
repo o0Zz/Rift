@@ -32,6 +32,11 @@ export function removePrompt(lists: PromptLists, key: string, index: number): Pr
   return withList(lists, key, (lists[key] ?? []).filter((_, i) => i !== index));
 }
 
+/** Enter saves a prompt being written; Shift+Enter is a new line (and nothing fires mid IME composition). */
+export function isSaveKey(e: { key: string; shiftKey: boolean; isComposing?: boolean }): boolean {
+  return e.key === "Enter" && !e.shiftKey && !e.isComposing;
+}
+
 /** Saved prompts (any shape, possibly edited by hand) → valid lists. */
 export function mergePrompts(saved: unknown): PromptLists {
   const lists: PromptLists = {};

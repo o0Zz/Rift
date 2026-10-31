@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { addPrompt, editPrompt, mergePrompts, promptKey, removePrompt } from "./promptLists";
+import { addPrompt, editPrompt, isSaveKey, mergePrompts, promptKey, removePrompt } from "./promptLists";
 
 it("keys a repo the same way whatever the path spelling", () => {
   expect(promptKey("C:\\Dev\\Rift\\")).toBe(promptKey("c:/dev/rift"));
@@ -19,6 +19,13 @@ it("adds, edits and removes prompts per repo", () => {
 
   lists = removePrompt(lists, "a", 0);
   expect(lists).toEqual({ b: ["other repo"] }); // an emptied list is dropped
+});
+
+it("saves on Enter, Shift+Enter is a new line", () => {
+  expect(isSaveKey({ key: "Enter", shiftKey: false })).toBe(true);
+  expect(isSaveKey({ key: "Enter", shiftKey: true })).toBe(false);
+  expect(isSaveKey({ key: "Enter", shiftKey: false, isComposing: true })).toBe(false);
+  expect(isSaveKey({ key: "a", shiftKey: false })).toBe(false);
 });
 
 it("reads any saved shape", () => {
