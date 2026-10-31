@@ -150,6 +150,21 @@ body,
   padding: 4px 0 0 6px;
 }
 
+/* xterm's scrollbar (14px, the width fit() reserves) stays shown instead of fading out, and easy to see. */
+.term .xterm-scrollable-element > .scrollbar.vertical {
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
+
+.term .xterm-scrollable-element > .scrollbar > .slider {
+  background: color-mix(in srgb, var(--fg-muted) 45%, transparent) !important;
+}
+
+.term .xterm-scrollable-element > .scrollbar > .slider:hover,
+.term .xterm-scrollable-element > .scrollbar > .slider.active {
+  background: color-mix(in srgb, var(--fg-muted) 75%, transparent) !important;
+}
+
 /* Sidebar */
 
 /* Resizable column: holds a panel and its drag handle. */
