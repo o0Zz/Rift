@@ -15,19 +15,32 @@ export function keepChecked(checked: Set<string>, before: Change[], after: Chang
   return new Set(after.map((c) => c.path).filter((p) => checked.has(p) || !known.has(p)));
 }
 
-/** History: a click picks one commit; Ctrl+click adds a second one to compare (or unpicks a picked one). */
-export function pickCommits(picks: string[], hash: string, add: boolean): string[] {
-  if (!add) return [hash];
-  if (picks.includes(hash)) return picks.filter((h) => h !== hash);
-  return [...picks.slice(-1), hash];
+/** History: a click picks one commit; Shift+click picks the range from that one (the anchor) to here. */
+export function pickCommits(picks: string[], hash: string, shift: boolean): string[] {
+  const anchor = picks[0];
+  return shift && anchor && anchor !== hash ? [anchor, hash] : [hash];
 }
 
-/** What to show for the picked commits: one commit's own changes, or older → newer of two (`order`: newest first). */
-export function commitRange(order: string[], picks: string[]): { from?: string; to: string } | undefined {
-  if (picks.length === 1) return { to: picks[0] };
+/**
+ * What to show for the picked commits (`order`: the log, newest first): one commit's changes, or the range
+ * `from` (oldest) to `to` (newest), both included; `count` commits.
+ */
+export function commitRange(
+  order: string[],
+  picks: string[],
+): { from?: string; to: string; count: number } | undefined {
+  if (picks.length === 1) return { to: picks[0], count: 1 };
   if (picks.length !== 2) return;
-  const [a, b] = picks;
-  return order.indexOf(a) > order.indexOf(b) ? { from: a, to: b } : { from: b, to: a };
+  const [i, j] = picks.map((h) => order.indexOf(h)).sort((a, b) => a - b);
+  return { from: order[j], to: order[i], count: j - i + 1 };
+}
+
+/** Whether a commit of the log is inside the picked range (highlighted). */
+export function inRange(order: string[], picks: string[], hash: string): boolean {
+  if (picks.length === 1) return picks[0] === hash;
+  const k = order.indexOf(hash);
+  const [i, j] = picks.map((h) => order.indexOf(h)).sort((a, b) => a - b);
+  return picks.length === 2 && k >= i && k <= j;
 }
 
 /** `(path, untracked)` pairs for the backend; a rename also commits its old path. */

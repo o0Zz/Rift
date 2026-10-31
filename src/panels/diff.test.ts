@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { commitFiles, commitRange, diffLineClass, keepChecked, pickCommits } from "./diff";
+import { commitFiles, commitRange, diffLineClass, inRange, keepChecked, pickCommits } from "./diff";
 
 it("keeps the user's unchecks across a reload and checks new files", () => {
   const before = [{ path: "a", status: "M" }, { path: "b", status: "M" }, { path: "gone", status: "M" }];
@@ -36,15 +36,20 @@ it("lists files to commit, with both sides of a rename", () => {
   ]);
 });
 
-it("picks one commit, or two to compare (older to newer)", () => {
+it("picks one commit, or a range with Shift (oldest to newest, both included)", () => {
+  expect(pickCommits([], "b", true)).toEqual(["b"]); // no anchor yet
   expect(pickCommits(["a"], "b", false)).toEqual(["b"]);
   expect(pickCommits(["a"], "b", true)).toEqual(["a", "b"]);
-  expect(pickCommits(["a", "b"], "c", true)).toEqual(["b", "c"]);
-  expect(pickCommits(["a", "b"], "a", true)).toEqual(["b"]);
+  expect(pickCommits(["a", "b"], "c", true)).toEqual(["a", "c"]); // the anchor stays
+  expect(pickCommits(["a"], "a", true)).toEqual(["a"]);
 
-  const order = ["new", "mid", "old"]; // the log, newest first
+  const order = ["new", "mid", "old", "first"]; // the log, newest first
   expect(commitRange(order, [])).toBeUndefined();
-  expect(commitRange(order, ["mid"])).toEqual({ to: "mid" });
-  expect(commitRange(order, ["new", "old"])).toEqual({ from: "old", to: "new" });
-  expect(commitRange(order, ["old", "mid"])).toEqual({ from: "old", to: "mid" });
+  expect(commitRange(order, ["mid"])).toEqual({ to: "mid", count: 1 });
+  expect(commitRange(order, ["new", "old"])).toEqual({ from: "old", to: "new", count: 3 });
+  expect(commitRange(order, ["first", "mid"])).toEqual({ from: "first", to: "mid", count: 3 });
+
+  expect(order.filter((h) => inRange(order, ["old", "new"], h))).toEqual(["new", "mid", "old"]);
+  expect(order.filter((h) => inRange(order, ["mid"], h))).toEqual(["mid"]);
+  expect(order.filter((h) => inRange(order, [], h))).toEqual([]);
 });

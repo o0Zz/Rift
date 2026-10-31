@@ -463,13 +463,31 @@ fn parse_name_status(text: &str) -> Vec<Change> {
     changes
 }
 
-/// Files changed by commit `to` (`from` None), or between commits `from` and `to`.
+/// What a range starting at commit `oldest` is compared against, so that `oldest`'s own changes count:
+/// its parent, or the empty tree for the first commit.
+fn before(root: &Path, oldest: &str) -> Result<String> {
+    valid_rev(oldest)?;
+    let parent = git(
+        root,
+        &["rev-parse", "--verify", "--quiet", &format!("{oldest}^")],
+    )?;
+    Ok(if parent.status.success() {
+        String::from_utf8_lossy(&parent.stdout).trim().to_string()
+    } else {
+        "4b825dc642cb6eb9a060e54bf8d69288fbee4904".into() // git's empty tree
+    })
+}
+
+/// Files changed by commit `to` (`from` None), or by the commits `from` (oldest) to `to`, both included.
 pub fn commit_files(root: &Path, from: Option<&str>, to: &str) -> Result<Vec<Change>> {
     valid_rev(to)?;
     let out = match from {
         Some(from) => {
-            valid_rev(from)?;
-            check(git(root, &["diff", "--name-status", "-z", "-M", from, to])?)?
+            let base = before(root, from)?;
+            check(git(
+                root,
+                &["diff", "--name-status", "-z", "-M", &base, to],
+            )?)?
         }
         // `show` also works for the first commit, which has no parent to diff against.
         None => check(git(
@@ -480,15 +498,15 @@ pub fn commit_files(root: &Path, from: Option<&str>, to: &str) -> Result<Vec<Cha
     Ok(parse_name_status(&String::from_utf8_lossy(&out.stdout)))
 }
 
-/// Diff of one file in commit `to`, or between commits `from` and `to`.
+/// Diff of one file in commit `to`, or over the commits `from` (oldest) to `to`, both included.
 pub fn commit_diff(root: &Path, from: Option<&str>, to: &str, path: &str) -> Result<String> {
     valid_rev(to)?;
     let out = match from {
         Some(from) => {
-            valid_rev(from)?;
+            let base = before(root, from)?;
             check(git(
                 root,
-                &["diff", "--no-color", "-M", from, to, "--", path],
+                &["diff", "--no-color", "-M", &base, to, "--", path],
             )?)?
         }
         None => check(git(
@@ -854,17 +872,36 @@ mod tests {
             2,
             "the first commit has no parent"
         );
+        // A range includes its oldest commit: from `edit` on, the edit, the rename and the new file.
         assert_eq!(
-            summary(commit_files(r, Some(first), last).unwrap()),
+            summary(commit_files(r, Some(edit), last).unwrap()),
             [
                 ("M".into(), "kept.txt".into(), None),
                 ("R".into(), "moved.txt".into(), Some("gone.txt".into())),
                 ("A".into(), "new.txt".into(), None),
             ]
         );
+        // From the first commit (no parent): everything is new.
+        let all: Vec<_> = summary(commit_files(r, Some(first), last).unwrap())
+            .into_iter()
+            .map(|(status, path, _)| (status, path))
+            .collect();
+        assert_eq!(
+            all,
+            [
+                ("A".to_string(), "kept.txt".to_string()),
+                ("A".into(), "moved.txt".into()),
+                ("A".into(), "new.txt".into())
+            ]
+        );
 
         let d = commit_diff(r, None, edit, "kept.txt").unwrap();
         assert!(d.contains("-two") && d.contains("+TWO"), "{d}");
+        let d = commit_diff(r, Some(edit), last, "kept.txt").unwrap();
+        assert!(
+            d.contains("-two") && d.contains("+TWO"),
+            "the oldest commit counts: {d}"
+        );
         let d = commit_diff(r, Some(first), last, "new.txt").unwrap();
         assert!(d.contains("+new"), "{d}");
         assert!(commit_files(r, None, "HEAD; rm -rf").is_err());

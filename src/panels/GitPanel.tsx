@@ -1,6 +1,6 @@
 import { createEffect, createSignal, For, on, Show } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
-import { commitFiles as files, commitRange, diffLineClass, keepChecked, pickCommits, type Change } from "./diff";
+import { commitFiles as files, commitRange, diffLineClass, inRange, keepChecked, pickCommits, type Change } from "./diff";
 import { Icon } from "../ui/Icon";
 import { createMenu } from "../ui/Menu";
 import { PromptDialog } from "../ui/PromptDialog";
@@ -10,7 +10,7 @@ type Branch = { name: string; current: boolean };
 
 /**
  * Branch (switch / create), pull and push, changed files with their diff and commit of the checked files;
- * History: the last commits, one commit's changes or the diff between two (Ctrl+click).
+ * History: the last commits; a click shows one commit's changes, Shift+click those of a range of commits.
  * Not live: loads when shown, when the shown repo changes, after an action, on ⟳, or when `refresh` changes
  * (its agent finished). Every git command runs on a click, never in the background.
  */
@@ -40,10 +40,11 @@ export function GitPanel(props: {
 
   const list = () => (Array.isArray(changes()) ? (changes() as Change[]) : []);
   const picked = () => list().filter((c) => checked().has(c.path));
-  const range = () => {
+  const order = () => {
     const log = commits();
-    return commitRange(Array.isArray(log) ? log.map((c) => c.hash) : [], picks());
+    return Array.isArray(log) ? log.map((c) => c.hash) : [];
   };
+  const range = () => commitRange(order(), picks());
   const short = (hash?: string) => hash?.slice(0, 7);
 
   /** `keep`: same repo, newer state. The list, checks and open diff stay put instead of starting over. */
@@ -104,8 +105,8 @@ export function GitPanel(props: {
     if (id === request) setDiff(text);
   }
 
-  async function pick(hash: string, add: boolean) {
-    setPicks(pickCommits(picks(), hash, add));
+  async function pick(hash: string, shift: boolean) {
+    setPicks(pickCommits(picks(), hash, shift));
     setSelected(undefined);
     setDiff(undefined);
     const r = range();
@@ -316,9 +317,11 @@ export function GitPanel(props: {
                     {(commit) => (
                       <div
                         class="git-commit"
-                        classList={{ active: picks().includes(commit.hash) }}
-                        title={`${commit.short} · ${commit.author} · ${commit.date}\nCtrl+click another commit to compare`}
-                        onClick={(e) => pick(commit.hash, e.ctrlKey || e.metaKey)}
+                        classList={{ active: inRange(order(), picks(), commit.hash) }}
+                        title={`${commit.short} · ${commit.author} · ${commit.date}\nShift+click another commit to see the whole range`}
+                        // Shift+click would also select the page's text.
+                        onMouseDown={(e) => e.shiftKey && e.preventDefault()}
+                        onClick={(e) => pick(commit.hash, e.shiftKey)}
                       >
                         <span class="git-hash">{commit.short}</span>
                         <span class="git-subject">{commit.subject}</span>
@@ -334,7 +337,9 @@ export function GitPanel(props: {
             {(r) => (
               <div class="git-files">
                 <div class="git-file all">
-                  {r().from ? `${short(r().from)} → ${short(r().to)}` : `Changes in ${short(r().to)}`}
+                  {r().from
+                    ? `${r().count} commits, ${short(r().from)} to ${short(r().to)}`
+                    : `Changes in ${short(r().to)}`}
                 </div>
                 <Show when={commitChanges()} fallback={<div class="tree-note">Loading…</div>}>
                   {(c) =>
@@ -358,7 +363,7 @@ export function GitPanel(props: {
                   ? "Click a file to see its diff"
                   : picks().length
                     ? "Click a file to see its diff"
-                    : "Click a commit to see its changes; Ctrl+click a second one to compare"}
+                    : "Click a commit to see its changes; Shift+click another one for the whole range"}
               </div>
             }
           >
