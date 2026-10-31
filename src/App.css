@@ -1166,8 +1166,21 @@ body,
 
 .tab-sub .stat-add,
 .tab-sub .stat-del,
-.tab-sub .stat-ab {
+.tab-sub .stat-ab,
+.tab-ctx {
   flex: none;
+}
+
+.tab-ctx.high {
+  color: var(--s-m);
+}
+
+.usage {
+  flex: none;
+  margin-left: auto;
+  color: var(--fg-muted);
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 /* Top bar above the terminal: active tab, git button on the right (Warp-style) */

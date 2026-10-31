@@ -39,6 +39,51 @@ impl AgentEvent {
     }
 }
 
+/// Live numbers from an agent's status line: context window and plan limits, in percent.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Usage {
+    pub context: Option<f64>,
+    pub five_hour: Option<Limit>,
+    pub seven_day: Option<Limit>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Limit {
+    pub used: f64,
+    /// Unix epoch seconds.
+    pub resets_at: i64,
+}
+
+impl Usage {
+    /// The line printed back into the agent's own status bar: "ctx 34% · 5h 23% · 7d 41%".
+    pub fn line(&self) -> String {
+        let parts = [
+            self.context.map(|c| format!("ctx {c:.0}%")),
+            self.five_hour
+                .as_ref()
+                .map(|l| format!("5h {:.0}%", l.used)),
+            self.seven_day
+                .as_ref()
+                .map(|l| format!("7d {:.0}%", l.used)),
+        ];
+        parts
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(" \u{b7} ")
+    }
+}
+
+/// Usage from a status line payload (`rift status <harness>`); `None` for hook payloads.
+pub fn parse_usage(harness: &str, payload: &Value) -> Option<Usage> {
+    match harness {
+        "claude" => claude::parse_usage(payload),
+        _ => None,
+    }
+}
+
 /// An agent session bound to a tab, enough to resume it later.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AgentSession {

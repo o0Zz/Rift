@@ -27,6 +27,7 @@ export class Tab {
     unread: field(false),
     shell: field<string | undefined>(undefined),
     stats: field<GitStats | undefined>(undefined),
+    context: field<number | undefined>(undefined),
     snap: field<string>(crypto.randomUUID()),
     docs: field<DocView[]>([]),
     current: field(-1),
@@ -62,6 +63,9 @@ export class Tab {
   set snap(v) { this.f.snap.set(v); }
   get stats() { return this.f.stats.get(); }
   set stats(v) { this.f.stats.set(v); }
+  /** Percent of the agent's context window in use (its status line); undefined = unknown. */
+  get context() { return this.f.context.get(); }
+  set context(v) { this.f.context.set(v); }
   /** Files open in this tab, and the one shown instead of the terminal (-1 = the terminal). */
   get docs() { return this.f.docs.get(); }
   set docs(v) { this.f.docs.set(v); }

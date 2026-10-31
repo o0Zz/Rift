@@ -126,6 +126,7 @@ Frontend ↔ backend: Tauri commands, the PTY `Channel`, and events (`pty-exit`,
 ### Agent harness
 - Everything agent-specific goes through `AgentHarness` (`agents/mod.rs`): `id`, `name`, `parse_hook`, `resume_command`, `start_command`, `hooks_installed`, `install_hooks`, `one_shot`. UI and session code never mention "claude"; they use `AgentHarness`, `AgentEvent`, `AgentSession { harness, session_id }`.
 - Claude hooks: in `~/.claude/settings.json`, **exec form** (`"command": "<path>\rift.exe", "args": ["hook", "claude"]`; shell form would go through Git Bash). Installed only on the user's "Enable" click; other settings and key order kept, `.bak` written, older Rift entries replaced. `SessionStart` → idle + bind, `SessionEnd` → unbind, `UserPromptSubmit`/`PostToolUse` → working, `Stop` → done, `Notification` → blocked (except `idle_prompt`). Hook call ~25 ms. Never edit that file without the user's click; uninstall not built.
+- Usage: the same click sets `statusLine` to `rift status claude` (a shell command: forward slashes, quoted only with a space), unless the user has their own (kept, and counts as installed; hooks without any `statusLine` ask to Enable again). It prints `ctx 34% · 5h 23% · 7d 41%` back into Claude and forwards the JSON through the pipe → `agent-usage` (`agents::parse_usage`): context on the tab, 5h/7d plan limits in the top bar. Event-driven only (Claude debounces at 300 ms); no polling.
 - Resume per tab: each tab runs `claude --resume <its own session_id>` in its cwd.
 
 ## Windows specifics

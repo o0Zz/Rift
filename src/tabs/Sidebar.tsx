@@ -5,6 +5,7 @@ import type { Tab } from "./Tab";
 import { TabIcon } from "./icons";
 import { Icon } from "../ui/Icon";
 import { GitStatsView } from "./GitStats";
+import { CONTEXT_WARN } from "./usage";
 
 export type SidebarProps = {
   tabs: Tab[];
@@ -166,6 +167,11 @@ export function Sidebar(props: SidebarProps) {
                   <Icon name="branch" size={11} /> {tab.branch}
                 </span>
                 <GitStatsView stats={tab.stats} />
+              </Show>
+              <Show when={tab.agent && tab.context !== undefined}>
+                <span class="tab-ctx" classList={{ high: tab.context! >= CONTEXT_WARN }} title="Context window used">
+                  ctx {Math.round(tab.context!)}%
+                </span>
               </Show>
               <span class="tab-path">
                 <bdo dir="ltr">{tab.cwd}</bdo>

@@ -36,6 +36,8 @@ freezing the window) and fails when a change goes over budget.
 
 ### Made for Claude Code
 - **Status on every tab**: Claude's icon with a badge: working, done, or waiting for your permission.
+- **Usage at a glance**: each Claude tab shows how full its context window is, and the top bar your 5-hour and
+  weekly plan usage (Pro/Max), with reset times on hover.
 - **Notifications** when a session finishes or needs you while you are elsewhere. Click one to jump to its tab;
   the taskbar icon flashes too.
 - **Never lose track**: `Ctrl+Shift+U` jumps to the next tab that needs you, the sidebar filters *Needs me* /

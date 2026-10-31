@@ -29,6 +29,7 @@ import { DocView } from "./docs/DocView";
 import { afterClose, placeDoc } from "./docs/place";
 import { Sidebar } from "./tabs/Sidebar";
 import { GitStatsView } from "./tabs/GitStats";
+import { limitsLabel, limitsTitle, type Limit, type Limits } from "./tabs/usage";
 import { Icon } from "./ui/Icon";
 import { Explorer } from "./panels/Explorer";
 import { GitPanel } from "./panels/GitPanel";
@@ -44,6 +45,7 @@ type Widths = { tabs: number; explorer: number; git: number };
 type Saved = { tabs: SavedTab[]; active: number; layout?: { groups?: Group[]; panels?: Panels; widths?: Widths } };
 type Integration = { id: string; name: string; installed: boolean };
 type AgentStatus = { pty: number; harness: string; status: Status | null; message: string | null };
+type AgentUsage = { pty: number; context: number | null } & { [K in keyof Limits]: Limit | null };
 
 function App() {
   let host!: HTMLDivElement;
@@ -57,6 +59,8 @@ function App() {
   // The default shell (settings) is the backend's: spare shells start with it.
   createEffect(on(() => settings().shell, (id) => invoke("shell_set_default", { id: id || null }), { defer: true }));
   const [update, setUpdate] = createSignal<{ version: string; restart: () => Promise<void> }>();
+  // Plan limits from the latest status line (they are per account, not per tab).
+  const [limits, setLimits] = createSignal<Limits>({});
   // From Tauri's window events: document.hasFocus() is not reliable in WebView2.
   const [windowFocused, setWindowFocused] = createSignal(true);
   const [settings, setSettings] = createSignal<Settings>(DEFAULTS);
@@ -444,6 +448,7 @@ function App() {
     batch(() => {
       tab.status = status ?? undefined;
       tab.agent = status ? harness : undefined;
+      if (!status) tab.context = undefined;
     });
     refreshStats(tab); // an agent at work changes files
     if (tab.root) changedRepos.add(tab.root);
@@ -560,6 +565,12 @@ function App() {
         if (tab) closeTab(tab, true);
       }),
       listen<AgentStatus>("agent-status", (e) => onAgentStatus(e.payload)),
+      listen<AgentUsage>("agent-usage", ({ payload: u }) => {
+        const tab = tabs().find((t) => t.view.ptyId === u.pty);
+        if (tab) tab.context = u.context ?? undefined;
+        // API-key sessions have no plan limits: keep what a subscription session last reported.
+        if (u.fiveHour || u.sevenDay) setLimits({ fiveHour: u.fiveHour ?? undefined, sevenDay: u.sevenDay ?? undefined });
+      }),
       // Another `rift.exe <dir>` was launched (Explorer menu): single-instance forwards the folder here.
       listen<string>("open-dir", (e) => newTab({ cwd: e.payload, title: "" })),
     ];
@@ -735,6 +746,13 @@ function App() {
               </button>
             )}
           </Show>
+          <Show when={limitsLabel(limits())}>
+            {(label) => (
+              <span class="usage" title={limitsTitle(limits())}>
+                {label()}
+              </span>
+            )}
+          </Show>
           <button
             class="git-button"
             classList={{ on: panels().git }}
@@ -760,8 +778,9 @@ function App() {
           {(i) => (
             <div class="banner">
               <span>
-                Enable <b>{i.name}</b> integration: tab status icons, notifications, and each tab's session restored on
-                restart. Adds Rift hooks to its settings (a .bak copy is kept).
+                Enable <b>{i.name}</b> integration: tab status icons, notifications, each tab's session restored on
+                restart, context and plan usage. Adds Rift hooks and a status line to its settings (your own status
+                line is kept; a .bak copy is written).
               </span>
               <button onClick={() => enable(i.id)}>Enable</button>
               <button onClick={() => setMissing(missing().filter((m) => m !== i))}>Not now</button>

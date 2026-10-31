@@ -20,12 +20,34 @@ pub struct HookMessage {
 
 /// Entry point of `rift hook <harness>`. Never fails loudly: a broken hook must not disturb the agent.
 pub fn run_client(harness: &str) {
+    if let Some(payload) = read_stdin() {
+        forward(harness, payload);
+    }
+}
+
+/// Entry point of `rift status <harness>`, the agent's status line: prints the usage line (inside Rift or
+/// not) and forwards the payload to the tab.
+pub fn run_status(harness: &str) {
+    let Some(payload) = read_stdin() else {
+        return;
+    };
+    if let Some(usage) = crate::agents::parse_usage(harness, &payload) {
+        println!("{}", usage.line());
+    }
+    forward(harness, payload);
+}
+
+fn read_stdin() -> Option<Value> {
+    let mut stdin = String::new();
+    let _ = std::io::stdin().take(1 << 20).read_to_string(&mut stdin);
+    serde_json::from_str(&stdin).ok()
+}
+
+fn forward(harness: &str, payload: Value) {
     let (Ok(tab), Ok(pipe)) = (std::env::var("RIFT_TAB_ID"), std::env::var("RIFT_PIPE")) else {
         return; // agent not running inside Rift
     };
-    let mut stdin = String::new();
-    let _ = std::io::stdin().take(1 << 20).read_to_string(&mut stdin);
-    let (Ok(tab), Ok(payload)) = (tab.parse(), serde_json::from_str(&stdin)) else {
+    let Ok(tab) = tab.parse() else {
         return;
     };
     let _ = send(

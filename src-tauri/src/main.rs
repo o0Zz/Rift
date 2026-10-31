@@ -9,5 +9,11 @@ fn main() {
     {
         return rift_lib::hook::run_client(harness);
     }
+    // `rift.exe status <harness>`: the agent's status line command (prints a line, forwards the numbers).
+    if let [_, cmd, harness] = args.as_slice()
+        && cmd == "status"
+    {
+        return rift_lib::hook::run_status(harness);
+    }
     rift_lib::run()
 }

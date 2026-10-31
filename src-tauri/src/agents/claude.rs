@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use serde_json::{Map, Value, json};
 
-use super::{AgentEvent, AgentHarness};
+use super::{AgentEvent, AgentHarness, Limit, Usage};
 
 // PostToolUse flips "blocked" back to "working" once a permission is granted and the tool ran.
 const EVENTS: [&str; 6] = [
@@ -46,6 +46,47 @@ fn is_ours(handler: &Value) -> bool {
             let name = c.rsplit(['/', '\\']).next().unwrap_or(c).to_lowercase();
             name == "rift" || name == "rift.exe"
         })
+}
+
+/// Rift's status line: a shell command (Claude runs it through Git Bash or PowerShell on Windows), so
+/// forward slashes, and quotes only when the path has a space (PowerShell would not run a quoted path).
+fn status_line(exe: &Path) -> Value {
+    let path = exe.to_string_lossy().replace('\\', "/");
+    let path = if path.contains(' ') {
+        format!("\"{path}\"")
+    } else {
+        path
+    };
+    json!({ "type": "command", "command": format!("{path} status claude") })
+}
+
+fn is_our_status_line(line: &Value) -> bool {
+    line["command"].as_str().is_some_and(|c| {
+        c.strip_suffix(" status claude").is_some_and(|exe| {
+            let exe = exe.trim_matches('"');
+            let name = exe.rsplit(['/', '\\']).next().unwrap_or(exe);
+            name.eq_ignore_ascii_case("rift") || name.eq_ignore_ascii_case("rift.exe")
+        })
+    })
+}
+
+/// Context window and plan limits from Claude's status line JSON; `None` for a hook payload.
+pub fn parse_usage(p: &Value) -> Option<Usage> {
+    if p.get("hook_event_name").is_some() || p.get("context_window").is_none() {
+        return None;
+    }
+    let limit = |window: &str| {
+        let l = &p["rate_limits"][window];
+        Some(Limit {
+            used: l["used_percentage"].as_f64()?,
+            resets_at: l["resets_at"].as_i64()?,
+        })
+    };
+    Some(Usage {
+        context: p["context_window"]["used_percentage"].as_f64(),
+        five_hour: limit("five_hour"),
+        seven_day: limit("seven_day"),
+    })
 }
 
 /// `claude -p` for short text tasks: small fast model, no tools, not saved in the user's session list.
@@ -142,13 +183,15 @@ impl AgentHarness for Claude {
             return false;
         };
         let wanted = handler(exe);
-        EVENTS.iter().all(|event| {
-            settings["hooks"][event].as_array().is_some_and(|groups| {
-                groups
-                    .iter()
-                    .any(|g| g["hooks"].as_array().is_some_and(|hs| hs.contains(&wanted)))
+        // The status line counts as set up when it is anyone's: Rift never replaces the user's own.
+        settings.get("statusLine").is_some()
+            && EVENTS.iter().all(|event| {
+                settings["hooks"][event].as_array().is_some_and(|groups| {
+                    groups
+                        .iter()
+                        .any(|g| g["hooks"].as_array().is_some_and(|hs| hs.contains(&wanted)))
+                })
             })
-        })
     }
 
     /// Adds Rift's handler to each event, replacing an older Rift entry (e.g. another exe path).
@@ -176,6 +219,9 @@ impl AgentHarness for Claude {
             let mut group = Map::new();
             group.insert("hooks".into(), json!([handler(exe)]));
             groups.push(Value::Object(group));
+        }
+        if root.get("statusLine").is_none_or(is_our_status_line) {
+            root.insert("statusLine".into(), status_line(exe));
         }
 
         if self.settings.exists() {
@@ -345,7 +391,7 @@ mod tests {
 
         let s = read(&c);
         let keys: Vec<_> = s.as_object().unwrap().keys().cloned().collect();
-        assert_eq!(keys, ["model", "hooks", "permissions"]);
+        assert_eq!(keys, ["model", "hooks", "permissions", "statusLine"]);
         assert_eq!(
             s["hooks"]["SessionStart"][0]["hooks"][0]["command"],
             "echo hi"
@@ -385,6 +431,75 @@ mod tests {
                 "{event}"
             );
         }
+    }
+
+    #[test]
+    fn installs_a_status_line_but_never_replaces_the_users() {
+        let dir = tempfile::tempdir().unwrap();
+        let c = claude(&dir);
+        c.install_hooks(Path::new(r"C:\Program Files\Rift\rift.exe"))
+            .unwrap();
+        assert_eq!(
+            read(&c)["statusLine"]["command"],
+            r#""C:/Program Files/Rift/rift.exe" status claude"#
+        );
+        // Ours is updated to the new exe; the user's own stays, and still counts as installed.
+        c.install_hooks(Path::new(EXE)).unwrap();
+        assert_eq!(
+            read(&c)["statusLine"]["command"],
+            "C:/Apps/Rift/rift.exe status claude"
+        );
+        let mut s = read(&c);
+        s["statusLine"] = json!({ "type": "command", "command": "~/my-line.sh" });
+        std::fs::write(&c.settings, s.to_string()).unwrap();
+        c.install_hooks(Path::new(EXE)).unwrap();
+        assert_eq!(read(&c)["statusLine"]["command"], "~/my-line.sh");
+        assert!(c.hooks_installed(Path::new(EXE)));
+    }
+
+    #[test]
+    fn hooks_without_a_status_line_ask_to_enable_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let c = claude(&dir);
+        c.install_hooks(Path::new(EXE)).unwrap();
+        let mut s = read(&c);
+        s.as_object_mut().unwrap().remove("statusLine");
+        std::fs::write(&c.settings, s.to_string()).unwrap();
+        assert!(!c.hooks_installed(Path::new(EXE)));
+    }
+
+    #[test]
+    fn parses_usage_from_the_status_line_json() {
+        // Shape documented at code.claude.com/docs/en/statusline.
+        let full = json!({
+            "session_id": "abc",
+            "model": { "display_name": "Opus" },
+            "context_window": { "used_percentage": 8, "context_window_size": 200000 },
+            "rate_limits": {
+                "five_hour": { "used_percentage": 23.5, "resets_at": 1738425600 },
+                "seven_day": { "used_percentage": 41.2, "resets_at": 1738857600 }
+            }
+        });
+        let usage = parse_usage(&full).unwrap();
+        assert_eq!(usage.context, Some(8.0));
+        assert_eq!(
+            usage.five_hour,
+            Some(Limit {
+                used: 23.5,
+                resets_at: 1738425600
+            })
+        );
+        assert_eq!(usage.line(), "ctx 8% \u{b7} 5h 24% \u{b7} 7d 41%");
+        // API key users: no rate limits; early in a session: no percentage yet.
+        let early = json!({ "session_id": "abc", "context_window": { "used_percentage": null } });
+        let usage = parse_usage(&early).unwrap();
+        assert_eq!((usage.context, &usage.five_hour), (None, &None));
+        assert_eq!(usage.line(), "");
+        // Hook payloads are not usage.
+        assert_eq!(
+            parse_usage(&json!({ "hook_event_name": "Stop", "session_id": "abc" })),
+            None
+        );
     }
 
     #[test]

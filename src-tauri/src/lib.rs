@@ -210,6 +210,14 @@ struct AgentStatus {
     message: Option<String>,
 }
 
+/// Payload of the `agent-usage` event (the agent's status line).
+#[derive(Clone, Serialize)]
+struct AgentUsage {
+    pty: TabId,
+    #[serde(flatten)]
+    usage: agents::Usage,
+}
+
 #[derive(Serialize)]
 struct Integration {
     id: &'static str,
@@ -470,6 +478,17 @@ pub fn run() {
 
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(hook::serve(pipe.clone(), move |msg| {
+                // Status line: live numbers only, no status or session change.
+                if let Some(usage) = agents::parse_usage(&msg.harness, &msg.payload) {
+                    let _ = handle.emit(
+                        "agent-usage",
+                        AgentUsage {
+                            pty: msg.tab,
+                            usage,
+                        },
+                    );
+                    return;
+                }
                 let harnesses = handle.state::<Harnesses>();
                 let Some(event) = harnesses
                     .get(&msg.harness)
