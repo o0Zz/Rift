@@ -132,13 +132,22 @@ function App() {
   // The tab the side panels show. Follows the active tab only once it stays put for a moment,
   // so holding Ctrl+PgDn never makes the panels load each tab it passes.
   const [panelTab, setPanelTab] = createSignal<Tab>();
-  const [gitRefresh, setGitRefresh] = createSignal(0); // bumped when an agent in the git panel's repo finishes
   let panelTimer = 0;
   createEffect(() => {
     const tab = active();
     clearTimeout(panelTimer);
-    panelTimer = setTimeout(() => setPanelTab(tab), 150);
+    panelTimer = setTimeout(() => {
+      const root = tab?.root;
+      const same = root === panelTab()?.root;
+      setPanelTab(tab);
+      // Another repo loads anyway; the same one reloads only if something may have changed it.
+      if (root && changedRepos.delete(root) && same && panels().git) setGitRefresh(gitRefresh() + 1);
+    }, 150);
   });
+  // Repos where files may have changed since the git panel loaded them: a prompt came back or an agent
+  // moved. Switching tabs reloads the panel only for those, so a switch where nothing happened costs nothing.
+  const changedRepos = new Set<string>();
+  const [gitRefresh, setGitRefresh] = createSignal(0); // bumped to reload the git panel in place
   // Keep the spare shell in the active tab's folder, so a new tab there (which opens in the same
   // folder) is instant. Only once the tab and its folder stay put: each move costs a shell start.
   let prewarmTimer = 0;
@@ -245,6 +254,7 @@ function App() {
         batch(() => {
           tab.root = head?.root;
           tab.branch = head?.branch;
+          if (head) changedRepos.add(head.root);
           refreshStats(tab);
         }),
       );
@@ -435,8 +445,12 @@ function App() {
       tab.agent = status ? harness : undefined;
     });
     refreshStats(tab); // an agent at work changes files
-    // Same repo as the git panel (any tab): reload it now. Another repo reloads anyway when the panel shows it.
-    if (tab.status === "done" && tab.root && panels().git && panelTab()?.root === tab.root) setGitRefresh(gitRefresh() + 1);
+    if (tab.root) changedRepos.add(tab.root);
+    // Finished in the repo the git panel shows (any tab): reload it now to show the agent's changes.
+    if (tab.status === "done" && tab.root && panels().git && panelTab()?.root === tab.root) {
+      changedRepos.delete(tab.root);
+      setGitRefresh(gitRefresh() + 1);
+    }
     const visible = active() === tab && windowFocused();
     if (visible) fadeDoneWhenSeen(tab);
     if (!shouldNotify(tab.status, visible)) return;
