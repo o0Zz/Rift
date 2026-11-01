@@ -104,6 +104,7 @@ export function Prompts(props: {
         </div>
         <div class="commit-box">
           <textarea
+            data-autofocus
             placeholder="New prompt (Enter to add, Shift+Enter for a new line)"
             value={draft()}
             onInput={(e) => setDraft(e.currentTarget.value)}

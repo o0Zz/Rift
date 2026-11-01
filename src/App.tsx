@@ -846,7 +846,7 @@ function App() {
     const id = group && isGroup(group) ? group.shown : undefined;
     if (id === "main") active()?.shown.focus();
     else if (id && isTerminal(id)) consoles.get(id)?.view?.focus();
-    else to.querySelector<HTMLElement>("textarea, input, [tabindex]:not([tabindex='-1']), button")?.focus();
+    else (to.querySelector<HTMLElement>("[data-autofocus]") ?? to.querySelector<HTMLElement>("textarea, input, [tabindex]:not([tabindex='-1']), button"))?.focus();
   }
 
   const px = (b: Box) => ({ left: `${b.left}px`, top: `${b.top}px`, width: `${b.width}px`, height: `${b.height}px` });

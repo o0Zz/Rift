@@ -131,6 +131,7 @@ it("rejects shortcuts that would steal typing", () => {
 describe("mergeSettings", () => {
   it("falls back to defaults for missing or invalid values", () => {
     expect(mergeSettings(null)).toEqual(DEFAULTS);
+    expect(DEFAULTS.fontSize).toBe(12);
     const s = mergeSettings({ theme: "neon", fontSize: 200, fontFamily: " ", docs: "x", tabSize: "huge", keys: { newTab: "oops" } });
     expect(s).toEqual(DEFAULTS);
   });

@@ -108,7 +108,7 @@ export const DEFAULT_KEYS: Keymap = defaultKeys(IS_MAC);
 
 export const DEFAULTS: Settings = {
   theme: "dark",
-  fontSize: 14,
+  fontSize: 12,
   // Windows, macOS, Linux defaults, then whatever monospace font the system has.
   fontFamily: "'Cascadia Mono', Consolas, Menlo, 'DejaVu Sans Mono', monospace",
   shell: "",
