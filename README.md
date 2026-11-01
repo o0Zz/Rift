@@ -5,13 +5,13 @@
 # Rift
 
 **The fast terminal for coding agents.**
-Vertical tabs that switch instantly, Claude Code status on every tab, and every session back exactly where you left it.
+Vertical tabs that switch instantly, the status of every agent on its tab, and every session back exactly where you left it.
 
-[![CI](https://github.com/o0Zz/rift/actions/workflows/ci.yml/badge.svg)](https://github.com/o0Zz/rift/actions/workflows/ci.yml)
+[![CI](https://github.com/o0Zz/Rift/actions/workflows/ci.yml/badge.svg)](https://github.com/o0Zz/Rift/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-informational)
 
-[**Download**](https://github.com/o0Zz/rift/releases/latest) · [Features](#features) · [Shortcuts](#keyboard-shortcuts) · [Build from source](#build-from-source)
+[**Download**](https://github.com/o0Zz/Rift/releases/latest) · [Features](#features) · [Shortcuts](#keyboard-shortcuts) · [Build from source](#build-from-source)
 
 <img src="docs/screenshots/rift-dark.png" alt="Rift: grouped vertical tabs with Claude Code status, file tree, terminal and git diff" />
 
@@ -19,13 +19,13 @@ Vertical tabs that switch instantly, Claude Code status on every tab, and every 
 
 ## Why Rift
 
-You run several Claude Code sessions at once, and you jump between them all day. Rift is built for exactly
+You run several coding agents at once (Claude Code, Codex, Gemini CLI, Copilot CLI), and you jump between them all day. Rift is built for exactly
 that, and **speed beats features**: every feature has to keep switching tabs and opening tabs instant.
 
 | Measured on Windows, 20 tabs × 10,000 lines of scrollback | |
 |---|---|
 | Switching tabs: main-thread work (p95) | **under 16 ms**, less than one frame |
-| Switching tabs: key press → tab on screen (p95) | **about 30 ms** |
+| Switching tabs: key press → tab on screen | **about 30 ms** typical, under 50 ms (p95) |
 | New tab | **instant**: a shell is already waiting in the current folder |
 | Windows installer / app | **2.4 MB** / 7 MB |
 
@@ -34,9 +34,9 @@ freezing the window) and fails when a change goes over budget.
 
 ## Features
 
-### Made for Claude Code
-- **Status on every tab**: Claude's icon with a badge: working, done, or waiting for your permission.
-- **Usage at a glance**: each Claude tab shows how full its context window is, and the top bar your 5-hour and
+### Made for coding agents
+- **Status on every tab**: the agent's icon with a badge: working, done, or waiting for your permission.
+- **Usage at a glance** (Claude Code): each Claude tab shows how full its context window is, and the top bar your 5-hour and
   weekly plan usage (Pro/Max), with reset times on hover.
 - **Notifications** when a session finishes or needs you while you are elsewhere. Click one to jump to its tab;
   the taskbar icon flashes too.
@@ -45,21 +45,22 @@ freezing the window) and fails when a change goes over budget.
 - **Parallel agents without conflicts**: *New Claude Code in a worktree…* (or Codex, Gemini CLI, Copilot CLI)
   creates a branch and a git worktree next to the repo and starts the agent there, in one click.
 - **Each tab resumes its own session.** Close Rift, reopen it: every tab comes back in its folder, and each
-  Claude session resumes where it was. Not the last one: the one that ran in that tab.
-- **Paste screenshots into Claude**: `Alt+V` on Windows, `Ctrl+V` on macOS and Linux.
-- **AI commit messages**: select files, click ✨ Generate, get a Conventional Commit written from the diff.
-- **Also Codex, Gemini CLI and GitHub Copilot CLI**: status on the tab, notifications, per-tab resume and
-  commit messages. Context and plan usage are Claude Code only.
+  agent session resumes where it was. Not the last one: the one that ran in that tab.
+- **Paste screenshots into Claude Code**: `Alt+V` on Windows, `Ctrl+V` on macOS and Linux.
+- **AI commit messages**: select files, click ✨ Generate, get a Conventional Commit written from the diff by
+  the agent you use (its name is on the button's tooltip).
+- Works with **Claude Code, Codex, Gemini CLI and GitHub Copilot CLI**. Context and plan usage, `Shift+Enter`
+  and screenshot paste are Claude Code features.
 
 ### Tabs that stay out of your way
 - **Vertical tabs** with **named groups**: color them, collapse them, drag tabs between them.
-- The tab shows what matters: Claude's conversation title, the **git branch** with its changes
+- The tab shows what matters: the agent's conversation title, the **git branch** with its changes
   (`+12 −3`, commits ahead/behind), the folder.
 - New tabs open **in the current tab's folder**, in its group.
 - Instant switching with `Ctrl+PgUp` / `Ctrl+PgDn`. `F2` renames, menus work from the keyboard.
 - **Your scrollback comes back** after a restart, colors included.
-- Find in the scrollback, `Ctrl`+click links, zoom, `Shift+Enter` for a new line in Claude, drag a file from
-  the files panel to type its path.
+- Find in the scrollback, `Ctrl`+click links, zoom, `Shift+Enter` for a new line in Claude Code, drag a file
+  from the files panel to type its path.
 
 ### Everything around the terminal
 - **Files panel** with file-type icons, opened only when you want it. Delete a file or folder with the Delete key
@@ -69,11 +70,11 @@ freezing the window) and fails when a change goes over budget.
   striped tables. One document at a time, or a new sub-tab per file (Settings).
 - **Git panel**, one click away on the top right: changed files, colored diff, commit exactly the files you check
   (or commit and push), pull, push, switch or create a branch, and a history: click a commit to see its changes,
-  Shift+click another one to see the changes of the whole range.
+  Shift+click another one to see the changes of the whole range. Drag the lists' bottom edge to resize them.
 - **Prompts panel**: write your next prompts ahead of time, one list per repo. Click one to edit it (Enter saves,
   Shift+Enter for a new line); its ← arrow, or dragging it onto the terminal, pastes it there (you press Enter) and it leaves the list.
 - Panels open and close with one shortcut and resize by dragging their edge.
-- **Settings**: dark, light or system theme, terminal font, and every shortcut can be rebound.
+- **Settings**: dark, light or system theme, terminal font, tab size, and every shortcut can be rebound.
 - **Open in Rift** from the Windows File Explorer right-click menu.
 - **Auto-update** from GitHub Releases: downloads in the background, installs when you close Rift.
 - **Your shells**: PowerShell, Command Prompt, Git Bash or WSL on Windows; your `$SHELL` and the others
@@ -86,7 +87,7 @@ freezing the window) and fails when a change goes over budget.
 
 ## Install
 
-Download the latest version from [**Releases**](https://github.com/o0Zz/rift/releases/latest):
+Download the latest version from [**Releases**](https://github.com/o0Zz/Rift/releases/latest):
 
 | OS | File |
 |---|---|
@@ -98,32 +99,32 @@ Installed copies update themselves.
 
 ### Turn on the agent integrations
 For each agent you use (Claude Code, Codex, Gemini CLI, Copilot CLI), Rift offers **Enable** on first launch: it
-adds Rift's hooks to that agent's settings (`~/.claude/settings.json`, `~/.codex/hooks.json`,
-`~/.gemini/settings.json`, or its own `~/.copilot/hooks/rift.json`). Your other settings are kept, and a `.bak`
-copy is written. Sessions started after that get status icons, notifications and per-tab resume. Codex asks you
+adds Rift's hooks to that agent's settings (`~/.claude/settings.json`, plus a status line for usage;
+`~/.codex/hooks.json`; `~/.gemini/settings.json`; or its own `~/.copilot/hooks/rift.json`). The banner shows the
+exact file before you click. Your other settings are kept, and a `.bak` copy is written. Sessions started after that get status icons, notifications and per-tab resume. Codex asks you
 to trust new hooks once: type `/hooks` in Codex and approve Rift's. Without an agent, Rift is simply a fast
 terminal.
 
 ## Keyboard shortcuts
 
-| Action | Default |
-|---|---|
-| New tab (in the current folder) | `Ctrl+Shift+T` |
-| Close tab | `Ctrl+Shift+W` |
-| Next / previous tab | `Ctrl+PgDn` / `Ctrl+PgUp`, `Ctrl+Tab` / `Ctrl+Shift+Tab` |
-| Files panel | `Ctrl+Shift+E` |
-| Git panel | `Ctrl+Shift+G` |
-| Prompts panel | `Ctrl+Shift+O` |
-| Next tab that needs you | `Ctrl+Shift+U` |
-| Find in terminal | `Ctrl+Shift+F` |
-| Zoom in / out / reset | `Ctrl+=` / `Ctrl+-` / `Ctrl+0` |
-| Rename tab | `F2` |
-| Refresh the files and git panels | `F5` (never reloads Rift) |
-| Settings | `Ctrl+,` |
-| Copy / paste | `Ctrl+C` (with a selection) / `Ctrl+V` |
+| Action | Windows / Linux | macOS |
+|---|---|---|
+| New tab (in the current folder) | `Ctrl+Shift+T` | `Cmd+T` |
+| Close tab | `Ctrl+Shift+W` | `Cmd+W` |
+| Next / previous tab | `Ctrl+PgDn` / `Ctrl+PgUp`, `Ctrl+Tab` / `Ctrl+Shift+Tab` | `Cmd+Shift+]` / `Cmd+Shift+[`, `Cmd+Alt+→` / `Cmd+Alt+←`, `Ctrl+Tab` / `Ctrl+Shift+Tab` |
+| Files panel | `Ctrl+Shift+E` | `Cmd+Shift+E` |
+| Git panel | `Ctrl+Shift+G` | `Cmd+Shift+G` |
+| Prompts panel | `Ctrl+Shift+O` | `Cmd+Shift+O` |
+| Next tab that needs you | `Ctrl+Shift+U` | `Cmd+Shift+U` |
+| Find in terminal | `Ctrl+Shift+F` | `Cmd+F` |
+| Zoom in / out / reset | `Ctrl+=` / `Ctrl+-` / `Ctrl+0` | `Cmd+=` / `Cmd+-` / `Cmd+0` |
+| Rename tab | `F2` | `F2` |
+| Refresh the files and git panels | `F5` (never reloads Rift) | `F5` |
+| Settings | `Ctrl+,` | `Cmd+,` |
+| Copy / paste | `Ctrl+C` (with a selection) / `Ctrl+V` | `Cmd+C` / `Cmd+V` |
 
-All of them can be changed in Settings. `Ctrl+T` and `Ctrl+W` are left to your shell and to Claude Code.
-On macOS the defaults use `Cmd` instead of `Ctrl`.
+All of them can be changed in Settings. On Windows and Linux, `Ctrl+T`, `Ctrl+W` and `Ctrl+F` are left to your
+shell and your agents.
 
 ## Build from source
 
