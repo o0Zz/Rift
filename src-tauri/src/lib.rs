@@ -40,7 +40,9 @@ fn err(e: impl std::fmt::Display) -> String {
 
 /// Opens a shell for a new tab. Output is streamed as raw bytes on `on_data`; exit is the `pty-exit` event.
 /// With `agent`, the shell starts by resuming that agent session.
-#[tauri::command]
+/// Off the main thread (`async`), like every command that creates or closes a pseudo console: those calls
+/// wait for the console host process, and a sync command would freeze the window with them.
+#[tauri::command(async)]
 #[allow(clippy::too_many_arguments)] // Tauri injects state/app params
 fn pty_open(
     app: AppHandle,
@@ -110,7 +112,7 @@ fn shell_profiles() -> Vec<ShellProfile> {
 }
 
 /// Default shell from settings (`None`: the platform default). Spare shells use it from now on.
-#[tauri::command]
+#[tauri::command(async)]
 fn shell_set_default(ptys: Ptys, id: Option<String>) {
     let shell = id
         .as_deref()
@@ -126,7 +128,7 @@ fn pty_prewarm(ptys: Ptys, cwd: Option<String>) {
     ptys.prewarm(cwd.map(Into::into));
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn pty_close(ptys: Ptys, id: TabId) {
     ptys.close(id);
 }
@@ -156,7 +158,7 @@ async fn git_worktree_add(root: String, branch: String) -> Result<String, String
 
 /// Tabs saved by the previous run. Called once per page load: shells left over from a previous
 /// page (dev reload, WebView reload) have no tab anymore and are closed.
-#[tauri::command]
+#[tauri::command(async)]
 fn session_restore(session: State<SessionStore>, ptys: Ptys) -> Saved {
     ptys.close_all_tabs();
     session.load()
@@ -514,6 +516,7 @@ fn bench_done(app: AppHandle, report: String, ok: bool) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    pty::lock_dll_search();
     let mut builder = tauri::Builder::default();
     // Single instance: a second `rift.exe <dir>` (Explorer menu) opens a tab in this window instead.
     // Not in bench mode or an isolated profile, which must run next to the user's instance.

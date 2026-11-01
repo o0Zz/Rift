@@ -12,6 +12,23 @@ use portable_pty::{ChildKiller, MasterPty, PtySize, native_pty_system};
 
 pub use crate::shell::Shell;
 
+/// Windows searches the current directory and `PATH` for a DLL loaded by name, and portable-pty loads
+/// `conpty.dll` by name to prefer a sideloaded ConPTY over the system one. WezTerm puts such a file on
+/// `PATH` (an old fork whose `OpenConsole.exe` hung Rift at startup). After this call a DLL is searched
+/// in the application folder and System32 only: the system ConPTY, or one shipped next to rift.exe.
+pub fn lock_dll_search() {
+    #[cfg(windows)]
+    {
+        const LOAD_LIBRARY_SEARCH_DEFAULT_DIRS: u32 = 0x1000;
+        #[link(name = "kernel32")]
+        unsafe extern "system" {
+            fn SetDefaultDllDirectories(flags: u32) -> i32;
+        }
+        // Safety: a Win32 call with a constant flag; it only narrows the DLL search of this process.
+        unsafe { SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS) };
+    }
+}
+
 pub type TabId = u32;
 pub type OnData = Box<dyn FnMut(Vec<u8>) + Send>;
 pub type OnExit = Box<dyn FnOnce(TabId) + Send>;
@@ -636,5 +653,49 @@ mod tests {
         let (id, _out, _) = open(&m, Some(std::env::temp_dir()), None);
         m.close(id);
         assert!(m.write(id, b"x").is_err());
+    }
+
+    /// A DLL that is only on `PATH` (where WezTerm plants a `conpty.dll`) is not found by name once the
+    /// search is locked; the same file still loads by its full path.
+    #[cfg(windows)]
+    #[test]
+    fn locked_dll_search_ignores_path() {
+        use std::ffi::{OsStr, c_void};
+        use std::os::windows::ffi::OsStrExt;
+        #[link(name = "kernel32")]
+        unsafe extern "system" {
+            fn LoadLibraryW(name: *const u16) -> *mut c_void;
+            fn FreeLibrary(module: *mut c_void) -> i32;
+        }
+        fn loads(name: &OsStr) -> bool {
+            let wide: Vec<u16> = name.encode_wide().chain([0]).collect();
+            let module = unsafe { LoadLibraryW(wide.as_ptr()) };
+            if module.is_null() {
+                return false;
+            }
+            unsafe { FreeLibrary(module) };
+            true
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let system32 = PathBuf::from(std::env::var_os("SystemRoot").unwrap()).join("System32");
+        let planted = dir.path().join("rift-planted-test.dll");
+        std::fs::copy(system32.join("version.dll"), &planted).unwrap();
+        let mut paths = vec![dir.path().to_path_buf()];
+        paths.extend(std::env::split_paths(
+            &std::env::var_os("PATH").unwrap_or_default(),
+        ));
+        // Prepends only: other tests keep finding their shells on PATH.
+        unsafe { std::env::set_var("PATH", std::env::join_paths(paths).unwrap()) };
+
+        lock_dll_search();
+        assert!(
+            !loads(OsStr::new("rift-planted-test.dll")),
+            "a DLL on PATH must not be found by name"
+        );
+        assert!(
+            loads(planted.as_os_str()),
+            "the planted file is a loadable DLL"
+        );
     }
 }
