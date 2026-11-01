@@ -38,15 +38,17 @@ import { GitPanel } from "./panels/GitPanel";
 import { Prompts } from "./panels/Prompts";
 import { addPrompt, editPrompt, mergePrompts, promptKey, removePrompt, type PromptLists } from "./panels/promptLists";
 import { Resizer } from "./ui/Resizer";
+import { DockView, PANEL_DRAG_TYPE } from "./panels/Dock";
+import { DEFAULT_DOCKS, isShown, mergeDocks, move as movePanel, SIDES, toggle, type Docks, type PanelId, type Side } from "./panels/docks";
 import { FindBar } from "./ui/FindBar";
 import { PromptDialog } from "./ui/PromptDialog";
 import "./App.css";
 
 type TabUi = { name?: string; color?: string; group?: string; shell?: string; snap?: string; docs?: string[]; doc?: number };
 type SavedTab = { cwd?: string; title: string; agent?: AgentSession; ui?: TabUi };
-type Panels = { explorer: boolean; git: boolean; prompts: boolean };
-type Widths = { tabs: number; explorer: number; git: number; prompts: number };
-type Saved = { tabs: SavedTab[]; active: number; layout?: { groups?: Group[]; panels?: Panels; widths?: Widths } };
+type Widths = { tabs: number };
+// `panels` and the panel `widths`: the layout before docks, read once to keep what was open.
+type Saved = { tabs: SavedTab[]; active: number; layout?: { groups?: Group[]; docks?: unknown; panels?: Record<string, boolean>; widths?: Record<string, number> } };
 type Integration = { id: string; name: string; detected: boolean; installed: boolean; setup: string };
 type AgentStatus = { pty: number; harness: string; status: Status | null; message: string | null };
 type AgentUsage = { pty: number; context: number | null } & { [K in keyof Limits]: Limit | null };
@@ -116,7 +118,9 @@ function App() {
         untrack(() => {
           const l = look();
           for (const t of tabs()) t.view.setLook(l);
+          dockTerm?.setLook(l);
           active()?.view.refit();
+          dockTerm?.refit();
           resizeHiddenTabs();
         }),
       { defer: true },
@@ -128,8 +132,12 @@ function App() {
     invoke("settings_save", { value: s });
   }
 
-  const [panels, setPanels] = createSignal<Panels>({ explorer: false, git: false, prompts: false });
-  const [widths, setWidths] = createSignal<Widths>({ tabs: 240, explorer: 240, git: 440, prompts: 320 });
+  // Panels in three docks (left, right, bottom), the same for every tab.
+  const [docks, setDocks] = createSignal<Docks>(DEFAULT_DOCKS);
+  const shown = (id: PanelId) => isShown(docks(), id);
+  const [dragPanel, setDragPanel] = createSignal<PanelId>();
+  const [dropSide, setDropSide] = createSignal<Side>();
+  const [widths, setWidths] = createSignal<Widths>({ tabs: 240 });
   // Prompts prepared in advance, per repo; saved on each change (a user action, never in the background).
   const [promptLists, setPromptLists] = createSignal<PromptLists>({});
   const promptRepo = () => panelTab()?.root ?? panelTab()?.cwd;
@@ -144,6 +152,7 @@ function App() {
     dragging = d;
     if (!d) {
       active()?.view.refit();
+      dockTerm?.refit();
       resizeHiddenTabs();
     }
   };
@@ -159,7 +168,7 @@ function App() {
       const same = root === panelTab()?.root;
       setPanelTab(tab);
       // Another repo loads anyway; the same one reloads only if something may have changed it.
-      if (root && changedRepos.delete(root) && same && panels().git) setGitRefresh(gitRefresh() + 1);
+      if (root && changedRepos.delete(root) && same && shown("git")) setGitRefresh(gitRefresh() + 1);
     }, 150);
   });
   // Repos where files may have changed since the git panel loaded them: a prompt came back or an agent
@@ -197,7 +206,7 @@ function App() {
         } satisfies TabUi,
       })),
       active: Math.max(0, list.indexOf(active()!)),
-      layout: { groups: groups(), panels: panels(), widths: widths() },
+      layout: { groups: groups(), docks: docks(), widths: widths() },
     });
   }
   createEffect(save);
@@ -312,8 +321,8 @@ function App() {
   async function restore() {
     const saved = await invoke<Saved>("session_restore");
     setGroups(saved.layout?.groups ?? []);
-    if (saved.layout?.panels) setPanels({ ...panels(), ...saved.layout.panels });
-    if (saved.layout?.widths) setWidths({ ...widths(), ...saved.layout.widths });
+    setDocks(mergeDocks(saved.layout?.docks, saved.layout));
+    if (saved.layout?.widths?.tabs) setWidths({ tabs: saved.layout.widths.tabs });
     const starts = batch(() => (saved.tabs.length ? saved.tabs : [undefined]).map(newTab));
     const list = tabs();
     activate(list[Math.min(saved.active, list.length - 1)]);
@@ -452,8 +461,19 @@ function App() {
     idleJob = requestIdleCallback(step);
   }
 
-  function togglePanel(panel: keyof Panels) {
-    setPanels({ ...panels(), [panel]: !panels()[panel] });
+  function togglePanel(id: PanelId) {
+    setDocks(toggle(docks(), id));
+  }
+
+  // The terminal panel: one shell shared by every tab (a dev server, logs...). Started the first time the panel
+  // is shown, in the active tab's folder; kept while hidden or moved to another dock; gone when its shell exits.
+  let dockTerm: TermView | undefined;
+  function attachDockTerm(el: HTMLDivElement) {
+    const view = (dockTerm ??= new TermView(el, { onTitle() {}, onCwd() {}, isAgent: () => false, onEscape() {} }, look()));
+    el.appendChild(view.el);
+    const cwd = active()?.cwd;
+    // Next frame: the panel is in the page, so the terminal can measure itself.
+    requestAnimationFrame(() => (view.ptyId < 0 ? view.start(cwd).then(() => view.focus()) : view.show()));
   }
 
   function onAgentStatus({ pty, harness, status, message }: AgentStatus) {
@@ -467,7 +487,7 @@ function App() {
     refreshStats(tab); // an agent at work changes files
     if (tab.root) changedRepos.add(tab.root);
     // Finished in the repo the git panel shows (any tab): reload it now to show the agent's changes.
-    if (tab.status === "done" && tab.root && panels().git && panelTab()?.root === tab.root) {
+    if (tab.status === "done" && tab.root && shown("git") && panelTab()?.root === tab.root) {
       changedRepos.delete(tab.root);
       setGitRefresh(gitRefresh() + 1);
     }
@@ -545,6 +565,7 @@ function App() {
     else if (action === "toggleFiles") togglePanel("explorer");
     else if (action === "toggleGit") togglePanel("git");
     else if (action === "togglePrompts") togglePanel("prompts");
+    else if (action === "toggleTerminal") togglePanel("terminal");
     else if (action === "settings") setSettingsOpen(true);
     else if (action === "find") setFinding(true);
     else if (action === "renameTab") active() && setRenameRequest({ tab: active()! });
@@ -576,6 +597,12 @@ function App() {
         }
       }),
       listen<number>("pty-exit", (e) => {
+        if (dockTerm && e.payload === dockTerm.ptyId) {
+          dockTerm.dispose();
+          dockTerm = undefined;
+          if (shown("terminal")) togglePanel("terminal");
+          return;
+        }
         const tab = tabs().find((t) => t.view.ptyId === e.payload);
         if (tab) closeTab(tab, true);
       }),
@@ -613,6 +640,7 @@ function App() {
       if (dragging) return;
       frame = requestAnimationFrame(() => {
         active()?.view.refit();
+        dockTerm?.refit();
         resizeHiddenTabs();
       });
     });
@@ -637,7 +665,9 @@ function App() {
         newTab: () => newTab(dirs.length ? { cwd: dirs[tabs().length % dirs.length], title: "" } : undefined),
         views: () => tabs().map((t) => t.view),
         activate: (i) => activate(tabs()[i]),
-        setPanels: (open) => setPanels({ ...panels(), explorer: open, git: open }),
+        setPanels: (open) => {
+          for (const id of ["explorer", "git"] as const) if (shown(id) !== open) togglePanel(id);
+        },
         openDoc: (i, file) => openDoc(`${dirs[0]}/${file}`, tabs()[i]),
         showsDoc: (i) => tabs()[i].current >= 0,
       });
@@ -650,6 +680,92 @@ function App() {
       closeRequests.then((f) => f());
       resize.disconnect();
     });
+  });
+
+  function renderPanel(id: PanelId) {
+    if (id === "explorer") {
+      return (
+        <Explorer
+          root={panelTab()?.root ?? panelTab()?.cwd}
+          refresh={filesRefresh()}
+          onOpenFile={(path) => openDoc(path)}
+          onDeleted={(path) => {
+            // Its documents close (asking first about unsaved changes); the git panel shows the deletion.
+            for (const tab of tabs()) {
+              for (let i = tab.docs.length - 1; i >= 0; i--) if (isUnder(tab.docs[i].path, path)) closeDoc(tab, i);
+            }
+            if (shown("git")) setGitRefresh(gitRefresh() + 1);
+          }}
+          onClose={() => togglePanel("explorer")}
+        />
+      );
+    }
+    if (id === "prompts") {
+      return (
+        <Prompts
+          repo={promptRepo()}
+          prompts={promptLists()[promptKey(promptRepo() ?? "")] ?? []}
+          onAdd={(text) => changePrompts(addPrompt(promptLists(), promptKey(promptRepo()!), text))}
+          onEdit={(i, text) => changePrompts(editPrompt(promptLists(), promptKey(promptRepo()!), i, text))}
+          onRemove={(i) => changePrompts(removePrompt(promptLists(), promptKey(promptRepo()!), i))}
+          onSend={(i) => {
+            const tab = active();
+            const key = promptKey(promptRepo()!);
+            const text = promptLists()[key]?.[i];
+            if (!tab || !text) return;
+            if (tab.current >= 0) showDoc(tab, -1);
+            tab.view.paste(text);
+            changePrompts(removePrompt(promptLists(), key, i));
+          }}
+          onClose={() => togglePanel("prompts")}
+        />
+      );
+    }
+    if (id === "git") {
+      return (
+        <GitPanel
+          root={panelTab()?.root}
+          branch={panelTab()?.branch}
+          agent={agents()[0]?.name}
+          refresh={gitRefresh()}
+          onClose={() => togglePanel("git")}
+          onHeadChanged={() => {
+            // A switch, commit, pull or push: every tab of this repo shows the new branch and stats.
+            const root = panelTab()?.root;
+            for (const tab of tabs()) {
+              if (!root || tab.root !== root || !tab.cwd) continue;
+              invoke<{ branch: string } | null>("git_head", { cwd: tab.cwd }).then((head) => (tab.branch = head?.branch));
+              refreshStats(tab);
+            }
+          }}
+        />
+      );
+    }
+    return (
+      <aside class="panel terminal">
+        <div class="panel-head">
+          <span class="panel-title">Terminal</span>
+          <span class="head-buttons">
+            <button class="icon-btn" title="Close (Ctrl+Shift+J)" onClick={() => togglePanel("terminal")}>
+              <Icon name="close" />
+            </button>
+          </span>
+        </div>
+        <div class="dock-term" ref={attachDockTerm} />
+      </aside>
+    );
+  }
+
+  const dockProps = (side: Side) => ({
+    get dock() {
+      return docks()[side];
+    },
+    render: renderPanel,
+    onShow: (id: PanelId) => setDocks({ ...docks(), [side]: { ...docks()[side], shown: id } }),
+    onMove: (id: PanelId, to: Side) => setDocks(movePanel(docks(), id, to)),
+    onResize: (size: number) => setDocks({ ...docks(), [side]: { ...docks()[side], size } }),
+    onDragging,
+    onDragPanel: (id: PanelId | undefined) => batch(() => (setDragPanel(id), setDropSide(undefined))),
   });
 
   return (
@@ -669,7 +785,7 @@ function App() {
         onUpdateGroup={updateGroup}
         onDeleteGroup={deleteGroup}
         onCloseGroup={closeGroup}
-        panels={panels()}
+        panels={{ explorer: shown("explorer"), git: shown("git") }}
         onTogglePanel={togglePanel}
         onOpenSettings={() => setSettingsOpen(true)}
         filter={filter()}
@@ -681,31 +797,7 @@ function App() {
       />
         <Resizer edge="right" size={widths().tabs} min={160} max={480} onResize={resizeWidth("tabs")} onDragging={onDragging} />
       </div>
-      <Show when={panels().explorer}>
-        <div class="pane" style={{ width: `${widths().explorer}px` }}>
-          <Explorer
-            root={panelTab()?.root ?? panelTab()?.cwd}
-            refresh={filesRefresh()}
-            onOpenFile={(path) => openDoc(path)}
-            onDeleted={(path) => {
-              // Its documents close (asking first about unsaved changes); the git panel shows the deletion.
-              for (const tab of tabs()) {
-                for (let i = tab.docs.length - 1; i >= 0; i--) if (isUnder(tab.docs[i].path, path)) closeDoc(tab, i);
-              }
-              if (panels().git) setGitRefresh(gitRefresh() + 1);
-            }}
-            onClose={() => togglePanel("explorer")}
-          />
-          <Resizer
-            edge="right"
-            size={widths().explorer}
-            min={160}
-            max={600}
-            onResize={resizeWidth("explorer")}
-            onDragging={onDragging}
-          />
-        </div>
-      </Show>
+      <DockView side="left" {...dockProps("left")} />
       <Show when={worktreeFrom()}>
         {(from) => (
           <PromptDialog
@@ -779,7 +871,15 @@ function App() {
           </Show>
           <button
             class="icon-btn"
-            classList={{ on: panels().prompts }}
+            classList={{ on: shown("terminal") }}
+            onClick={() => togglePanel("terminal")}
+            title="Terminal (Ctrl+Shift+J)"
+          >
+            <Icon name="terminal" />
+          </button>
+          <button
+            class="icon-btn"
+            classList={{ on: shown("prompts") }}
             onClick={() => togglePanel("prompts")}
             title="Prompts (Ctrl+Shift+O)"
           >
@@ -787,7 +887,7 @@ function App() {
           </button>
           <button
             class="git-button"
-            classList={{ on: panels().git }}
+            classList={{ on: shown("git") }}
             onClick={() => togglePanel("git")}
             title="Git changes (Ctrl+Shift+G)"
           >
@@ -826,48 +926,34 @@ function App() {
             />
           </Show>
         </div>
+        <DockView side="bottom" {...dockProps("bottom")} />
       </main>
-      <Show when={panels().prompts}>
-        <div class="pane" style={{ width: `${widths().prompts}px` }}>
-          <Resizer edge="left" size={widths().prompts} min={220} max={800} onResize={resizeWidth("prompts")} onDragging={onDragging} />
-          <Prompts
-            repo={promptRepo()}
-            prompts={promptLists()[promptKey(promptRepo() ?? "")] ?? []}
-            onAdd={(text) => changePrompts(addPrompt(promptLists(), promptKey(promptRepo()!), text))}
-            onEdit={(i, text) => changePrompts(editPrompt(promptLists(), promptKey(promptRepo()!), i, text))}
-            onRemove={(i) => changePrompts(removePrompt(promptLists(), promptKey(promptRepo()!), i))}
-            onSend={(i) => {
-              const tab = active();
-              const key = promptKey(promptRepo()!);
-              const text = promptLists()[key]?.[i];
-              if (!tab || !text) return;
-              if (tab.current >= 0) showDoc(tab, -1);
-              tab.view.paste(text);
-              changePrompts(removePrompt(promptLists(), key, i));
-            }}
-            onClose={() => togglePanel("prompts")}
-          />
-        </div>
-      </Show>
-      <Show when={panels().git}>
-        <div class="pane" style={{ width: `${widths().git}px` }}>
-          <Resizer edge="left" size={widths().git} min={280} max={1000} onResize={resizeWidth("git")} onDragging={onDragging} />
-          <GitPanel
-            root={panelTab()?.root}
-            branch={panelTab()?.branch}
-            agent={agents()[0]?.name}
-            refresh={gitRefresh()}
-            onClose={() => togglePanel("git")}
-            onHeadChanged={() => {
-              // A switch, commit, pull or push: every tab of this repo shows the new branch and stats.
-              const root = panelTab()?.root;
-              for (const tab of tabs()) {
-                if (!root || tab.root !== root || !tab.cwd) continue;
-                invoke<{ branch: string } | null>("git_head", { cwd: tab.cwd }).then((head) => (tab.branch = head?.branch));
-                refreshStats(tab);
-              }
-            }}
-          />
+      <DockView side="right" {...dockProps("right")} />
+      {/* While a dock tab is dragged: drop it on a side of the window to move it there. */}
+      <Show when={dragPanel()}>
+        <div class="dock-drops">
+          <For each={SIDES}>
+            {(side) => (
+              <div
+                class={`dock-drop ${side}`}
+                classList={{ over: dropSide() === side }}
+                onDragOver={(e) => e.preventDefault()}
+                onDragEnter={() => setDropSide(side)}
+                onDragLeave={() => dropSide() === side && setDropSide(undefined)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const id = e.dataTransfer?.getData(PANEL_DRAG_TYPE) as PanelId;
+                  batch(() => {
+                    if (id) setDocks(movePanel(docks(), id, side));
+                    setDragPanel(undefined);
+                    setDropSide(undefined);
+                  });
+                }}
+              >
+                Move to {side}
+              </div>
+            )}
+          </For>
         </div>
       </Show>
     </div>

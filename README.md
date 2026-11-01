@@ -73,7 +73,10 @@ freezing the window) and fails when a change goes over budget.
   Shift+click another one to see the changes of the whole range. Drag the lists' bottom edge to resize them.
 - **Prompts panel**: write your next prompts ahead of time, one list per repo. Click one to edit it (Enter saves,
   Shift+Enter for a new line); its ← arrow, or dragging it onto the terminal, pastes it there (you press Enter) and it leaves the list.
-- Panels open and close with one shortcut and resize by dragging their edge.
+- **Terminal panel**: one extra shell shared by every tab (a dev server, logs), started the first time you open it.
+- Panels sit in three docks (left, right, bottom), the same for every tab. Several panels in one dock become tabs;
+  move one with a right-click on its header or tab, or drag its tab onto a side of the window. Each opens and closes
+  with one shortcut and resizes by dragging its edge.
 - **Settings**: dark, light or system theme, terminal font, tab size, and every shortcut can be rebound.
 - **Open in Rift** from the Windows File Explorer right-click menu.
 - **Auto-update** from GitHub Releases: downloads in the background, installs when you close Rift.
@@ -115,6 +118,7 @@ terminal.
 | Files panel | `Ctrl+Shift+E` | `Cmd+Shift+E` |
 | Git panel | `Ctrl+Shift+G` | `Cmd+Shift+G` |
 | Prompts panel | `Ctrl+Shift+O` | `Cmd+Shift+O` |
+| Terminal panel | `Ctrl+Shift+J` | `Cmd+Shift+J` |
 | Next tab that needs you | `Ctrl+Shift+U` | `Cmd+Shift+U` |
 | Find in terminal | `Ctrl+Shift+F` | `Cmd+F` |
 | Zoom in / out / reset | `Ctrl+=` / `Ctrl+-` / `Ctrl+0` | `Cmd+=` / `Cmd+-` / `Cmd+0` |

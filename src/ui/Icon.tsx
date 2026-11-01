@@ -9,6 +9,7 @@ const PATHS = {
   push: "M8 13.5v-8M4.5 8.5L8 5l3.5 3.5M3 2.5h10",
   close: "M4 4l8 8M12 4l-8 8",
   send: "M13 8H3.5M7.5 4l-4 4 4 4",
+  terminal: "M3 4.5l3.5 3.5L3 11.5M8 11.5h5",
   list: "M6 4.5h7M6 8h7M6 11.5h7M3 4.5h.5M3 8h.5M3 11.5h.5",
   plus: "M8 3v10M3 8h10",
   right: "M6 4l4 4-4 4",

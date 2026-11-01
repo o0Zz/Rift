@@ -590,13 +590,114 @@ body,
   user-select: none;
 }
 
-.panel.explorer {
+/* Docks: left, right and bottom, each showing one panel (tabs when it holds several). */
+.dock {
+  flex-direction: column;
+  background: var(--panel);
+}
+
+.dock.left {
   border-right: 1px solid var(--line);
 }
 
-.panel.git,
-.panel.prompts {
+.dock.right {
   border-left: 1px solid var(--line);
+}
+
+.dock.bottom {
+  border-top: 1px solid var(--line);
+}
+
+.dock > aside {
+  min-height: 0;
+}
+
+.resizer.top {
+  top: -3px;
+  right: 0;
+  bottom: auto;
+  left: 0;
+  width: auto;
+  height: 6px;
+  cursor: row-resize;
+}
+
+.dock-tabs {
+  display: flex;
+  flex: none;
+  gap: 2px;
+  padding: 4px 6px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.dock-tab {
+  padding: 4px 10px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--fg-muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.dock-tab:hover {
+  color: var(--fg-bright);
+}
+
+.dock-tab.on {
+  border-bottom-color: var(--accent);
+  color: var(--fg-bright);
+}
+
+/* The terminal panel's shell (one for the whole window). */
+.dock-term {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  background: var(--bg);
+}
+
+/* Shown while a dock tab is dragged: the sides of the window it can be dropped on. */
+.dock-drops {
+  position: fixed;
+  z-index: 50;
+  inset: 0;
+}
+
+.dock-drop {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px dashed transparent;
+  color: transparent;
+}
+
+.dock-drop.left {
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 30%;
+}
+
+.dock-drop.right {
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 30%;
+}
+
+.dock-drop.bottom {
+  right: 30%;
+  bottom: 0;
+  left: 30%;
+  height: 40%;
+}
+
+.dock-drop.over {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--fg-bright);
 }
 
 .prompt-list {
