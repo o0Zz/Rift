@@ -45,6 +45,8 @@ describe("actionFor with the default keys", () => {
     expect(actionFor(key("J", { shift: true }), DEFAULT_KEYS)).toBe("toggleTerminal");
     expect(actionFor(key("K", { shift: true }), DEFAULT_KEYS)).toBe("newTerminal");
     expect(actionFor(key(","), DEFAULT_KEYS)).toBe("settings");
+    expect(actionFor({ key: "ArrowLeft", ctrlKey: false, shiftKey: false, altKey: true, metaKey: false }, DEFAULT_KEYS)).toBe("focusLeft");
+    expect(actionFor({ key: "ArrowDown", ctrlKey: false, shiftKey: false, altKey: true, metaKey: false }, DEFAULT_KEYS)).toBe("focusDown");
     expect(actionFor(key("U", { shift: true }), DEFAULT_KEYS)).toBe("nextAttention");
     expect(actionFor(key("F", { shift: true }), DEFAULT_KEYS)).toBe("find");
     expect(actionFor(key("="), DEFAULT_KEYS)).toBe("zoomIn");

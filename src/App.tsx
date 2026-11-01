@@ -1,4 +1,4 @@
-import { batch, createEffect, createSignal, For, on, onCleanup, onMount, Show, untrack } from "solid-js";
+import { batch, createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show, untrack } from "solid-js";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, UserAttentionType } from "@tauri-apps/api/window";
 import { getVersion } from "@tauri-apps/api/app";
@@ -39,24 +39,24 @@ import { GitPanel } from "./panels/GitPanel";
 import { Prompts } from "./panels/Prompts";
 import { addPrompt, editPrompt, mergePrompts, promptKey, removePrompt, type PromptLists } from "./panels/promptLists";
 import { Resizer } from "./ui/Resizer";
-import { DockView } from "./panels/Dock";
-import { DEFAULT_DOCKS, insert, isShown, isTerminal, mergeDocks, move as movePanel, remove, zoneAt, edgeAt, dropTarget, show, sideOf, SIDES, toggle, type Docks, type PanelId, type Side, type Target } from "./panels/docks";
+import { PaneView } from "./panels/PaneTree";
+import { DEFAULT_PANES, groupOf, index, insert, isGroup, isShown, isTerminal, MAIN, mergePanes, move as movePanel, nextPane, previewBox, remove, setSizes, show, toggle, zoneAt, type Box, type Pane, type PanelId, type Target } from "./panels/panes";
 import { FindBar } from "./ui/FindBar";
 import { PromptDialog } from "./ui/PromptDialog";
 import "./App.css";
 
-type Box = { left: number; top: number; width: number; height: number };
 type TabUi = { name?: string; color?: string; group?: string; shell?: string; snap?: string; docs?: string[]; doc?: number };
 type SavedTab = { cwd?: string; title: string; agent?: AgentSession; ui?: TabUi };
 type Widths = { tabs: number };
-// `panels` and the panel `widths`: the layout before docks, read once to keep what was open.
-type Saved = { tabs: SavedTab[]; active: number; layout?: { groups?: Group[]; docks?: unknown; panels?: Record<string, boolean>; widths?: Record<string, number> } };
+// `docks`: the panel layout before the tree of splits, read once to keep the user's arrangement.
+type Saved = { tabs: SavedTab[]; active: number; layout?: { groups?: Group[]; panes?: unknown; docks?: unknown; widths?: Record<string, number> } };
 type Integration = { id: string; name: string; detected: boolean; installed: boolean; setup: string };
 type AgentStatus = { pty: number; harness: string; status: Status | null; message: string | null };
 type AgentUsage = { pty: number; context: number | null } & { [K in keyof Limits]: Limit | null };
 
 function App() {
   let host!: HTMLDivElement;
+  let panesEl!: HTMLDivElement;
   const [tabs, setTabs] = createSignal<Tab[]>([]);
   const [groups, setGroups] = createSignal<Group[]>([]);
   const [active, setActive] = createSignal<Tab>();
@@ -134,9 +134,10 @@ function App() {
     invoke("settings_save", { value: s });
   }
 
-  // Panels in three docks (left, right, bottom), the same for every tab.
-  const [docks, setDocks] = createSignal<Docks>(DEFAULT_DOCKS);
-  const shown = (id: PanelId) => isShown(docks(), id);
+  // Panels in one tree of splits, the same for every tab; the tab's own terminal is one of its leaves ("main").
+  const [panes, setPanes] = createSignal<Pane>(DEFAULT_PANES);
+  const paneMap = createMemo(() => index(panes()));
+  const shown = (id: PanelId) => isShown(panes(), id);
   const [dragPanel, setDragPanel] = createSignal<PanelId>();
   const [drop, setDrop] = createSignal<{ to: Target; box: Box }>();
   const [widths, setWidths] = createSignal<Widths>({ tabs: 240 });
@@ -208,7 +209,7 @@ function App() {
         } satisfies TabUi,
       })),
       active: Math.max(0, list.indexOf(active()!)),
-      layout: { groups: groups(), docks: docks(), widths: widths() },
+      layout: { groups: groups(), panes: panes(), widths: widths() },
     });
   }
   createEffect(save);
@@ -323,7 +324,7 @@ function App() {
   async function restore() {
     const saved = await invoke<Saved>("session_restore");
     setGroups(saved.layout?.groups ?? []);
-    setDocks(mergeDocks(saved.layout?.docks, saved.layout));
+    setPanes(mergePanes(saved.layout?.panes, saved.layout?.docks));
     if (saved.layout?.widths?.tabs) setWidths({ tabs: saved.layout.widths.tabs });
     const starts = batch(() => (saved.tabs.length ? saved.tabs : [undefined]).map(newTab));
     const list = tabs();
@@ -464,10 +465,10 @@ function App() {
   }
 
   function togglePanel(id: PanelId) {
-    setDocks(toggle(docks(), id));
+    setPanes(toggle(panes(), id));
   }
 
-  // Terminal panels: shells shared by every tab (a dev server, logs...), as many as wanted, each in any dock.
+  // Terminal panels: shells shared by every tab (a dev server, logs...), as many as wanted, anywhere in the tree.
   // A new one opens next to the last one used, in its folder; it starts when first shown, keeps running while
   // hidden or moved, and goes away when closed or when its shell exits. Not restored with the session.
   type Console = { view?: TermView; cwd(): string | undefined; setCwd(cwd: string): void };
@@ -476,8 +477,8 @@ function App() {
   let sizes: ResizeObserver | undefined; // refits the terminals when their area changes size
   const refitConsoles = () => consoles.forEach((c) => c.view?.refit());
   const panelName = (id: PanelId) =>
-    isTerminal(id) ? `Terminal ${id.slice(5)}` : { explorer: "Files", git: "Git", prompts: "Prompts" }[id];
-  const consoleShown = () => SIDES.some((s) => docks()[s].groups.some((g) => g.shown && isTerminal(g.shown)));
+    isTerminal(id) ? `Terminal ${id.slice(5)}` : ({ explorer: "Files", git: "Git", prompts: "Prompts", main: "Terminal" } as const)[id];
+  const consoleShown = () => [...paneMap().values()].some((p) => isGroup(p) && !!p.shown && isTerminal(p.shown));
 
   function newConsole() {
     let n = 1;
@@ -486,8 +487,8 @@ function App() {
     const from = lastConsole && consoles.get(lastConsole);
     const [cwd, setCwd] = createSignal(from ? from.cwd() : active()?.cwd);
     consoles.set(id, { cwd, setCwd });
-    const at: Target = lastConsole ? { side: sideOf(docks(), lastConsole), with: lastConsole } : { side: "bottom", at: "tab" };
-    setDocks(insert(docks(), id, at));
+    const at: Target = lastConsole ? { pane: groupOf(panes(), lastConsole)!.id, at: "tab" } : { pane: MAIN, at: "bottom" };
+    setPanes(insert(panes(), id, at));
     lastConsole = id;
   }
 
@@ -499,7 +500,7 @@ function App() {
     }
     consoles.delete(id);
     if (lastConsole === id) lastConsole = [...consoles.keys()].pop();
-    setDocks(remove(docks(), id));
+    setPanes(remove(panes(), id));
   }
 
   /** The terminals' shortcut: shows or hides the last one used, or opens the first one. */
@@ -613,6 +614,10 @@ function App() {
     else if (action === "togglePrompts") togglePanel("prompts");
     else if (action === "toggleTerminal") toggleConsoles();
     else if (action === "newTerminal") newConsole();
+    else if (action === "focusLeft") focusPane("left");
+    else if (action === "focusRight") focusPane("right");
+    else if (action === "focusUp") focusPane("up");
+    else if (action === "focusDown") focusPane("down");
     else if (action === "settings") setSettingsOpen(true);
     else if (action === "find") setFinding(true);
     else if (action === "renameTab") active() && setRenameRequest({ tab: active()! });
@@ -726,6 +731,7 @@ function App() {
   });
 
   function renderPanel(id: PanelId) {
+    if (id === "main") return mainEl;
     if (id === "explorer") {
       return (
         <Explorer
@@ -805,60 +811,161 @@ function App() {
             </button>
           </span>
         </div>
-        <div class="dock-term" ref={(el) => attachConsole(id, el)} />
+        <div class="pane-term" ref={(el) => attachConsole(id, el)} />
       </aside>
     );
   }
 
-  const px = (b: Box) => ({ left: `${b.left}px`, top: `${b.top}px`, width: `${b.width}px`, height: `${b.height}px` });
-
-  /** Where dropping the dragged panel at (x, y) puts it, and the box to light up. Runs only during a drag. */
+  /**
+   * Where dropping the dragged panel at (x, y) puts it, and the box to light up: near the window's edge = a
+   * full side of it, else beside or into the pane under the cursor. Runs only during a drag.
+   */
   function dropAt(id: PanelId, x: number, y: number): { to: Target; box: Box } | undefined {
-    const inside = (r: DOMRect) => x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
-    for (const el of document.querySelectorAll<HTMLElement>(".dock-group")) {
+    const win = panesEl.getBoundingClientRect();
+    const near = Math.min(x - win.left, win.right - x, y - win.top, win.bottom - y);
+    if (near >= 0 && near < 24) {
+      const at = near === x - win.left ? "left" : near === win.right - x ? "right" : near === y - win.top ? "top" : "bottom";
+      return { to: { pane: "root", at }, box: previewBox(win, at, 0.25) };
+    }
+    for (const el of panesEl.querySelectorAll<HTMLElement>(".pane-group")) {
       const r = el.getBoundingClientRect();
-      if (!inside(r)) continue;
-      const across = !!el.closest(".dock.bottom");
-      const zone = zoneAt(r, x, y, across);
-      const to = dropTarget(docks(), id, el.dataset.panels!.split(" ") as PanelId[], zone);
-      if (!to) return;
-      const box = { left: r.left, top: r.top, width: r.width, height: r.height };
-      if ("at" in to) {
-        if (across) box.width /= 2;
-        else box.height /= 2;
-        if (zone === "after") {
-          if (across) box.left += box.width;
-          else box.top += box.height;
-        }
-      }
-      return { to, box };
+      if (x < r.left || x > r.right || y < r.top || y > r.bottom) continue;
+      const pane = el.dataset.pane!;
+      const at = zoneAt(r, x, y, pane !== MAIN);
+      if (!at || movePanel(panes(), id, { pane, at }) === panes()) return; // nowhere new
+      return { to: { pane, at }, box: at === "tab" ? r : previewBox(r, at) };
     }
-    const r = host.getBoundingClientRect();
-    const side = inside(r) ? edgeAt(r, x, y) : undefined;
-    if (!side) return;
-    const box = { left: r.left, top: r.top, width: r.width, height: r.height };
-    if (side === "bottom") {
-      box.top += (box.height * 2) / 3;
-      box.height /= 3;
-    } else {
-      box.width /= 4;
-      if (side === "right") box.left += box.width * 3;
-    }
-    return { to: { side, at: "end" }, box };
   }
 
-  const dockProps = (side: Side) => ({
-    get dock() {
-      return docks()[side];
-    },
-    name: panelName,
-    render: renderPanel,
-    onShow: (id: PanelId) => setDocks(show(docks(), id)),
-    onResize: (size: number) => setDocks({ ...docks(), [side]: { ...docks()[side], size } }),
-    onSplit: (split: number) => setDocks({ ...docks(), [side]: { ...docks()[side], split } }),
-    onDragging,
-    onDragPanel: (id: PanelId | undefined) => batch(() => (setDragPanel(id), setDrop(undefined))),
-  });
+  /** Alt+arrow: focus the pane beside the focused one (the tab's terminal, a panel, a terminal panel). */
+  function focusPane(dir: "left" | "right" | "up" | "down") {
+    const els = [...panesEl.querySelectorAll<HTMLElement>(".pane-group")];
+    const from = els.findIndex((el) => el.contains(document.activeElement));
+    const to = els[nextPane(els.map((el) => el.getBoundingClientRect()), Math.max(0, from), dir) ?? -1];
+    if (!to) return;
+    const group = paneMap().get(to.dataset.pane!);
+    const id = group && isGroup(group) ? group.shown : undefined;
+    if (id === "main") active()?.shown.focus();
+    else if (id && isTerminal(id)) consoles.get(id)?.view?.focus();
+    else to.querySelector<HTMLElement>("textarea, input, [tabindex]:not([tabindex='-1']), button")?.focus();
+  }
+
+  const px = (b: Box) => ({ left: `${b.left}px`, top: `${b.top}px`, width: `${b.width}px`, height: `${b.height}px` });
+
+  // The tab's terminal, documents and top bar: one element for the window's life (terminals are never remounted),
+  // placed in the group that holds "main".
+  const mainEl = (
+  <main class="main">
+    {/* Like Warp: the active tab's branch and changes on the right, opening the git panel. */}
+    <div class="topbar">
+      <Show
+        when={barTab()?.docs.length ? barTab() : undefined}
+        fallback={<span class="topbar-title">{barTab() ? displayTitle(barTab()!) : ""}</span>}
+      >
+        {(tab) => (
+          <div class="doc-tabs">
+            <button class="doc-tab" classList={{ on: tab().current < 0 }} onClick={() => showDoc(tab(), -1)}>
+              Terminal
+            </button>
+            <For each={tab().docs}>
+              {(doc, i) => (
+                <div
+                  class="doc-tab"
+                  classList={{ on: tab().current === i() }}
+                  title={doc.path}
+                  onClick={() => showDoc(tab(), i())}
+                  onAuxClick={(e) => e.button === 1 && closeDoc(tab(), i())}
+                >
+                  <span class="doc-name">{doc.name}</span>
+                  <Show when={doc.dirty}>
+                    <span class="doc-dirty" title="Unsaved (Ctrl+S)" />
+                  </Show>
+                  <button
+                    class="doc-close"
+                    title="Close"
+                    onClick={(e) => (e.stopPropagation(), closeDoc(tab(), i()))}
+                  >
+                    <Icon name="close" size={10} />
+                  </button>
+                </div>
+              )}
+            </For>
+          </div>
+        )}
+      </Show>
+      <Show when={barTab()?.docs[barTab()!.current]?.markdown && barTab()!.docs[barTab()!.current]}>
+        {(doc) => (
+          <button class="doc-mode" onClick={() => doc().toggleEdit()}>
+            {doc().editing ? "Read" : "Edit"}
+          </button>
+        )}
+      </Show>
+      <Show when={limitsLabel(limits())}>
+        {(label) => (
+          <span class="usage" title={limitsTitle(limits())}>
+            {label()}
+          </span>
+        )}
+      </Show>
+      <button
+        class="icon-btn"
+        classList={{ on: consoleShown() }}
+        onClick={toggleConsoles}
+        title="Terminal (Ctrl+Shift+J)"
+      >
+        <Icon name="terminal" />
+      </button>
+      <button
+        class="icon-btn"
+        classList={{ on: shown("prompts") }}
+        onClick={() => togglePanel("prompts")}
+        title="Prompts (Ctrl+Shift+O)"
+      >
+        <Icon name="list" />
+      </button>
+      <button
+        class="git-button"
+        classList={{ on: shown("git") }}
+        onClick={() => togglePanel("git")}
+        title="Git changes (Ctrl+Shift+G)"
+      >
+        <Icon name="branch" size={14} />
+        <span>{barTab()?.branch ?? "Git"}</span>
+        <GitStatsView stats={barTab()?.stats} />
+      </button>
+    </div>
+    <Show when={update()}>
+      {(u) => (
+        <div class="banner">
+          <span>
+            Rift <b>{u().version}</b> is ready. It installs when you close Rift, or now:
+          </span>
+          <button onClick={() => u().restart()}>Restart now</button>
+        </div>
+      )}
+    </Show>
+    <For each={missing()}>
+      {(i) => (
+        <div class="banner">
+          <span>
+            Enable <b>{i.name}</b> integration: tab status icons, notifications and each tab's session restored
+            on restart. {i.setup} Your other settings are kept; a .bak copy is written.
+          </span>
+          <button onClick={() => enable(i.id)}>Enable</button>
+          <button onClick={() => setMissing(missing().filter((m) => m !== i))}>Not now</button>
+        </div>
+      )}
+    </For>
+    <div class="terms" ref={host}>
+      <Show when={finding() && active()}>
+        <FindBar
+          find={(text, backwards) => active()!.view.find(text, backwards)}
+          onClose={() => (setFinding(false), active()?.view.endFind())}
+        />
+      </Show>
+    </div>
+  </main>
+  ) as HTMLElement;
 
   return (
     <div class="app">
@@ -889,7 +996,6 @@ function App() {
       />
         <Resizer edge="right" size={widths().tabs} min={160} max={480} onResize={resizeWidth("tabs")} onDragging={onDragging} />
       </div>
-      <DockView side="left" {...dockProps("left")} />
       <Show when={worktreeFrom()}>
         {(from) => (
           <PromptDialog
@@ -909,122 +1015,27 @@ function App() {
           onClose={() => (setSettingsOpen(false), active()?.shown.show())}
         />
       </Show>
-      <main class="main">
-        {/* Like Warp: the active tab's branch and changes on the right, opening the git panel. */}
-        <div class="topbar">
-          <Show
-            when={barTab()?.docs.length ? barTab() : undefined}
-            fallback={<span class="topbar-title">{barTab() ? displayTitle(barTab()!) : ""}</span>}
-          >
-            {(tab) => (
-              <div class="doc-tabs">
-                <button class="doc-tab" classList={{ on: tab().current < 0 }} onClick={() => showDoc(tab(), -1)}>
-                  Terminal
-                </button>
-                <For each={tab().docs}>
-                  {(doc, i) => (
-                    <div
-                      class="doc-tab"
-                      classList={{ on: tab().current === i() }}
-                      title={doc.path}
-                      onClick={() => showDoc(tab(), i())}
-                      onAuxClick={(e) => e.button === 1 && closeDoc(tab(), i())}
-                    >
-                      <span class="doc-name">{doc.name}</span>
-                      <Show when={doc.dirty}>
-                        <span class="doc-dirty" title="Unsaved (Ctrl+S)" />
-                      </Show>
-                      <button
-                        class="doc-close"
-                        title="Close"
-                        onClick={(e) => (e.stopPropagation(), closeDoc(tab(), i()))}
-                      >
-                        <Icon name="close" size={10} />
-                      </button>
-                    </div>
-                  )}
-                </For>
-              </div>
-            )}
-          </Show>
-          <Show when={barTab()?.docs[barTab()!.current]?.markdown && barTab()!.docs[barTab()!.current]}>
-            {(doc) => (
-              <button class="doc-mode" onClick={() => doc().toggleEdit()}>
-                {doc().editing ? "Read" : "Edit"}
-              </button>
-            )}
-          </Show>
-          <Show when={limitsLabel(limits())}>
-            {(label) => (
-              <span class="usage" title={limitsTitle(limits())}>
-                {label()}
-              </span>
-            )}
-          </Show>
-          <button
-            class="icon-btn"
-            classList={{ on: consoleShown() }}
-            onClick={toggleConsoles}
-            title="Terminal (Ctrl+Shift+J)"
-          >
-            <Icon name="terminal" />
-          </button>
-          <button
-            class="icon-btn"
-            classList={{ on: shown("prompts") }}
-            onClick={() => togglePanel("prompts")}
-            title="Prompts (Ctrl+Shift+O)"
-          >
-            <Icon name="list" />
-          </button>
-          <button
-            class="git-button"
-            classList={{ on: shown("git") }}
-            onClick={() => togglePanel("git")}
-            title="Git changes (Ctrl+Shift+G)"
-          >
-            <Icon name="branch" size={14} />
-            <span>{barTab()?.branch ?? "Git"}</span>
-            <GitStatsView stats={barTab()?.stats} />
-          </button>
-        </div>
-        <Show when={update()}>
-          {(u) => (
-            <div class="banner">
-              <span>
-                Rift <b>{u().version}</b> is ready. It installs when you close Rift, or now:
-              </span>
-              <button onClick={() => u().restart()}>Restart now</button>
-            </div>
+      <div class="panes" ref={panesEl}>
+        <Show when={panes().id} keyed>
+          {(id) => (
+            <PaneView
+              id={id}
+              style={{ flex: "1 1 0" }}
+              panes={paneMap}
+              name={panelName}
+              render={renderPanel}
+              onShow={(p) => setPanes(show(panes(), p))}
+              onSizes={(split, sizes) => setPanes(setSizes(panes(), split, sizes))}
+              onDragging={onDragging}
+              onDragPanel={(p) => batch(() => (setDragPanel(p), setDrop(undefined)))}
+            />
           )}
         </Show>
-        <For each={missing()}>
-          {(i) => (
-            <div class="banner">
-              <span>
-                Enable <b>{i.name}</b> integration: tab status icons, notifications and each tab's session restored
-                on restart. {i.setup} Your other settings are kept; a .bak copy is written.
-              </span>
-              <button onClick={() => enable(i.id)}>Enable</button>
-              <button onClick={() => setMissing(missing().filter((m) => m !== i))}>Not now</button>
-            </div>
-          )}
-        </For>
-        <div class="terms" ref={host}>
-          <Show when={finding() && active()}>
-            <FindBar
-              find={(text, backwards) => active()!.view.find(text, backwards)}
-              onClose={() => (setFinding(false), active()?.view.endFind())}
-            />
-          </Show>
-        </div>
-        <DockView side="bottom" {...dockProps("bottom")} />
-      </main>
-      <DockView side="right" {...dockProps("right")} />
-      {/* While a panel is dragged, the panel under the cursor (or an edge of the center terminal) lights up where it would go. */}
+      </div>
+      {/* While a panel is dragged, where it would go lights up under the cursor. */}
       <Show when={dragPanel()}>
         <div
-          class="dock-drops"
+          class="pane-drops"
           onDragOver={(e) => {
             e.preventDefault();
             setDrop(dropAt(dragPanel()!, e.clientX, e.clientY));
@@ -1034,7 +1045,7 @@ function App() {
             e.preventDefault();
             const to = drop()?.to;
             batch(() => {
-              if (to) setDocks(movePanel(docks(), dragPanel()!, to));
+              if (to) setPanes(movePanel(panes(), dragPanel()!, to));
               setDragPanel(undefined);
               setDrop(undefined);
             });

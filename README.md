@@ -75,9 +75,9 @@ freezing the window) and fails when a change goes over budget.
   Shift+Enter for a new line); its ← arrow, or dragging it onto the terminal, pastes it there (you press Enter) and it leaves the list.
 - **Terminals panel**: extra shells shared by every tab (a dev server, logs), as many as you want. A new one opens in
   the folder of the last one you used.
-- Panels sit in three docks (left, right, bottom), the same for every tab. Each dock splits in two (top/bottom on the
-  sides, left/right at the bottom) and panels in the same place become tabs. Move one by dragging its header or tab: the spot
-  under the cursor lights up (half of a panel = beside it, its middle = a tab, an edge of the terminal = that side). Each opens and closes with one shortcut and resizes by its edge.
+- Arrange the panels and the terminal like in VS Code, the same for every tab: drag a panel by its header or tab, and
+  the spot under the cursor lights up. Drop it on a side of any panel to split it there, on its middle to make it a tab,
+  or on the window's edge for a full side. Drag the lines between them to resize; Alt+arrows move the focus.
 - **Settings**: dark, light or system theme, terminal font, tab size, and every shortcut can be rebound.
 - **Open in Rift** from the Windows File Explorer right-click menu.
 - **Auto-update** from GitHub Releases: downloads in the background, installs when you close Rift.
@@ -121,6 +121,7 @@ terminal.
 | Prompts panel | `Ctrl+Shift+O` | `Cmd+Shift+O` |
 | Show / hide terminals | `Ctrl+Shift+J` | `Cmd+Shift+J` |
 | New terminal (in the current terminal's folder) | `Ctrl+Shift+K` | `Cmd+Shift+K` |
+| Focus the pane on that side | `Alt+arrows` | `Ctrl+Alt+arrows` |
 | Next tab that needs you | `Ctrl+Shift+U` | `Cmd+Shift+U` |
 | Find in terminal | `Ctrl+Shift+F` | `Cmd+F` |
 | Zoom in / out / reset | `Ctrl+=` / `Ctrl+-` / `Ctrl+0` | `Cmd+=` / `Cmd+-` / `Cmd+0` |
