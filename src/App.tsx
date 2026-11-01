@@ -40,7 +40,7 @@ import { Prompts } from "./panels/Prompts";
 import { addPrompt, editPrompt, mergePrompts, promptKey, removePrompt, type PromptLists } from "./panels/promptLists";
 import { Resizer } from "./ui/Resizer";
 import { DockView, PANEL_DRAG_TYPE } from "./panels/Dock";
-import { DEFAULT_DOCKS, endName, insert, isShown, isTerminal, mergeDocks, move as movePanel, moveChoices, remove, show, sideOf, SIDES, toggle, type Docks, type PanelId, type Side, type Target } from "./panels/docks";
+import { DEFAULT_DOCKS, endName, insert, isShown, isTerminal, mergeDocks, move as movePanel, remove, show, sideOf, SIDES, toggle, type Docks, type PanelId, type Side, type Target } from "./panels/docks";
 import { FindBar } from "./ui/FindBar";
 import { PromptDialog } from "./ui/PromptDialog";
 import "./App.css";
@@ -815,9 +815,7 @@ function App() {
     },
     name: panelName,
     render: renderPanel,
-    choices: (id: PanelId) => moveChoices(docks(), id, panelName),
     onShow: (id: PanelId) => setDocks(show(docks(), id)),
-    onMove: (id: PanelId, to: Target) => setDocks(movePanel(docks(), id, to)),
     onResize: (size: number) => setDocks({ ...docks(), [side]: { ...docks()[side], size } }),
     onSplit: (split: number) => setDocks({ ...docks(), [side]: { ...docks()[side], split } }),
     onDragging,
@@ -985,7 +983,7 @@ function App() {
         <DockView side="bottom" {...dockProps("bottom")} />
       </main>
       <DockView side="right" {...dockProps("right")} />
-      {/* While a dock tab is dragged: each side of the window takes it at one end, or as a tab. */}
+      {/* While a panel is dragged: each side of the window takes it at one end, or as a tab. */}
       <Show when={dragPanel()}>
         <div class="dock-drops">
           <For each={SIDES.flatMap((side) => (["start", "tab", "end"] as const).map((at) => ({ side, at, key: `${side}-${at}` })))}>

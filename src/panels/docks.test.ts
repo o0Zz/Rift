@@ -1,7 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_DOCKS, insert, isShown, mergeDocks, move, moveChoices, remove, show, sideOf, toggle, type Docks, type PanelId } from "./docks";
-
-const name = (id: PanelId) => ({ explorer: "Files", git: "Git", prompts: "Prompts" })[id as "git"] ?? "Terminal 1";
+import { DEFAULT_DOCKS, insert, isShown, mergeDocks, move, remove, show, sideOf, toggle, type Docks } from "./docks";
 
 const open: Docks = {
   ...DEFAULT_DOCKS,
@@ -45,22 +43,6 @@ describe("docks", () => {
     expect(move(move(DEFAULT_DOCKS, "explorer", { side: "right", at: "tab" }), "git", { side: "left", at: "tab" }).left.groups).toEqual([
       { panels: ["git"], shown: "git" },
     ]);
-  });
-
-  it("offers each other group as a tab and each free end", () => {
-    const labels = moveChoices(open, "prompts", name).map((c) => c.label);
-    expect(labels).toEqual([
-      "Move to left, next to Files",
-      "Move to left, top",
-      "Move to left, bottom",
-      "Move to right, top", // splits off from Git
-      "Move to right, bottom",
-      "Move to bottom, next to Terminal 1",
-      "Move to bottom, left",
-      "Move to bottom, right",
-    ]);
-    const empty = move(DEFAULT_DOCKS, "explorer", { side: "right", at: "tab" });
-    expect(moveChoices(empty, "git", name).map((c) => c.label)).toContain("Move to left");
   });
 
   it("repairs any saved shape: every panel once, at most two groups, unknown ones dropped", () => {

@@ -81,23 +81,6 @@ export function insert(docks: Docks, id: PanelId, to: Target): Docks {
 
 export const move = (docks: Docks, id: PanelId, to: Target) => insert(remove(docks, id), id, to);
 
-/** The "Move to…" menu of a panel: a tab next to each other group, and each free end of each dock. */
-export function moveChoices(docks: Docks, id: PanelId, name: (id: PanelId) => string): { label: string; target: Target }[] {
-  const choices: { label: string; target: Target }[] = [];
-  for (const side of SIDES) {
-    const groups = docks[side].groups;
-    const remaining = groups.filter((g) => g.panels.some((p) => p !== id)).length;
-    for (const g of groups.filter((g) => !g.panels.includes(id))) {
-      choices.push({ label: `Move to ${side}, next to ${g.panels.map(name).join(", ")}`, target: { side, with: g.panels[0] } });
-    }
-    if (remaining === 0 && !groups.some((g) => g.panels.includes(id))) choices.push({ label: `Move to ${side}`, target: { side, at: "end" } });
-    else if (remaining === 1) {
-      for (const at of ["start", "end"] as const) choices.push({ label: `Move to ${side}, ${endName(side, at)}`, target: { side, at } });
-    }
-  }
-  return choices;
-}
-
 /**
  * Any saved shape → valid docks: files, git and prompts exactly once, at most two groups per dock. Terminals
  * are dropped (their shells are not restored). Reads the first docks (one group per dock: `panels`/`shown` on
