@@ -3,17 +3,11 @@
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    // `rift.exe hook <harness>`: called by an agent's hook, forwards stdin to the running app and exits.
-    if let [_, cmd, harness] = args.as_slice()
-        && cmd == "hook"
-    {
-        return rift_lib::hook::run_client(harness);
+    match args.as_slice() {
+        // `rift.exe hook <harness>`: called by an agent's hook, forwards stdin to the running app and exits.
+        [_, cmd, harness] if cmd == "hook" => rift_lib::hook::run_client(harness),
+        // `rift.exe status <harness>`: the agent's status line command (prints a line, forwards the numbers).
+        [_, cmd, harness] if cmd == "status" => rift_lib::hook::run_status(harness),
+        _ => rift_lib::run(),
     }
-    // `rift.exe status <harness>`: the agent's status line command (prints a line, forwards the numbers).
-    if let [_, cmd, harness] = args.as_slice()
-        && cmd == "status"
-    {
-        return rift_lib::hook::run_status(harness);
-    }
-    rift_lib::run()
 }

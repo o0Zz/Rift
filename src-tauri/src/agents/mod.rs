@@ -118,7 +118,34 @@ pub trait AgentHarness: Send + Sync {
 pub struct Harnesses(pub Vec<Box<dyn AgentHarness>>);
 
 impl Harnesses {
+    /// Every supported agent, with its config files under `home`.
+    pub fn new(home: &Path) -> Self {
+        let copilot_home = std::env::var_os("COPILOT_HOME")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| home.join(".copilot"));
+        Harnesses(vec![
+            Box::new(claude::Claude {
+                settings: home.join(".claude").join("settings.json"),
+            }),
+            Box::new(codex::Codex {
+                hooks: home.join(".codex").join("hooks.json"),
+            }),
+            Box::new(gemini::Gemini {
+                settings: home.join(".gemini").join("settings.json"),
+            }),
+            Box::new(copilot::Copilot {
+                hooks: copilot_home.join("hooks").join("rift.json"),
+            }),
+        ])
+    }
+
     pub fn get(&self, id: &str) -> Option<&dyn AgentHarness> {
         self.0.iter().find(|h| h.id() == id).map(|h| h.as_ref())
+    }
+
+    /// The agent that writes one-shot answers (commit messages): the first one used on this machine.
+    pub fn for_one_shot(&self) -> Option<&dyn AgentHarness> {
+        let first = self.0.iter().find(|h| h.detected()).or(self.0.first());
+        first.map(|h| h.as_ref())
     }
 }

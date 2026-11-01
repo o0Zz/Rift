@@ -180,10 +180,10 @@ export function nextPane(boxes: Box[], from: number, dir: "left" | "right" | "up
 
 /**
  * Any saved shape → a valid tree: files, git, prompts and main exactly once, unknown panels and terminals (their
- * shells are not restored) dropped, empty splits gone. `docks` (the layout before the tree: left, right and
- * bottom docks of up to two groups) is read when there is no tree yet.
+ * shells are not restored) dropped, empty splits gone. Without a tree, `v1` (what v1.0.0 saved: which panels were
+ * open and their widths) opens those panels in the default tree.
  */
-export function mergePanes(saved: unknown, docks?: unknown): Pane {
+export function mergePanes(saved: unknown, v1?: unknown): Pane {
   const placed = new Set<PanelId>();
   let n = 0;
   const read = (v: unknown): Pane | null => {
@@ -209,8 +209,8 @@ export function mergePanes(saved: unknown, docks?: unknown): Pane {
     if (kept.length === 1) return kept[0][0];
     return { id, dir: o.dir === "col" ? "col" : "row", children: kept.map(([c]) => c!), sizes: kept.map(([, s]) => s as number) };
   };
-  let root = read(saved ?? fromDocks(docks));
-  if (!root || !placed.has("main")) return DEFAULT_PANES;
+  let root = read(saved);
+  if (!root || !placed.has("main")) return fromV1(v1);
   // Ids unique (a hand-edited file could repeat one).
   const seen = new Set<string>();
   root = mapTree(root, (p) => {
@@ -225,19 +225,14 @@ export function mergePanes(saved: unknown, docks?: unknown): Pane {
   return root;
 }
 
-/** The docks layout as a tree: [left | [main / bottom] | right]; dock sizes in pixels become weights. */
-function fromDocks(docks: unknown): unknown {
-  if (!docks || typeof docks !== "object") return undefined;
-  const d = docks as Record<string, { groups?: unknown[]; size?: number } | undefined>;
-  const side = (s: string, dir: "row" | "col") => ({ dir, children: d[s]?.groups ?? [d[s]], sizes: [] });
-  const size = (s: string, fallback: number) => (typeof d[s]?.size === "number" ? d[s]!.size! : fallback);
-  return {
-    dir: "row",
-    children: [
-      side("left", "col"),
-      { dir: "col", children: [{ panels: ["main"] }, side("bottom", "row")], sizes: [600, size("bottom", 240)] },
-      side("right", "col"),
-    ],
-    sizes: [size("left", 240), 900, size("right", 440)],
+/** v1.0.0's layout: `panels` {explorer, git, prompts} open or not, `widths` in pixels. */
+function fromV1(v1: unknown): Pane {
+  const o = (v1 && typeof v1 === "object" ? v1 : {}) as { panels?: Record<string, unknown>; widths?: Record<string, unknown> };
+  const width = (id: string, fallback: number) => {
+    const w = o.widths?.[id];
+    return typeof w === "number" && w > 0 ? w : fallback;
   };
+  let root: Pane = { ...DEFAULT_PANES, sizes: [width("explorer", 240), 900, width("git", 440)] };
+  for (const id of FIXED) if (o.panels?.[id] === true) root = show(root, id);
+  return root;
 }

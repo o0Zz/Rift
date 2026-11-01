@@ -45,7 +45,8 @@ src-tauri/src/
   scrollback.rs     per-tab history (`<id>.ans`) saved on close, shown again on restore
   hook.rs           `rift hook` client + server: named pipe (Windows) / Unix socket
   agents/           AgentHarness trait + adapters (claude, codex, gemini, copilot); config.rs: shared hook-file and one-shot helpers
-  git.rs            branch from .git/HEAD (no process); status/diff/stats/commit/worktree via git CLI (CREATE_NO_WINDOW)
+  git.rs            branch from .git/HEAD (no process); status/diff/stats/commit/worktree via git CLI (5 min deadline)
+  process.rs        runs git and agents' one-shots: no window, stdin + both outputs at once, killed with its children on timeout
   files.rs          one directory level per call (never walks recursively)
   settings.rs       settings.json (frontend owns its shape)
   explorer_menu.rs  "Open in Rift" registry entries (HKCU) + `rift.exe <dir>` parsing
@@ -54,7 +55,7 @@ src/
   App.tsx           wiring: restore/save, keys, agent status, top bar, Enable banners
   tabs/             layout.ts (pure: order, moves, titles, notify rule; tested), Tab.ts (state as Solid signals), Sidebar.tsx, GitStats.tsx, icons.tsx, nav.ts
   terminal/         TermView.ts (one xterm per tab), themes.ts, osc.ts, paths.ts
-  panels/           panes.ts (tree of splits, pure; tested) + PaneTree.tsx, Explorer, GitPanel, Prompts, diff.ts, fileIcons.ts
+  panels/           panes.ts (tree of splits, pure; tested) + PaneTree.tsx (tree, drag and drop), Consoles.tsx (terminal panels), Explorer, GitPanel, Prompts, diff.ts, fileIcons.ts
   ui/               Menu, Resizer (+ resize.ts, pure), Icon, PromptDialog, FindBar
   docs/             DocView.ts (one open file), place.ts (pure; tested), editor.ts + markdown.ts (lazy chunks)
   settings/         settings.ts (pure + tested), SettingsPage.tsx
@@ -69,6 +70,7 @@ Frontend ↔ backend: Tauri commands, the PTY `Channel`, and events (`pty-exit`,
 - `pty_open` takes a Tauri `Channel`; output goes as `InvokeResponseBody::Raw` bytes (no JSON) to `term.write(Uint8Array)`. Exit = `pty-exit`, detected by waiting on the child (ConPTY keeps the pipe open after exit).
 - New tabs open in the **active tab's folder**, after it, in its group. Spare shell: one shell waiting in a folder (home at launch); `pty_prewarm(cwd)` once the active tab and its folder are stable for 1 s. `pty_open` takes it only for the same folder (case/trailing-separator insensitive), default shell, no startup command; its output is buffered and replayed on attach.
 - ConPTY sends `ESC[6n` at startup and blocks until answered; xterm answers. `TermView` queues input until `pty_open` returns (the replayed spare output triggers the answer before the id is known). Tests answer by hand (`\x1b[1;1R`).
+- Input to a shell goes through its own writer thread (`pty_write` only queues): a shell that stops reading never blocks the UI thread or the other tabs.
 - Shell integration: PowerShell `-NoExit -EncodedCommand <init + startup>` (wraps the user's prompt to emit OSC 9;9); cmd `/K` with a `PROMPT` emitting OSC 9;9; bash (also Git Bash, MSYS paths converted) `--rcfile` sourcing ~/.bashrc, then OSC 7; zsh `ZDOTDIR` whose files source the user's own, then OSC 7. Startup command via `RIFT_STARTUP`. WSL and other shells run plain. User profiles untouched.
 - Shortcuts: capture-phase `keydown` (`tabs/nav.ts`), so xterm never sees them; dispatched only through `settings.ts` `actionFor`. Windows/Linux new/close tab = Ctrl+Shift+T/W (plain Ctrl+T/W belong to the shell and the agents); macOS uses Cmd+T/W/F. A shortcut needs Ctrl, Alt or Cmd, or is F1-F12 (`isValidShortcut`).
 - The webview never reloads: F5 / Ctrl+R / Cmd+R are blocked outside a terminal (`isReloadKey`; a reload restarts every shell). F5 = refresh the files and git panels.
@@ -93,16 +95,16 @@ Frontend ↔ backend: Tauri commands, the PTY `Channel`, and events (`pty-exit`,
 - Each tab knows its repo root + branch: `git_head` reads `.git/HEAD` at every prompt (OSC 9;9 / OSC 7). Git stats (`git_stats`, two git commands in parallel, ~80 ms): 1.5 s after a prompt or agent status change (coalesced per tab) and after a commit, **never on a tab switch**.
 - Top bar (Warp-style): active tab title, git button (branch + `+added −deleted ↑ahead ↓behind`), Claude's 5h/7d plan usage.
 - Commit: checkboxes, message, Ctrl+Enter. `git::commit` commits exactly the checked files (`git add` for untracked, then `git commit --only`; renames via `Change.orig`); pathspecs NUL-separated on stdin with `--literal-pathspecs`.
-- Git actions, all on a click: branch menu (last 30 local branches: `git switch`; "New branch…" = `git switch -c`), Pull (the user's merge/rebase config), Push (no upstream → `-u <first remote> HEAD`), Commit & Push. `GIT_TERMINAL_PROMPT=0`. `onHeadChanged` re-reads branch + stats of every tab of that repo.
+- Git actions, all on a click: branch menu (last 30 local branches: `git switch`; "New branch…" = `git switch -c`), Pull (the user's merge/rebase config), Push (no upstream → `-u <first remote> HEAD`), Commit & Push. `GIT_TERMINAL_PROMPT=0`; any git command is killed after 5 min (a login or host key nobody answers). `onHeadChanged` re-reads branch + stats of every tab of that repo.
 - History (Changes | History): `git log -n200`. Click = the commit's files, Shift+click = the range, both ends included (`pickCommits`, `commitRange`, `inRange`); a file → its diff. Commit ids checked hex before reaching git. Commit list and file list resize in height (bottom `Resizer`, not saved).
-- ✨ Generate: the checked files' diff (capped 60 KB) → `one_shot` of the first agent used on this machine (order Claude, Codex, Gemini, Copilot; the tooltip names it). Conventional Commits, no co-author line (`COMMIT_PROMPT`). Killed after 120 s with its child processes (`config::run`; npm `.cmd` shims start node).
+- ✨ Generate: the checked files' diff (capped 60 KB) → `one_shot` of the first agent used on this machine (order Claude, Codex, Gemini, Copilot; the tooltip names it). Conventional Commits, no co-author line (`COMMIT_PROMPT`). Killed after 120 s with its child processes (`process::output`; npm `.cmd` shims start node).
 - Prompts: one list per repo (`promptKey`: case/separator-insensitive) in `prompts.json` (frontend owns the shape, `mergePrompts`), saved on each edit. Enter adds/saves, Shift+Enter = new line. The ← button or a drag onto the terminal (`PROMPT_DRAG_TYPE`, removed on `dragend` if dropped) pastes it (`TermView.paste`, bracketed, no Enter) and removes it.
 
 ### Documents (files opened in a tab)
 - A click in the files panel opens the file **in the tab**, instead of its terminal; the top bar becomes sub-tabs `Terminal | file × | ...` (same height: terminals never refit). Setting: one document at a time (replaces the shown or last one, never one with unsaved changes, `placeDoc`) or a new sub-tab each time. Not text (binary, not UTF-8, > 5 MB, `files::read_text`) → default app.
 - `DocView` is like `TermView`: mounted for the tab's life, `display` toggle. Reads the file only once shown and still visible (a restore activates every tab); re-checks the mtime 150 ms after being shown (changed outside + no unsaved edits → reloaded). No watcher. Measured: switching to a document tab = 1.5-1.9 ms of work.
 - Editor `docs/editor.ts`: lazy chunk (~114 KB gz), languages per file (`@codemirror/language-data`). Highlighting, search, undo, Ctrl+S; no LSP/autocomplete. Line endings kept (`lineSeparator`). Terminal font via CSS variables.
-- Markdown reader (`docs/markdown.ts`, lazy, marked + **DOMPurify**: the page can call Rift's commands, so files never bring scripts, handlers, forms or `style`), Edit/Read in the top bar. Links: http(s) → browser, relative → opened in Rift, never navigate the app. Relative images via the asset protocol (`localImage` + `convertFileSrc`).
+- Markdown reader (`docs/markdown.ts`, lazy, marked + **DOMPurify**: the page can call Rift's commands, so files never bring scripts, handlers, forms or `style`), Edit/Read in the top bar. Links: http(s) → browser, relative → opened in Rift, never navigate the app; a linked file that is not text is shown in the file manager, never opened (a link to an .exe would run it). Relative images via the asset protocol (`localImage` + `convertFileSrc`).
 - Unsaved changes: confirm before closing the document, its tab or Rift. Open documents saved per tab (`ui.docs`, `ui.doc`).
 
 ### Settings and themes
@@ -111,7 +113,7 @@ Frontend ↔ backend: Tauri commands, the PTY `Channel`, and events (`pty-exit`,
 - Theme/font apply live via `TermView.setLook`; the effect tracks only theme + font (a shortcut edit must not re-render terminals). A font change re-wraps: visible tab now, hidden ones in idle time.
 
 ### Session restore
-- Frontend owns the tab list (`session_update`); hooks own the agent binding per pty. `SessionStore` writes on every change (tmp + rename), never before the frontend's first report, never after the freeze (`WindowEvent::Destroyed`, not the cancellable close request).
+- Frontend owns the tab list (`session_update`); hooks own the agent binding per pty. The frontend reports 300 ms after the last change (never in a tab switch's frame), at once before closing or updating (`flushSave`). `SessionStore` writes on every report (tmp + rename), never before the frontend's first report, never after the freeze (`WindowEvent::Destroyed`, not the cancellable close request).
 - A restored tab binds its session at `pty_open` and runs the harness's `resume_command` in its cwd (its own session, not the last one). `SessionEnded` unbinds only a matching id (`/clear`). Resume ids are validated (UUID for Claude, `config::safe_id` for the others): no injection from a tampered file.
 - Scrollback: on close and before an update restart, each **shell** tab's last 2000 lines are serialized with colors to `scrollback/<snap>.ans`, written back on restore under a dim "── restored ──" line. Agent tabs skipped (resume redisplays). Orphans pruned; ids validated.
 - `session_restore` first closes every tab shell (spare kept): dev reloads would leak shells. Bench mode uses temp session/settings files; `RIFT_DATA_DIR` gives an isolated profile (and disables single instance) for demos.

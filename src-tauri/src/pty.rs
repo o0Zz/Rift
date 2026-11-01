@@ -10,7 +10,7 @@ use std::thread;
 use anyhow::{Context, Result};
 use portable_pty::{ChildKiller, MasterPty, PtySize, native_pty_system};
 
-pub use crate::shell::Shell;
+use crate::shell::Shell;
 
 pub type TabId = u32;
 pub type OnData = Box<dyn FnMut(Vec<u8>) + Send>;
@@ -51,7 +51,8 @@ impl Sink {
 
 struct Session {
     master: Box<dyn MasterPty + Send>,
-    writer: Box<dyn Write + Send>,
+    /// To the shell's writer thread, in order.
+    input: std::sync::mpsc::Sender<Vec<u8>>,
     killer: Box<dyn ChildKiller + Send + Sync>,
     sink: Arc<Mutex<Sink>>,
 }
@@ -165,10 +166,9 @@ impl PtyManager {
     }
 
     pub fn write(&self, id: TabId, data: &[u8]) -> Result<()> {
-        let mut sessions = self.sessions.lock().unwrap();
-        let s = sessions.get_mut(&id).context("unknown tab")?;
-        s.writer.write_all(data)?;
-        s.writer.flush()?;
+        let sessions = self.sessions.lock().unwrap();
+        let s = sessions.get(&id).context("unknown tab")?;
+        s.input.send(data.to_vec()).context("shell input closed")?;
         Ok(())
     }
 
@@ -256,7 +256,20 @@ impl PtyManager {
 
         let killer = child.clone_killer();
         let mut reader = pair.master.try_clone_reader()?;
-        let writer = pair.master.take_writer()?;
+        let mut writer = pair.master.take_writer()?;
+        let (input, inputs) = std::sync::mpsc::channel::<Vec<u8>>();
+        // Ends when the session goes (its sender dropped) or the shell stops taking input.
+        thread::spawn(move || {
+            for data in inputs {
+                if writer
+                    .write_all(&data)
+                    .and_then(|_| writer.flush())
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
         let sink = Arc::new(Mutex::new(Sink::Buffer {
             data: Vec::new(),
             exited: false,
@@ -280,7 +293,7 @@ impl PtyManager {
             id,
             Session {
                 master: pair.master,
-                writer,
+                input,
                 killer,
                 sink,
             },
@@ -558,8 +571,8 @@ mod tests {
         m.prewarm(None);
         let spare = wait_for_spare(&m);
         let other = crate::shell::profiles()
-            .into_iter()
-            .map(|p| p.shell)
+            .iter()
+            .map(|p| p.shell.clone())
             .next()
             .unwrap();
         let (id, out, _) = open_with(&m, None, None, Some(other));

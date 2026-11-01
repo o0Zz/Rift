@@ -77,9 +77,18 @@ pub fn send(pipe: &str, msg: &HookMessage) -> std::io::Result<()> {
 pub async fn serve(name: String, on_message: impl Fn(HookMessage)) -> std::io::Result<()> {
     let mut listener = transport::Listener::bind(&name)?;
     loop {
-        let mut conn = listener.accept().await?;
+        let mut conn = match listener.accept().await {
+            Ok(conn) => conn,
+            Err(e) => {
+                eprintln!("rift: hook connection failed: {e}");
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                continue;
+            }
+        };
         let mut buf = Vec::new();
-        if conn.read_to_end(&mut buf).await.is_ok()
+        // A hook writes one line and closes at once: a client that hangs is dropped.
+        let read = tokio::time::timeout(Duration::from_secs(2), conn.read_to_end(&mut buf)).await;
+        if matches!(read, Ok(Ok(_)))
             && let Ok(msg) = serde_json::from_slice(&buf)
         {
             on_message(msg);
@@ -194,6 +203,35 @@ mod tests {
             tabs.push(m.tab);
         }
         assert_eq!(tabs, [7, 8], "messages must arrive in send order");
+    }
+
+    /// A client that connects and never closes is dropped after a moment: the hooks behind it still arrive.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_stuck_client_does_not_block_the_others() {
+        let name = format!("rift-test-stuck-{}", std::process::id());
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        tokio::spawn(serve(name.clone(), move |m| {
+            let _ = tx.send(m);
+        }));
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let stuck = transport::connect(&name).unwrap(); // open, never written to nor closed
+        let n = name.clone();
+        tokio::task::spawn_blocking(move || {
+            let msg = HookMessage {
+                tab: 9,
+                harness: "claude".into(),
+                payload: json!({}),
+            };
+            send(&n, &msg).unwrap();
+        })
+        .await
+        .unwrap();
+        let m = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .expect("the message behind a stuck client never arrived")
+            .unwrap();
+        assert_eq!(m.tab, 9);
+        drop(stuck);
     }
 
     #[test]

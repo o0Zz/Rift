@@ -3,6 +3,7 @@ mod explorer_menu;
 mod files;
 mod git;
 pub mod hook;
+mod process;
 mod pty;
 mod scrollback;
 mod session;
@@ -11,16 +12,14 @@ mod shell;
 
 use std::sync::Arc;
 
-use agents::{
-    AgentEvent, AgentSession, Harnesses, claude::Claude, codex::Codex, copilot::Copilot,
-    gemini::Gemini,
-};
+use agents::{AgentEvent, AgentSession, Harnesses};
 use portable_pty::PtySize;
-use pty::{PtyManager, Shell, TabId};
+use pty::{PtyManager, TabId};
 use scrollback::Scrollback;
 use serde::Serialize;
 use session::{Saved, SessionStore, TabInfo};
 use settings::SettingsFile;
+use shell::Shell;
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 
@@ -91,22 +90,10 @@ fn pty_resize(ptys: Ptys, id: TabId, cols: u16, rows: u16) -> Result<(), String>
     ptys.resize(id, size(cols, rows)).map_err(err)
 }
 
-#[derive(Serialize)]
-struct ShellProfile {
-    id: String,
-    name: String,
-}
-
 /// The shells installed here (default first), for settings and "New tab with…".
 #[tauri::command]
-fn shell_profiles() -> Vec<ShellProfile> {
+fn shell_profiles() -> &'static [shell::Profile] {
     shell::profiles()
-        .into_iter()
-        .map(|p| ShellProfile {
-            id: p.id,
-            name: p.name,
-        })
-        .collect()
 }
 
 /// Default shell from settings (`None`: the platform default). Spare shells use it from now on.
@@ -335,12 +322,7 @@ async fn commit_message(
     if diff.trim().is_empty() {
         return Err("Nothing to describe: the selected files have no diff".into());
     }
-    let agent = harnesses
-        .0
-        .iter()
-        .find(|h| h.detected())
-        .or(harnesses.0.first())
-        .ok_or("no agent configured")?;
+    let agent = harnesses.for_one_shot().ok_or("no agent configured")?;
     agent
         .one_shot(root.as_ref(), COMMIT_PROMPT, &diff)
         .map_err(err)
@@ -536,47 +518,24 @@ pub fn run() {
             // Per-process pipe: hooks reach the Rift instance that owns their tab.
             let pipe = format!("rift-{}", std::process::id());
 
-            // The bench must neither restore nor overwrite the user's tabs.
-            let session_path = if bench_mode() {
-                std::env::temp_dir().join("rift-bench-session.json")
-            } else {
-                data_dir_override()
-                    .map_or_else(|| app.path().app_data_dir(), Ok)?
-                    .join("session.json")
+            // The bench never reads nor overwrites the user's files: fresh temp ones, default settings.
+            let data_dir = data_dir_override().map_or_else(|| app.path().app_data_dir(), Ok)?;
+            let data_file = |name: &str| {
+                if bench_mode() {
+                    let file = std::env::temp_dir().join(format!("rift-bench-{name}"));
+                    let _ = std::fs::remove_file(&file);
+                    file
+                } else {
+                    data_dir.join(name)
+                }
             };
-            let _ = bench_mode() && std::fs::remove_file(&session_path).is_ok();
+            let session_path = data_file("session.json");
             // Tab histories live next to the session (temp folder for the bench).
             app.manage(Scrollback(session_path.with_file_name("scrollback")));
             app.manage(SessionStore::new(session_path));
-            // The bench runs with default settings, never the user's.
-            let data_dir = data_dir_override().map_or_else(|| app.path().app_data_dir(), Ok)?;
-            app.manage(SettingsFile(if bench_mode() {
-                std::env::temp_dir().join("rift-bench-settings.json")
-            } else {
-                data_dir.join("settings.json")
-            }));
-            app.manage(PromptsFile(SettingsFile(if bench_mode() {
-                std::env::temp_dir().join("rift-bench-prompts.json")
-            } else {
-                data_dir.join("prompts.json")
-            })));
-            let copilot_home = std::env::var_os("COPILOT_HOME")
-                .map(std::path::PathBuf::from)
-                .unwrap_or_else(|| home.join(".copilot"));
-            app.manage(Harnesses(vec![
-                Box::new(Claude {
-                    settings: home.join(".claude").join("settings.json"),
-                }),
-                Box::new(Codex {
-                    hooks: home.join(".codex").join("hooks.json"),
-                }),
-                Box::new(Gemini {
-                    settings: home.join(".gemini").join("settings.json"),
-                }),
-                Box::new(Copilot {
-                    hooks: copilot_home.join("hooks").join("rift.json"),
-                }),
-            ]));
+            app.manage(SettingsFile(data_file("settings.json")));
+            app.manage(PromptsFile(SettingsFile(data_file("prompts.json"))));
+            app.manage(Harnesses::new(&home));
 
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(hook::serve(pipe.clone(), move |msg| {

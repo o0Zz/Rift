@@ -193,10 +193,6 @@ body,
   right: -3px;
 }
 
-.resizer.left {
-  left: -3px;
-}
-
 /* Between two boxes of a panel: sets the height of the one above. */
 .resizer.bottom {
   position: relative;

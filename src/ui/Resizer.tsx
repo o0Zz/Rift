@@ -1,13 +1,11 @@
 import { resized } from "./resize";
 
 /**
- * Drag handle on a box's edge. `edge` is the side of the box it sits on: a left-side panel has its handle on
- * its right edge (dragging right widens it), the right-side git panel on its left edge. A `bottom` handle
- * goes right after its box (in the flow) and sets its height; without a `size` yet it starts from the
- * box's rendered height.
+ * Drag handle on a box's edge: `right` sets the width of the box it sits in (the tab list), `bottom` goes right
+ * after its box (in the flow) and sets its height; without a `size` yet it starts from the box's rendered height.
  */
 export function Resizer(props: {
-  edge: "left" | "right" | "bottom";
+  edge: "right" | "bottom";
   size?: number;
   min: number;
   max: number;
@@ -23,7 +21,7 @@ export function Resizer(props: {
     const from = at(e);
     const start = props.size ?? (el.previousElementSibling as HTMLElement).offsetHeight;
     props.onDragging?.(true);
-    const move = (ev: PointerEvent) => props.onResize(resized(props.edge, start, at(ev) - from, props.min, props.max));
+    const move = (ev: PointerEvent) => props.onResize(resized(start, at(ev) - from, props.min, props.max));
     const up = () => {
       el.removeEventListener("pointermove", move);
       el.removeEventListener("pointerup", up);

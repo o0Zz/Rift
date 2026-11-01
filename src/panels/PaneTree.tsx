@@ -1,8 +1,94 @@
-import { createMemo, For, Show, type JSX } from "solid-js";
-import { isGroup, isOpen, type Group, type Pane, type PanelId, type Split } from "./panes";
+import { batch, createMemo, createSignal, For, Show, type JSX } from "solid-js";
+import { index, isGroup, isOpen, MAIN, move, nextPane, previewBox, setSizes, show, zoneAt, type Box, type Group, type Pane, type PanelId, type Split, type Target } from "./panes";
 
 /** Drag type of a panel (its header or tab) being moved elsewhere. */
-export const PANEL_DRAG_TYPE = "application/x-rift-panel";
+const PANEL_DRAG_TYPE = "application/x-rift-panel";
+
+/**
+ * The window's panes: the tree of splits, and while a panel is dragged, where it would go lit up under the cursor
+ * (near the window's edge = a full side of it, else beside or into the pane under the cursor).
+ */
+export function Panes(props: {
+  root: Pane;
+  onChange(root: Pane): void;
+  name(id: PanelId): string;
+  render(id: PanelId): JSX.Element;
+  onDragging(dragging: boolean): void;
+  ref(el: HTMLDivElement): void;
+}) {
+  let el!: HTMLDivElement;
+  const panes = createMemo(() => index(props.root));
+  const [dragPanel, setDragPanel] = createSignal<PanelId>();
+  const [drop, setDrop] = createSignal<{ to: Target; box: Box }>();
+
+  function dropAt(id: PanelId, x: number, y: number): { to: Target; box: Box } | undefined {
+    const win = el.getBoundingClientRect();
+    const near = Math.min(x - win.left, win.right - x, y - win.top, win.bottom - y);
+    if (near >= 0 && near < 24) {
+      const at = near === x - win.left ? "left" : near === win.right - x ? "right" : near === y - win.top ? "top" : "bottom";
+      return { to: { pane: "root", at }, box: previewBox(win, at, 0.25) };
+    }
+    for (const group of el.querySelectorAll<HTMLElement>(".pane-group")) {
+      const r = group.getBoundingClientRect();
+      if (x < r.left || x > r.right || y < r.top || y > r.bottom) continue;
+      const pane = group.dataset.pane!;
+      const at = zoneAt(r, x, y, pane !== MAIN);
+      if (!at || move(props.root, id, { pane, at }) === props.root) return; // nowhere new
+      return { to: { pane, at }, box: at === "tab" ? r : previewBox(r, at) };
+    }
+  }
+
+  const px = (b: Box) => ({ left: `${b.left}px`, top: `${b.top}px`, width: `${b.width}px`, height: `${b.height}px` });
+  return (
+    <>
+      <div class="panes" ref={(e) => props.ref((el = e))}>
+        <Show when={props.root.id} keyed>
+          {(id) => (
+            <PaneView
+              id={id}
+              style={{ flex: "1 1 0" }}
+              panes={panes}
+              name={props.name}
+              render={props.render}
+              onShow={(p) => props.onChange(show(props.root, p))}
+              onSizes={(split, sizes) => props.onChange(setSizes(props.root, split, sizes))}
+              onDragging={props.onDragging}
+              onDragPanel={(p) => batch(() => (setDragPanel(p), setDrop(undefined)))}
+            />
+          )}
+        </Show>
+      </div>
+      <Show when={dragPanel()}>
+        <div
+          class="pane-drops"
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDrop(dropAt(dragPanel()!, e.clientX, e.clientY));
+          }}
+          onDragLeave={(e) => e.relatedTarget === null && setDrop(undefined)}
+          onDrop={(e) => {
+            e.preventDefault();
+            const to = drop()?.to;
+            batch(() => {
+              if (to) props.onChange(move(props.root, dragPanel()!, to));
+              setDragPanel(undefined);
+              setDrop(undefined);
+            });
+          }}
+        >
+          <Show when={drop()}>{(d) => <div class="drop-preview" style={px(d().box)} />}</Show>
+        </div>
+      </Show>
+    </>
+  );
+}
+
+/** Alt+arrows: the pane group beside the one holding the focus (in `panes`, the element of `Panes`), on side `dir`. */
+export function paneBeside(panes: HTMLElement, dir: "left" | "right" | "up" | "down"): HTMLElement | undefined {
+  const els = [...panes.querySelectorAll<HTMLElement>(".pane-group")];
+  const from = els.findIndex((el) => el.contains(document.activeElement));
+  return els[nextPane(els.map((el) => el.getBoundingClientRect()), Math.max(0, from), dir) ?? -1];
+}
 
 type Props = {
   /** Every pane by id: a pane re-renders only when its own entry changes, never because a sibling moved. */
@@ -20,7 +106,7 @@ type Props = {
  * one panel, with a row of tabs when it holds several. Drag a panel's header or tab to move it (App lights up
  * where it would go). Only shown panels are mounted (panels load when shown); terminals keep their shell alive.
  */
-export function PaneView(props: Props & { id: string; style?: JSX.CSSProperties }) {
+function PaneView(props: Props & { id: string; style?: JSX.CSSProperties }) {
   // Keeps the last value while the pane is being removed (its parent drops it in the same update).
   const pane = createMemo<Pane>((last) => props.panes().get(props.id) ?? last, props.panes().get(props.id)!);
   // A pane's kind never changes for its id: a group split in two gets a new parent, it does not become one.

@@ -2,7 +2,6 @@
 //! status/diff through the `git` CLI (respects the user's config).
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use anyhow::{Context, Result, bail};
 use serde::Serialize;
@@ -57,37 +56,22 @@ fn git(root: &Path, args: &[&str]) -> Result<std::process::Output> {
     git_with_input(root, args, None)
 }
 
+/// Longest a git command may run: push/pull can wait on a login or a host key nobody answers.
+const GIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+
 /// Runs git without a console window. `input` is written to stdin (e.g. a pathspec list).
 fn git_with_input(
     root: &Path,
     args: &[&str],
     input: Option<&[u8]>,
 ) -> Result<std::process::Output> {
-    use std::io::Write;
-    use std::process::Stdio;
-    let mut cmd = Command::new("git");
+    let mut cmd = crate::process::command("git");
     cmd.current_dir(root)
         .args(args)
         // Never wait on a terminal prompt nobody sees (push/pull): fail, or let the credential helper's
         // own window ask.
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .stdin(if input.is_some() {
-            Stdio::piped()
-        } else {
-            Stdio::null()
-        })
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW: no console flashing from the GUI app
-    }
-    let mut child = cmd.spawn().context("could not run git")?;
-    if let Some(input) = input {
-        child.stdin.take().unwrap().write_all(input)?; // dropped right after: git sees EOF
-    }
-    child.wait_with_output().context("could not run git")
+        .env("GIT_TERMINAL_PROMPT", "0");
+    crate::process::output(cmd, input.unwrap_or_default(), GIT_TIMEOUT, "git")
 }
 
 fn check(out: std::process::Output) -> Result<std::process::Output> {
@@ -210,7 +194,7 @@ pub fn stats(root: &Path) -> Result<Stats> {
 /// parallel agents work on separate checkouts. Creates the branch from HEAD unless it exists.
 /// Returns the worktree folder.
 pub fn worktree_add(root: &Path, branch: &str) -> Result<PathBuf> {
-    check(git(root, &["check-ref-format", "--branch", branch])?).context("invalid branch name")?;
+    valid_branch(root, branch)?;
     let repo = root
         .file_name()
         .context("repository has no folder name")?
@@ -242,32 +226,48 @@ pub fn worktree_add(root: &Path, branch: &str) -> Result<PathBuf> {
     Ok(path)
 }
 
-/// Diff of several files, for an AI commit message: capped at `max` bytes.
+/// Diff of several files, for an AI commit message: capped at `max` bytes. Tracked files in one git call
+/// per hundred paths (a command line has a length limit), untracked ones one by one.
 pub fn diff_many(root: &Path, changes: &[(String, bool)], max: usize) -> Result<String> {
+    let tracked: Vec<&str> = changes
+        .iter()
+        .filter(|(_, untracked)| !untracked)
+        .map(|(p, _)| p.as_str())
+        .collect();
     let mut all = String::new();
-    for (path, untracked) in changes {
-        all.push_str(&diff(root, path, *untracked)?);
+    for paths in tracked.chunks(100) {
+        all.push_str(&diff_tracked(root, paths)?);
         if all.len() > max {
-            let cut = (0..=max)
-                .rev()
-                .find(|&i| all.is_char_boundary(i))
-                .unwrap_or(0);
-            all.truncate(cut);
-            all.push_str("\n… (diff truncated)\n");
-            break;
+            return Ok(truncated(all, max));
+        }
+    }
+    for (path, _) in changes.iter().filter(|(_, untracked)| *untracked) {
+        all.push_str(&diff(root, path, true)?);
+        if all.len() > max {
+            return Ok(truncated(all, max));
         }
     }
     Ok(all)
 }
 
+/// `text` cut to at most `max` bytes (on a character boundary), saying so.
+fn truncated(mut text: String, max: usize) -> String {
+    if text.len() > max {
+        let cut = (0..=max)
+            .rev()
+            .find(|&i| text.is_char_boundary(i))
+            .unwrap_or(0);
+        text.truncate(cut);
+        text.push_str("\n… (diff truncated)\n");
+    }
+    text
+}
+
 pub fn status(root: &Path) -> Result<Vec<Change>> {
-    let out = git(
+    let out = check(git(
         root,
         &["status", "--porcelain=v1", "-z", "--untracked-files=all"],
-    )?;
-    if !out.status.success() {
-        bail!("{}", String::from_utf8_lossy(&out.stderr).trim());
-    }
+    )?)?;
     let text = String::from_utf8_lossy(&out.stdout);
     let mut fields = text.split('\0').filter(|f| !f.is_empty());
     let mut changes = Vec::new();
@@ -300,16 +300,7 @@ pub fn status(root: &Path) -> Result<Vec<Change>> {
 const MAX_DIFF: usize = 512 * 1024;
 
 fn capped_diff(out: &std::process::Output) -> String {
-    let mut text = String::from_utf8_lossy(&out.stdout).into_owned();
-    if text.len() > MAX_DIFF {
-        let cut = (0..=MAX_DIFF)
-            .rev()
-            .find(|&i| text.is_char_boundary(i))
-            .unwrap_or(0);
-        text.truncate(cut);
-        text.push_str("\n… diff truncated\n");
-    }
-    text
+    truncated(String::from_utf8_lossy(&out.stdout).into_owned(), MAX_DIFF)
 }
 
 #[derive(Debug, PartialEq, Serialize)]
@@ -526,12 +517,19 @@ pub fn diff(root: &Path, path: &str, untracked: bool) -> Result<String> {
             &["diff", "--no-color", "--no-index", "--", "/dev/null", path],
         )?
     } else {
-        let out = git(root, &["diff", "--no-color", "HEAD", "--", path])?;
-        if out.status.success() {
-            out
-        } else {
-            git(root, &["diff", "--no-color", "--cached", "--", path])? // no commit yet
-        }
+        return diff_tracked(root, &[path]);
+    };
+    Ok(capped_diff(&out))
+}
+
+/// Diff of tracked files against HEAD (against the index before the first commit).
+fn diff_tracked(root: &Path, paths: &[&str]) -> Result<String> {
+    let args = |base: &'static [&'static str]| [base, &["--"], paths].concat();
+    let out = git(root, &args(&["diff", "--no-color", "HEAD"]))?;
+    let out = if out.status.success() {
+        out
+    } else {
+        git(root, &args(&["diff", "--no-color", "--cached"]))? // no commit yet
     };
     Ok(capped_diff(&out))
 }
@@ -693,6 +691,26 @@ mod tests {
             "{}",
             d.len()
         );
+    }
+
+    #[test]
+    fn diff_many_shows_every_file_tracked_or_not() {
+        let dir = repo();
+        let r = dir.path();
+        for f in ["a.txt", "b.txt"] {
+            std::fs::write(r.join(f), "one\n").unwrap();
+        }
+        run(r, &["add", "."]);
+        run(r, &["commit", "-qm", "two files"]);
+        std::fs::write(r.join("a.txt"), "one\nA\n").unwrap();
+        std::fs::write(r.join("b.txt"), "one\nB\n").unwrap();
+        std::fs::write(r.join("c d.txt"), "C\n").unwrap();
+        let files = [("a.txt", false), ("b.txt", false), ("c d.txt", true)]
+            .map(|(p, u)| (p.to_string(), u));
+        let d = diff_many(r, &files, 60_000).unwrap();
+        for added in ["+A", "+B", "+C"] {
+            assert!(d.contains(added), "{added} missing in:\n{d}");
+        }
     }
 
     #[test]

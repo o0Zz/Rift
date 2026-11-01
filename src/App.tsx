@@ -1,4 +1,4 @@
-import { batch, createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show, untrack } from "solid-js";
+import { batch, createEffect, createSignal, For, on, onCleanup, onMount, Show, untrack } from "solid-js";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, UserAttentionType } from "@tauri-apps/api/window";
 import { getVersion } from "@tauri-apps/api/app";
@@ -34,22 +34,21 @@ import { limitsLabel, limitsTitle, type Limit, type Limits } from "./tabs/usage"
 import { Icon } from "./ui/Icon";
 import { Explorer } from "./panels/Explorer";
 import { isUnder } from "./panels/fileOps";
-import { folderName } from "./tabs/layout";
 import { GitPanel } from "./panels/GitPanel";
 import { Prompts } from "./panels/Prompts";
 import { addPrompt, editPrompt, mergePrompts, promptKey, removePrompt, type PromptLists } from "./panels/promptLists";
 import { Resizer } from "./ui/Resizer";
-import { PaneView } from "./panels/PaneTree";
-import { DEFAULT_PANES, groupOf, index, insert, isGroup, isShown, isTerminal, MAIN, mergePanes, move as movePanel, nextPane, previewBox, remove, setSizes, show, toggle, zoneAt, type Box, type Pane, type PanelId, type Target } from "./panels/panes";
+import { Panes, paneBeside } from "./panels/PaneTree";
+import { createConsoles } from "./panels/Consoles";
+import { DEFAULT_PANES, index, isGroup, isShown, isTerminal, mergePanes, toggle, type Pane, type PanelId } from "./panels/panes";
 import { FindBar } from "./ui/FindBar";
 import { PromptDialog } from "./ui/PromptDialog";
 import "./App.css";
 
 type TabUi = { name?: string; color?: string; group?: string; shell?: string; snap?: string; docs?: string[]; doc?: number };
 type SavedTab = { cwd?: string; title: string; agent?: AgentSession; ui?: TabUi };
-type Widths = { tabs: number };
-// `docks`: the panel layout before the tree of splits, read once to keep the user's arrangement.
-type Saved = { tabs: SavedTab[]; active: number; layout?: { groups?: Group[]; panes?: unknown; docks?: unknown; widths?: Record<string, number> } };
+// `panels`: what v1.0.0 saved instead of `panes` (which panels were open), read until a tree is saved.
+type Saved = { tabs: SavedTab[]; active: number; layout?: { groups?: Group[]; panes?: unknown; panels?: unknown; widths?: Record<string, number> } };
 type Integration = { id: string; name: string; detected: boolean; installed: boolean; setup: string };
 type AgentStatus = { pty: number; harness: string; status: Status | null; message: string | null };
 type AgentUsage = { pty: number; context: number | null } & { [K in keyof Limits]: Limit | null };
@@ -120,7 +119,7 @@ function App() {
         untrack(() => {
           const l = look();
           for (const t of tabs()) t.view.setLook(l);
-          for (const c of consoles.values()) c.view?.setLook(l);
+          for (const v of consoles.views()) v.setLook(l);
           active()?.view.refit();
           refitConsoles();
           resizeHiddenTabs();
@@ -136,11 +135,8 @@ function App() {
 
   // Panels in one tree of splits, the same for every tab; the tab's own terminal is one of its leaves ("main").
   const [panes, setPanes] = createSignal<Pane>(DEFAULT_PANES);
-  const paneMap = createMemo(() => index(panes()));
   const shown = (id: PanelId) => isShown(panes(), id);
-  const [dragPanel, setDragPanel] = createSignal<PanelId>();
-  const [drop, setDrop] = createSignal<{ to: Target; box: Box }>();
-  const [widths, setWidths] = createSignal<Widths>({ tabs: 240 });
+  const [tabsWidth, setTabsWidth] = createSignal(240);
   // Prompts prepared in advance, per repo; saved on each change (a user action, never in the background).
   const [promptLists, setPromptLists] = createSignal<PromptLists>({});
   const promptRepo = () => panelTab()?.root ?? panelTab()?.cwd;
@@ -150,7 +146,6 @@ function App() {
   };
   // While a panel edge is dragged the terminal is not re-wrapped (100+ ms each): only on release.
   let dragging = false;
-  const resizeWidth = (key: keyof Widths) => (w: number) => setWidths({ ...widths(), [key]: w });
   const onDragging = (d: boolean) => {
     dragging = d;
     if (!d) {
@@ -190,10 +185,14 @@ function App() {
   // Saving starts once restored tabs have their shells, so a half-restored state is never written.
   const [restored, setRestored] = createSignal(false);
 
+  // Written 300 ms after the last change, never during it: a tab switch changes `active`, and the write
+  // (a JSON file, on the backend's main thread) would land in the switch's frame.
+  let pendingSave: Record<string, unknown> | undefined;
+  let saveTimer = 0;
   function save() {
     if (!restored()) return;
     const list = tabs();
-    invoke("session_update", {
+    pendingSave = {
       tabs: list.map((t) => ({
         pty: t.view.ptyId >= 0 ? t.view.ptyId : null,
         cwd: t.cwd ?? null,
@@ -209,10 +208,20 @@ function App() {
         } satisfies TabUi,
       })),
       active: Math.max(0, list.indexOf(active()!)),
-      layout: { groups: groups(), panes: panes(), widths: widths() },
-    });
+      layout: { groups: groups(), panes: panes(), widths: { tabs: tabsWidth() } },
+    };
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(flushSave, 300);
   }
   createEffect(save);
+
+  /** Writes a pending save now: before Rift closes or updates. */
+  async function flushSave() {
+    clearTimeout(saveTimer);
+    const args = pendingSave;
+    pendingSave = undefined;
+    if (args) await invoke("session_update", args);
+  }
 
   // Git stats per tab (~80 ms of git in the background, never on a tab switch): after a prompt or an agent
   // status change, coalesced so that a burst of prompts costs one refresh per tab and 1.5 s.
@@ -324,8 +333,8 @@ function App() {
   async function restore() {
     const saved = await invoke<Saved>("session_restore");
     setGroups(saved.layout?.groups ?? []);
-    setPanes(mergePanes(saved.layout?.panes, saved.layout?.docks));
-    if (saved.layout?.widths?.tabs) setWidths({ tabs: saved.layout.widths.tabs });
+    setPanes(mergePanes(saved.layout?.panes, saved.layout));
+    if (saved.layout?.widths?.tabs) setTabsWidth(saved.layout.widths.tabs);
     const starts = batch(() => (saved.tabs.length ? saved.tabs : [undefined]).map(newTab));
     const list = tabs();
     activate(list[Math.min(saved.active, list.length - 1)]);
@@ -355,15 +364,17 @@ function App() {
   }
 
   // Documents: files opened from the files panel, shown in the tab instead of its terminal (top bar sub-tabs).
-  function makeDoc(tab: Tab, path: string): DocView {
+  // `fromLink`: reached by a link in a Markdown file, which anyone may have written: a file that is not text is
+  // shown in the file manager, never opened (a link to an .exe would run it).
+  function makeDoc(tab: Tab, path: string, fromLink = false): DocView {
     const doc: DocView = new DocView(host, path, {
       // Not text (binary, too big): the default app opens it instead.
       onNotText: () => {
-        invoke("fs_open", { path });
+        invoke(fromLink ? "fs_reveal" : "fs_open", { path });
         const i = tab.docs.indexOf(doc);
         if (i >= 0) closeDoc(tab, i, true);
       },
-      onOpenFile: (p) => openDoc(p, tab),
+      onOpenFile: (p) => openDoc(p, tab, true),
     });
     return doc;
   }
@@ -378,12 +389,12 @@ function App() {
     tab.shown.focus();
   }
 
-  function openDoc(path: string, tab = active()) {
+  function openDoc(path: string, tab = active(), fromLink = false) {
     if (!tab) return;
     const { index, replace } = placeDoc(tab.docs, tab.current, path, settings().docs === "single");
     if (index < tab.docs.length && !replace) return showDoc(tab, index);
     const docs = [...tab.docs];
-    const [old] = docs.splice(index, replace ? 1 : 0, makeDoc(tab, path));
+    const [old] = docs.splice(index, replace ? 1 : 0, makeDoc(tab, path, fromLink));
     old?.dispose();
     tab.docs = docs;
     showDoc(tab, index);
@@ -468,59 +479,11 @@ function App() {
     setPanes(toggle(panes(), id));
   }
 
-  // Terminal panels: shells shared by every tab (a dev server, logs...), as many as wanted, anywhere in the tree.
-  // A new one opens next to the last one used, in its folder; it starts when first shown, keeps running while
-  // hidden or moved, and goes away when closed or when its shell exits. Not restored with the session.
-  type Console = { view?: TermView; cwd(): string | undefined; setCwd(cwd: string): void };
-  const consoles = new Map<PanelId, Console>();
-  let lastConsole: PanelId | undefined;
   let sizes: ResizeObserver | undefined; // refits the terminals when their area changes size
-  const refitConsoles = () => consoles.forEach((c) => c.view?.refit());
+  const consoles = createConsoles({ panes, setPanes, cwd: () => active()?.cwd, look, sizes: () => sizes });
+  const refitConsoles = () => consoles.views().forEach((v) => v.refit());
   const panelName = (id: PanelId) =>
     isTerminal(id) ? `Terminal ${id.slice(5)}` : ({ explorer: "Files", git: "Git", prompts: "Prompts", main: "Terminal" } as const)[id];
-
-  function newConsole() {
-    let n = 1;
-    while (consoles.has(`term:${n}`)) n++;
-    const id: PanelId = `term:${n}`;
-    const from = lastConsole && consoles.get(lastConsole);
-    const [cwd, setCwd] = createSignal(from ? from.cwd() : active()?.cwd);
-    consoles.set(id, { cwd, setCwd });
-    const at: Target = lastConsole ? { pane: groupOf(panes(), lastConsole)!.id, at: "tab" } : { pane: MAIN, at: "bottom" };
-    setPanes(insert(panes(), id, at));
-    lastConsole = id;
-  }
-
-  function closeConsole(id: PanelId) {
-    const view = consoles.get(id)?.view;
-    if (view) {
-      sizes?.unobserve(view.el);
-      view.dispose();
-    }
-    consoles.delete(id);
-    if (lastConsole === id) lastConsole = [...consoles.keys()].pop();
-    setPanes(remove(panes(), id));
-  }
-
-  /** The terminals' shortcut: shows or hides the last one used, or opens the first one. */
-  function toggleConsoles() {
-    if (lastConsole) togglePanel(lastConsole);
-    else newConsole();
-  }
-
-  function attachConsole(id: PanelId, el: HTMLDivElement) {
-    const c = consoles.get(id)!;
-    if (!c.view) {
-      c.view = new TermView(el, { onTitle() {}, onCwd: c.setCwd, isAgent: () => false, onEscape() {} }, look());
-      c.view.el.addEventListener("focusin", () => (lastConsole = id));
-      sizes?.observe(c.view.el);
-    }
-    const view = c.view;
-    el.appendChild(view.el);
-    lastConsole = id;
-    // Next frame: the panel is in the page, so the terminal can measure itself.
-    requestAnimationFrame(() => (view.ptyId < 0 ? view.start(c.cwd()).then(() => view.focus()) : view.show()));
-  }
 
   function onAgentStatus({ pty, harness, status, message }: AgentStatus) {
     const tab = tabs().find((t) => t.view.ptyId === pty);
@@ -611,8 +574,8 @@ function App() {
     else if (action === "toggleFiles") togglePanel("explorer");
     else if (action === "toggleGit") togglePanel("git");
     else if (action === "togglePrompts") togglePanel("prompts");
-    else if (action === "toggleTerminal") toggleConsoles();
-    else if (action === "newTerminal") newConsole();
+    else if (action === "toggleTerminal") consoles.toggleLast();
+    else if (action === "newTerminal") consoles.open();
     else if (action === "focusLeft") focusPane("left");
     else if (action === "focusRight") focusPane("right");
     else if (action === "focusUp") focusPane("up");
@@ -648,8 +611,8 @@ function App() {
         }
       }),
       listen<number>("pty-exit", (e) => {
-        const term = [...consoles].find(([, c]) => c.view?.ptyId === e.payload);
-        if (term) return closeConsole(term[0]);
+        const term = consoles.byPty(e.payload);
+        if (term) return consoles.close(term);
         const tab = tabs().find((t) => t.view.ptyId === e.payload);
         if (tab) closeTab(tab, true);
       }),
@@ -676,6 +639,7 @@ function App() {
         event.preventDefault();
         return;
       }
+      await flushSave();
       await saveHistories();
       await updater?.installIfReady();
     });
@@ -703,7 +667,7 @@ function App() {
     invoke<string[] | null>("bench_dirs").then(async (dirs) => {
       if (!dirs) {
         // Not in dev (would offer the latest release over local work) nor in the bench.
-        if (!import.meta.env.DEV) updater = startUpdates((version, restart) => setUpdate({ version, restart: () => saveHistories().then(restart) }));
+        if (!import.meta.env.DEV) updater = startUpdates((version, restart) => setUpdate({ version, restart: () => flushSave().then(saveHistories).then(restart) }));
         return;
       }
       const bench = await import("./bench");
@@ -789,206 +753,158 @@ function App() {
         />
       );
     }
-    const cwd = consoles.get(id)?.cwd;
-    return (
-      <aside class="panel terminal">
-        <div class="panel-head">
-          <span class="panel-title" title={cwd?.()}>
-            {panelName(id)}
-            {cwd?.() ? ` · ${folderName(cwd()!)}` : ""}
-          </span>
-          <span class="head-buttons">
-            <button
-              class="icon-btn"
-              title="New terminal in this folder (Ctrl+Shift+K)"
-              onClick={() => ((lastConsole = id), newConsole())}
-            >
-              <Icon name="plus" />
-            </button>
-            <button class="icon-btn" title="Close this terminal (ends its shell)" onClick={() => closeConsole(id)}>
-              <Icon name="close" />
-            </button>
-          </span>
-        </div>
-        <div class="pane-term" ref={(el) => attachConsole(id, el)} />
-      </aside>
-    );
-  }
-
-  /**
-   * Where dropping the dragged panel at (x, y) puts it, and the box to light up: near the window's edge = a
-   * full side of it, else beside or into the pane under the cursor. Runs only during a drag.
-   */
-  function dropAt(id: PanelId, x: number, y: number): { to: Target; box: Box } | undefined {
-    const win = panesEl.getBoundingClientRect();
-    const near = Math.min(x - win.left, win.right - x, y - win.top, win.bottom - y);
-    if (near >= 0 && near < 24) {
-      const at = near === x - win.left ? "left" : near === win.right - x ? "right" : near === y - win.top ? "top" : "bottom";
-      return { to: { pane: "root", at }, box: previewBox(win, at, 0.25) };
-    }
-    for (const el of panesEl.querySelectorAll<HTMLElement>(".pane-group")) {
-      const r = el.getBoundingClientRect();
-      if (x < r.left || x > r.right || y < r.top || y > r.bottom) continue;
-      const pane = el.dataset.pane!;
-      const at = zoneAt(r, x, y, pane !== MAIN);
-      if (!at || movePanel(panes(), id, { pane, at }) === panes()) return; // nowhere new
-      return { to: { pane, at }, box: at === "tab" ? r : previewBox(r, at) };
-    }
+    return consoles.render(id, panelName(id));
   }
 
   /** Alt+arrow: focus the pane beside the focused one (the tab's terminal, a panel, a terminal panel). */
   function focusPane(dir: "left" | "right" | "up" | "down") {
-    const els = [...panesEl.querySelectorAll<HTMLElement>(".pane-group")];
-    const from = els.findIndex((el) => el.contains(document.activeElement));
-    const to = els[nextPane(els.map((el) => el.getBoundingClientRect()), Math.max(0, from), dir) ?? -1];
+    const to = paneBeside(panesEl, dir);
     if (!to) return;
-    const group = paneMap().get(to.dataset.pane!);
+    const group = index(panes()).get(to.dataset.pane!);
     const id = group && isGroup(group) ? group.shown : undefined;
     if (id === "main") active()?.shown.focus();
-    else if (id && isTerminal(id)) consoles.get(id)?.view?.focus();
+    else if (id && isTerminal(id)) consoles.view(id)?.focus();
     else (to.querySelector<HTMLElement>("[data-autofocus]") ?? to.querySelector<HTMLElement>("textarea, input, [tabindex]:not([tabindex='-1']), button"))?.focus();
   }
-
-  const px = (b: Box) => ({ left: `${b.left}px`, top: `${b.top}px`, width: `${b.width}px`, height: `${b.height}px` });
 
   // The tab's terminal, documents and top bar: one element for the window's life (terminals are never remounted),
   // placed in the group that holds "main".
   const mainEl = (
-  <main class="main">
-    {/* Like Warp: the active tab's branch and changes on the right, opening the git panel. */}
-    <div class="topbar">
-      <Show
-        when={barTab()?.docs.length ? barTab() : undefined}
-        fallback={<span class="topbar-title">{barTab() ? displayTitle(barTab()!) : ""}</span>}
-      >
-        {(tab) => (
-          <div class="doc-tabs">
-            <button class="doc-tab" classList={{ on: tab().current < 0 }} onClick={() => showDoc(tab(), -1)}>
-              Terminal
-            </button>
-            <For each={tab().docs}>
-              {(doc, i) => (
-                <div
-                  class="doc-tab"
-                  classList={{ on: tab().current === i() }}
-                  title={doc.path}
-                  onClick={() => showDoc(tab(), i())}
-                  onAuxClick={(e) => e.button === 1 && closeDoc(tab(), i())}
-                >
-                  <span class="doc-name">{doc.name}</span>
-                  <Show when={doc.dirty}>
-                    <span class="doc-dirty" title="Unsaved (Ctrl+S)" />
-                  </Show>
-                  <button
-                    class="doc-close"
-                    title="Close"
-                    onClick={(e) => (e.stopPropagation(), closeDoc(tab(), i()))}
+    <main class="main">
+      {/* Like Warp: the active tab's branch and changes on the right, opening the git panel. */}
+      <div class="topbar">
+        <Show
+          when={barTab()?.docs.length ? barTab() : undefined}
+          fallback={<span class="topbar-title">{barTab() ? displayTitle(barTab()!) : ""}</span>}
+        >
+          {(tab) => (
+            <div class="doc-tabs">
+              <button class="doc-tab" classList={{ on: tab().current < 0 }} onClick={() => showDoc(tab(), -1)}>
+                Terminal
+              </button>
+              <For each={tab().docs}>
+                {(doc, i) => (
+                  <div
+                    class="doc-tab"
+                    classList={{ on: tab().current === i() }}
+                    title={doc.path}
+                    onClick={() => showDoc(tab(), i())}
+                    onAuxClick={(e) => e.button === 1 && closeDoc(tab(), i())}
                   >
-                    <Icon name="close" size={10} />
-                  </button>
-                </div>
-              )}
-            </For>
+                    <span class="doc-name">{doc.name}</span>
+                    <Show when={doc.dirty}>
+                      <span class="doc-dirty" title="Unsaved (Ctrl+S)" />
+                    </Show>
+                    <button
+                      class="doc-close"
+                      title="Close"
+                      onClick={(e) => (e.stopPropagation(), closeDoc(tab(), i()))}
+                    >
+                      <Icon name="close" size={10} />
+                    </button>
+                  </div>
+                )}
+              </For>
+            </div>
+          )}
+        </Show>
+        <Show when={barTab()?.docs[barTab()!.current]?.markdown && barTab()!.docs[barTab()!.current]}>
+          {(doc) => (
+            <button class="doc-mode" onClick={() => doc().toggleEdit()}>
+              {doc().editing ? "Read" : "Edit"}
+            </button>
+          )}
+        </Show>
+        <Show when={limitsLabel(limits())}>
+          {(label) => (
+            <span class="usage" title={limitsTitle(limits())}>
+              {label()}
+            </span>
+          )}
+        </Show>
+        <button class="icon-btn" onClick={() => consoles.open()} title="New terminal (Ctrl+Shift+K)">
+          <Icon name="plus" />
+        </button>
+        <button
+          class="icon-btn"
+          classList={{ on: shown("prompts") }}
+          onClick={() => togglePanel("prompts")}
+          title="Prompts (Ctrl+Shift+O)"
+        >
+          <Icon name="list" />
+        </button>
+        <button
+          class="git-button"
+          classList={{ on: shown("git") }}
+          onClick={() => togglePanel("git")}
+          title="Git changes (Ctrl+Shift+G)"
+        >
+          <Icon name="branch" size={14} />
+          <span>{barTab()?.branch ?? "Git"}</span>
+          <GitStatsView stats={barTab()?.stats} />
+        </button>
+      </div>
+      <Show when={update()}>
+        {(u) => (
+          <div class="banner">
+            <span>
+              Rift <b>{u().version}</b> is ready. It installs when you close Rift, or now:
+            </span>
+            <button onClick={() => u().restart()}>Restart now</button>
           </div>
         )}
       </Show>
-      <Show when={barTab()?.docs[barTab()!.current]?.markdown && barTab()!.docs[barTab()!.current]}>
-        {(doc) => (
-          <button class="doc-mode" onClick={() => doc().toggleEdit()}>
-            {doc().editing ? "Read" : "Edit"}
-          </button>
+      <For each={missing()}>
+        {(i) => (
+          <div class="banner">
+            <span>
+              Enable <b>{i.name}</b> integration: tab status icons, notifications and each tab's session restored
+              on restart. {i.setup} Your other settings are kept; a .bak copy is written.
+            </span>
+            <button onClick={() => enable(i.id)}>Enable</button>
+            <button onClick={() => setMissing(missing().filter((m) => m !== i))}>Not now</button>
+          </div>
         )}
-      </Show>
-      <Show when={limitsLabel(limits())}>
-        {(label) => (
-          <span class="usage" title={limitsTitle(limits())}>
-            {label()}
-          </span>
-        )}
-      </Show>
-      <button class="icon-btn" onClick={newConsole} title="New terminal (Ctrl+Shift+K)">
-        <Icon name="plus" />
-      </button>
-      <button
-        class="icon-btn"
-        classList={{ on: shown("prompts") }}
-        onClick={() => togglePanel("prompts")}
-        title="Prompts (Ctrl+Shift+O)"
-      >
-        <Icon name="list" />
-      </button>
-      <button
-        class="git-button"
-        classList={{ on: shown("git") }}
-        onClick={() => togglePanel("git")}
-        title="Git changes (Ctrl+Shift+G)"
-      >
-        <Icon name="branch" size={14} />
-        <span>{barTab()?.branch ?? "Git"}</span>
-        <GitStatsView stats={barTab()?.stats} />
-      </button>
-    </div>
-    <Show when={update()}>
-      {(u) => (
-        <div class="banner">
-          <span>
-            Rift <b>{u().version}</b> is ready. It installs when you close Rift, or now:
-          </span>
-          <button onClick={() => u().restart()}>Restart now</button>
-        </div>
-      )}
-    </Show>
-    <For each={missing()}>
-      {(i) => (
-        <div class="banner">
-          <span>
-            Enable <b>{i.name}</b> integration: tab status icons, notifications and each tab's session restored
-            on restart. {i.setup} Your other settings are kept; a .bak copy is written.
-          </span>
-          <button onClick={() => enable(i.id)}>Enable</button>
-          <button onClick={() => setMissing(missing().filter((m) => m !== i))}>Not now</button>
-        </div>
-      )}
-    </For>
-    <div class="terms" ref={host}>
-      <Show when={finding() && active()}>
-        <FindBar
-          find={(text, backwards) => active()!.view.find(text, backwards)}
-          onClose={() => (setFinding(false), active()?.view.endFind())}
-        />
-      </Show>
-    </div>
-  </main>
+      </For>
+      <div class="terms" ref={host}>
+        <Show when={finding() && active()}>
+          <FindBar
+            find={(text, backwards) => active()!.view.find(text, backwards)}
+            onClose={() => (setFinding(false), active()?.view.endFind())}
+          />
+        </Show>
+      </div>
+    </main>
   ) as HTMLElement;
 
   return (
     <div class="app">
-      <div class="pane" style={{ width: `${widths().tabs}px` }}>
-      <Sidebar
-        tabs={tabs()}
-        groups={groups()}
-        active={active()}
-        onActivate={activate}
-        onClose={closeTab}
-        onNewTab={(shell) => newTab(undefined, shell ? { shell } : {})}
-        shells={shells()}
-        onMoveTab={move}
-        onMoveGroup={(id, before) => setGroups(moveGroup(groups(), id, before))}
-        onNewGroup={newGroup}
-        onUpdateGroup={updateGroup}
-        onDeleteGroup={deleteGroup}
-        onCloseGroup={closeGroup}
-        panels={{ explorer: shown("explorer"), git: shown("git") }}
-        onTogglePanel={togglePanel}
-        onOpenSettings={() => setSettingsOpen(true)}
-        filter={filter()}
-        onFilter={setFilter}
-        agents={agents()}
-        onNewWorktree={(tab, agent) => setWorktreeFrom({ tab, agent })}
-        rename={renameRequest()}
-        onFocusTerminal={() => active()?.shown.focus()}
-      />
-        <Resizer edge="right" size={widths().tabs} min={160} max={480} onResize={resizeWidth("tabs")} onDragging={onDragging} />
+      <div class="pane" style={{ width: `${tabsWidth()}px` }}>
+        <Sidebar
+          tabs={tabs()}
+          groups={groups()}
+          active={active()}
+          onActivate={activate}
+          onClose={closeTab}
+          onNewTab={(shell) => newTab(undefined, shell ? { shell } : {})}
+          shells={shells()}
+          onMoveTab={move}
+          onMoveGroup={(id, before) => setGroups(moveGroup(groups(), id, before))}
+          onNewGroup={newGroup}
+          onUpdateGroup={updateGroup}
+          onDeleteGroup={deleteGroup}
+          onCloseGroup={closeGroup}
+          filesShown={shown("explorer")}
+          onToggleFiles={() => togglePanel("explorer")}
+          onOpenSettings={() => setSettingsOpen(true)}
+          filter={filter()}
+          onFilter={setFilter}
+          agents={agents()}
+          onNewWorktree={(tab, agent) => setWorktreeFrom({ tab, agent })}
+          rename={renameRequest()}
+          onFocusTerminal={() => active()?.shown.focus()}
+        />
+        <Resizer edge="right" size={tabsWidth()} min={160} max={480} onResize={setTabsWidth} onDragging={onDragging} />
       </div>
       <Show when={worktreeFrom()}>
         {(from) => (
@@ -1009,45 +925,7 @@ function App() {
           onClose={() => (setSettingsOpen(false), active()?.shown.show())}
         />
       </Show>
-      <div class="panes" ref={panesEl}>
-        <Show when={panes().id} keyed>
-          {(id) => (
-            <PaneView
-              id={id}
-              style={{ flex: "1 1 0" }}
-              panes={paneMap}
-              name={panelName}
-              render={renderPanel}
-              onShow={(p) => setPanes(show(panes(), p))}
-              onSizes={(split, sizes) => setPanes(setSizes(panes(), split, sizes))}
-              onDragging={onDragging}
-              onDragPanel={(p) => batch(() => (setDragPanel(p), setDrop(undefined)))}
-            />
-          )}
-        </Show>
-      </div>
-      {/* While a panel is dragged, where it would go lights up under the cursor. */}
-      <Show when={dragPanel()}>
-        <div
-          class="pane-drops"
-          onDragOver={(e) => {
-            e.preventDefault();
-            setDrop(dropAt(dragPanel()!, e.clientX, e.clientY));
-          }}
-          onDragLeave={(e) => e.relatedTarget === null && setDrop(undefined)}
-          onDrop={(e) => {
-            e.preventDefault();
-            const to = drop()?.to;
-            batch(() => {
-              if (to) setPanes(movePanel(panes(), dragPanel()!, to));
-              setDragPanel(undefined);
-              setDrop(undefined);
-            });
-          }}
-        >
-          <Show when={drop()}>{(d) => <div class="drop-preview" style={px(d().box)} />}</Show>
-        </div>
-      </Show>
+      <Panes root={panes()} onChange={setPanes} name={panelName} render={renderPanel} onDragging={onDragging} ref={(el) => (panesEl = el)} />
     </div>
   );
 }
