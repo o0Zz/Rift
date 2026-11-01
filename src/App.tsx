@@ -47,8 +47,7 @@ import "./App.css";
 
 type TabUi = { name?: string; color?: string; group?: string; shell?: string; snap?: string; docs?: string[]; doc?: number };
 type SavedTab = { cwd?: string; title: string; agent?: AgentSession; ui?: TabUi };
-// `panels`: what v1.0.0 saved instead of `panes` (which panels were open), read until a tree is saved.
-type Saved = { tabs: SavedTab[]; active: number; layout?: { groups?: Group[]; panes?: unknown; panels?: unknown; widths?: Record<string, number> } };
+type Saved = { tabs: SavedTab[]; active: number; layout?: { groups?: Group[]; panes?: unknown; widths?: { tabs?: number } } };
 type Integration = { id: string; name: string; detected: boolean; installed: boolean; setup: string };
 type AgentStatus = { pty: number; harness: string; status: Status | null; message: string | null };
 type AgentUsage = { pty: number; context: number | null } & { [K in keyof Limits]: Limit | null };
@@ -333,7 +332,7 @@ function App() {
   async function restore() {
     const saved = await invoke<Saved>("session_restore");
     setGroups(saved.layout?.groups ?? []);
-    setPanes(mergePanes(saved.layout?.panes, saved.layout));
+    setPanes(mergePanes(saved.layout?.panes));
     if (saved.layout?.widths?.tabs) setTabsWidth(saved.layout.widths.tabs);
     const starts = batch(() => (saved.tabs.length ? saved.tabs : [undefined]).map(newTab));
     const list = tabs();

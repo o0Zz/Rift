@@ -180,10 +180,9 @@ export function nextPane(boxes: Box[], from: number, dir: "left" | "right" | "up
 
 /**
  * Any saved shape → a valid tree: files, git, prompts and main exactly once, unknown panels and terminals (their
- * shells are not restored) dropped, empty splits gone. Without a tree, `v1` (what v1.0.0 saved: which panels were
- * open and their widths) opens those panels in the default tree.
+ * shells are not restored) dropped, empty splits gone. No valid tree: the default one.
  */
-export function mergePanes(saved: unknown, v1?: unknown): Pane {
+export function mergePanes(saved: unknown): Pane {
   const placed = new Set<PanelId>();
   let n = 0;
   const read = (v: unknown): Pane | null => {
@@ -210,7 +209,7 @@ export function mergePanes(saved: unknown, v1?: unknown): Pane {
     return { id, dir: o.dir === "col" ? "col" : "row", children: kept.map(([c]) => c!), sizes: kept.map(([, s]) => s as number) };
   };
   let root = read(saved);
-  if (!root || !placed.has("main")) return fromV1(v1);
+  if (!root || !placed.has("main")) return DEFAULT_PANES;
   // Ids unique (a hand-edited file could repeat one).
   const seen = new Set<string>();
   root = mapTree(root, (p) => {
@@ -222,17 +221,5 @@ export function mergePanes(saved: unknown, v1?: unknown): Pane {
   const missing = FIXED.filter((p) => !placed.has(p));
   for (const p of missing) root = insert(root, p, { pane: "root", at: p === "explorer" ? "left" : "right" });
   for (const p of missing) root = setGroup(root, p, () => undefined);
-  return root;
-}
-
-/** v1.0.0's layout: `panels` {explorer, git, prompts} open or not, `widths` in pixels. */
-function fromV1(v1: unknown): Pane {
-  const o = (v1 && typeof v1 === "object" ? v1 : {}) as { panels?: Record<string, unknown>; widths?: Record<string, unknown> };
-  const width = (id: string, fallback: number) => {
-    const w = o.widths?.[id];
-    return typeof w === "number" && w > 0 ? w : fallback;
-  };
-  let root: Pane = { ...DEFAULT_PANES, sizes: [width("explorer", 240), 900, width("git", 440)] };
-  for (const id of FIXED) if (o.panels?.[id] === true) root = show(root, id);
   return root;
 }

@@ -92,11 +92,4 @@ describe("panes", () => {
     expect(shape(d)).toEqual({ row: ["explorer", { col: ["*main", "*git"] }, "prompts"] }); // missing ones added, closed
     expect((index(d).get(groupOf(d, "git")!.id) as { shown?: string }).shown).toBe("git");
   });
-
-  it("opens what v1.0.0 had open (no tree saved yet), at its widths", () => {
-    const d = mergePanes(undefined, { panels: { explorer: true, git: true, prompts: false }, widths: { tabs: 200, explorer: 300, git: 500 } });
-    expect(shape(d)).toEqual({ row: ["*explorer", "*main", "*git prompts"] });
-    expect((d as { sizes: number[] }).sizes).toEqual([300, 900, 500]);
-    expect(mergePanes(undefined, { panels: "x", widths: { git: -1 } })).toEqual(DEFAULT_PANES);
-  });
 });
