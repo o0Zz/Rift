@@ -62,6 +62,9 @@ describe("panes", () => {
     expect(zoneAt(box, 200, 200, false)).toBeUndefined();
     expect(previewBox(box, "bottom")).toEqual({ left: 0, top: 200, width: 400, height: 200 });
     expect(previewBox(box, "right", 0.25)).toEqual({ left: 300, top: 0, width: 100, height: 400 });
+    // What the app passes: a DOMRect, whose fields are getters (a spread copies none of them).
+    class Rect { get left() { return 0; } get top() { return 0; } get width() { return 400; } get height() { return 400; } }
+    expect(previewBox(new Rect(), "top")).toEqual({ left: 0, top: 0, width: 400, height: 200 });
   });
 
   it("finds the pane to focus with Alt+arrows", () => {

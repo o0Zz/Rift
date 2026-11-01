@@ -478,7 +478,6 @@ function App() {
   const refitConsoles = () => consoles.forEach((c) => c.view?.refit());
   const panelName = (id: PanelId) =>
     isTerminal(id) ? `Terminal ${id.slice(5)}` : ({ explorer: "Files", git: "Git", prompts: "Prompts", main: "Terminal" } as const)[id];
-  const consoleShown = () => [...paneMap().values()].some((p) => isGroup(p) && !!p.shown && isTerminal(p.shown));
 
   function newConsole() {
     let n = 1;
@@ -907,13 +906,8 @@ function App() {
           </span>
         )}
       </Show>
-      <button
-        class="icon-btn"
-        classList={{ on: consoleShown() }}
-        onClick={toggleConsoles}
-        title="Terminal (Ctrl+Shift+J)"
-      >
-        <Icon name="terminal" />
+      <button class="icon-btn" onClick={newConsole} title="New terminal (Ctrl+Shift+K)">
+        <Icon name="plus" />
       </button>
       <button
         class="icon-btn"

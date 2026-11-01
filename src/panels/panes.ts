@@ -146,7 +146,7 @@ export function zoneAt(box: Box, x: number, y: number, tabs: boolean): Edge | "t
 
 /** The box a drop beside `box` on `at` would fill (half of it; a quarter of the window for the whole window). */
 export function previewBox(box: Box, at: Edge | "tab", share = 0.5): Box {
-  const b = { ...box };
+  const b = { left: box.left, top: box.top, width: box.width, height: box.height }; // not a spread: a DOMRect has getters
   if (at === "left" || at === "right") b.width *= share;
   if (at === "top" || at === "bottom") b.height *= share;
   if (at === "right") b.left += box.width - b.width;
