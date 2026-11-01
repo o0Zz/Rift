@@ -15,16 +15,22 @@ pub fn read_json(path: &Path) -> Result<Value> {
     }
 }
 
-/// Writes `value`, the previous file saved next to it as `<name>.bak`.
+/// Writes `value`, the previous file saved next to it as `<name>.bak`. Temp file + rename: a crash never
+/// leaves the agent a half-written config.
 pub fn write_json(path: &Path, value: &Value) -> Result<()> {
+    let sibling = |ext: &str| {
+        let mut p = path.as_os_str().to_owned();
+        p.push(ext);
+        PathBuf::from(p)
+    };
     if path.exists() {
-        let mut bak = path.as_os_str().to_owned();
-        bak.push(".bak");
-        std::fs::copy(path, PathBuf::from(bak))?;
+        std::fs::copy(path, sibling(".bak"))?;
     } else if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    std::fs::write(path, serde_json::to_string_pretty(value)? + "\n")?;
+    let tmp = sibling(".tmp");
+    std::fs::write(&tmp, serde_json::to_string_pretty(value)? + "\n")?;
+    std::fs::rename(&tmp, path)?;
     Ok(())
 }
 
@@ -132,9 +138,23 @@ fn program(name: &str) -> PathBuf {
     PathBuf::from(name)
 }
 
+/// How long a one-shot agent run may take (e.g. stuck on a login or an approval).
+const RUN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+
 /// Runs `name args` in `cwd` without a window, `input` on stdin; its stdout, trimmed.
 pub fn run(name: &str, args: &[&str], cwd: &Path, input: &str) -> Result<String> {
-    use std::io::Write;
+    run_for(name, args, cwd, input, RUN_TIMEOUT)
+}
+
+/// `run`, killed (with its children: npm shims start node) after `timeout`.
+fn run_for(
+    name: &str,
+    args: &[&str],
+    cwd: &Path,
+    input: &str,
+    timeout: std::time::Duration,
+) -> Result<String> {
+    use std::io::{Read, Write};
     use std::process::{Command, Stdio};
     let mut cmd = Command::new(program(name));
     cmd.current_dir(cwd)
@@ -154,18 +174,58 @@ pub fn run(name: &str, args: &[&str], cwd: &Path, input: &str) -> Result<String>
     let input = input.to_string();
     // Write from another thread: a large diff must not deadlock against the agent's own output.
     let writer = std::thread::spawn(move || stdin.write_all(input.as_bytes()));
-    let out = child.wait_with_output()?;
+    // Both streams read at once, so neither fills up and blocks the agent.
+    fn read_all(mut r: impl Read + Send + 'static) -> std::thread::JoinHandle<Vec<u8>> {
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            let _ = r.read_to_end(&mut buf);
+            buf
+        })
+    }
+    let stdout = read_all(child.stdout.take().unwrap());
+    let stderr = read_all(child.stderr.take().unwrap());
+    let deadline = std::time::Instant::now() + timeout;
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if std::time::Instant::now() >= deadline {
+            kill_tree(&mut child);
+            bail!(
+                "{name} did not answer in {} s (waiting for a login or an approval?)",
+                timeout.as_secs()
+            );
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    };
     let _ = writer.join();
-    if !out.status.success() {
-        let err = String::from_utf8_lossy(&out.stderr);
+    let stdout = stdout.join().unwrap_or_default();
+    let stderr = stderr.join().unwrap_or_default();
+    if !status.success() {
+        let err = String::from_utf8_lossy(&stderr);
         let err = if err.trim().is_empty() {
-            String::from_utf8_lossy(&out.stdout)
+            String::from_utf8_lossy(&stdout)
         } else {
             err
         };
         bail!("{name} failed: {}", err.trim());
     }
-    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    Ok(String::from_utf8_lossy(&stdout).trim().to_string())
+}
+
+/// Kills `child` and, on Windows, what it started (`taskkill /T`): killing an npm `.cmd` shim alone leaves
+/// its node process running.
+fn kill_tree(child: &mut std::process::Child) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let _ = std::process::Command::new("taskkill")
+            .args(["/T", "/F", "/PID", &child.id().to_string()])
+            .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+            .output();
+    }
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 #[cfg(test)]
@@ -189,6 +249,20 @@ mod tests {
             "gemini"
         ));
         assert!(!is_ours(&json!({ "command": "echo hi" }), "gemini"));
+        let exec = |cmd: &str| {
+            is_ours(
+                &json!({ "command": cmd, "args": ["hook", "claude"] }),
+                "claude",
+            )
+        };
+        assert!(exec(r"C:\Users\me\AppData\Local\Rift\rift.exe"));
+        assert!(exec("/usr/bin/rift"));
+        assert!(exec("/Applications/Rift.app/Contents/MacOS/rift"));
+        assert!(!exec("/usr/bin/drift"));
+        assert!(!is_ours(
+            &json!({ "command": "/usr/bin/rift", "args": ["other"] }),
+            "claude"
+        ));
     }
 
     #[test]
@@ -277,6 +351,44 @@ mod tests {
         assert_eq!(read_json(&path).unwrap(), json!({ "a": 2 }));
         let bak = std::fs::read_to_string(dir.path().join("sub").join("hooks.json.bak")).unwrap();
         assert!(bak.contains("\"a\": 1"), "{bak}");
+        assert!(!dir.path().join("sub").join("hooks.json.tmp").exists());
+    }
+
+    #[test]
+    fn a_run_that_never_answers_is_stopped() {
+        let dir = tempfile::tempdir().unwrap();
+        let start = std::time::Instant::now();
+        let timeout = std::time::Duration::from_secs(1);
+        let err = if cfg!(windows) {
+            run_for("ping", &["-n", "30", "127.0.0.1"], dir.path(), "", timeout)
+        } else {
+            run_for("sleep", &["30"], dir.path(), "", timeout)
+        }
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("did not answer in 1 s"), "{err}");
+        assert!(start.elapsed() < std::time::Duration::from_secs(10));
+    }
+
+    /// npm installs Codex and Gemini as `.cmd` shims running node: the commit prompt (backticks, `!`, quotes,
+    /// parentheses) must reach the agent unchanged through cmd.exe.
+    #[cfg(windows)]
+    #[test]
+    fn prompt_reaches_an_npm_cmd_shim_unchanged() {
+        let dir = tempfile::tempdir().unwrap();
+        let shim = dir.path().join("agent.cmd");
+        std::fs::write(
+            &shim,
+            "@node -e \"process.stdout.write(JSON.stringify(process.argv.slice(1)))\" -- %*\r\n",
+        )
+        .unwrap();
+        let prompt = format!(
+            "{} 100% \"quoted\" ^caret %PATH% & | < >",
+            crate::COMMIT_PROMPT
+        );
+        let out = run(shim.to_str().unwrap(), &["-p", &prompt], dir.path(), "").unwrap();
+        let args: Vec<String> = serde_json::from_str(&out).unwrap();
+        assert_eq!(args, ["-p", prompt.as_str()]);
     }
 
     #[test]

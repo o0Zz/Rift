@@ -98,6 +98,13 @@ impl AgentHarness for Copilot {
     fn install_hooks(&self, exe: &Path) -> Result<()> {
         config::write_json(&self.hooks, &hook_file(exe))
     }
+
+    fn setup(&self) -> String {
+        format!(
+            "Writes Rift's hooks to their own file, {}.",
+            self.hooks.display()
+        )
+    }
 }
 
 #[cfg(test)]

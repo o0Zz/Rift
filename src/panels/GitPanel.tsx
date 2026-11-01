@@ -19,6 +19,8 @@ export function GitPanel(props: {
   root?: string;
   branch?: string;
   refresh?: number;
+  /** The agent ✨ Generate sends the diff to (the first one used on this machine). */
+  agent?: string;
   onClose(): void;
   /** Branch, commits or upstream changed: the tabs of this repo re-read their branch and stats. */
   onHeadChanged?(): void;
@@ -402,7 +404,7 @@ export function GitPanel(props: {
               <button
                 disabled={!!busy() || picked().length === 0}
                 onClick={generate}
-                title="Write the message from the diff of the selected files (Claude)"
+                title={`Write the message from the diff of the selected files (sent to ${props.agent ?? "Claude Code"})`}
               >
                 {busy() === "generate" ? "Generating…" : "✨ Generate"}
               </button>

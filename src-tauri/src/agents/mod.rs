@@ -107,10 +107,8 @@ pub trait AgentHarness: Send + Sync {
     /// Whether the agent is configured to call `exe hook <id>`.
     fn hooks_installed(&self, exe: &Path) -> bool;
     fn install_hooks(&self, exe: &Path) -> Result<()>;
-    /// What the user still has to do after `install_hooks`, if anything.
-    fn install_note(&self) -> Option<&'static str> {
-        None
-    }
+    /// Shown before the Enable click: what `install_hooks` writes and where, and anything left to do.
+    fn setup(&self) -> String;
     /// Runs the agent non-interactively in `cwd`: `prompt` as instruction, `input` on stdin; returns its answer.
     fn one_shot(&self, cwd: &Path, prompt: &str, input: &str) -> Result<String>;
     /// Shell command starting a new interactive session (e.g. `claude`).

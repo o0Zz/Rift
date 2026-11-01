@@ -94,9 +94,10 @@ impl AgentHarness for Codex {
         config::write_json(&self.hooks, &hooks)
     }
 
-    fn install_note(&self) -> Option<&'static str> {
-        Some(
-            "Codex runs new hooks only once you trust them: in Codex, type /hooks and approve Rift's hooks.",
+    fn setup(&self) -> String {
+        format!(
+            "Adds Rift's hooks to {}. Codex runs new hooks only once trusted: then type /hooks in Codex and approve them.",
+            self.hooks.display()
         )
     }
 }
@@ -178,7 +179,8 @@ mod tests {
                 "{event}"
             );
         }
-        assert!(c.install_note().unwrap().contains("/hooks"));
+        assert!(c.setup().contains("/hooks"));
+        assert!(c.setup().contains(&c.hooks.display().to_string()));
     }
 
     #[test]

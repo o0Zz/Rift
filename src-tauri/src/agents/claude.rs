@@ -28,11 +28,6 @@ fn handler(exe: &Path) -> Value {
     json!({ "type": "command", "command": exe.to_string_lossy(), "args": ["hook", "claude"] })
 }
 
-#[cfg(test)]
-fn is_ours(handler: &Value) -> bool {
-    config::is_ours(handler, "claude")
-}
-
 /// Rift's status line: a shell command (Claude runs it through Git Bash or PowerShell on Windows), so
 /// forward slashes, and quotes only when the path has a space (PowerShell would not run a quoted path).
 fn status_line(exe: &Path) -> Value {
@@ -72,7 +67,7 @@ pub fn parse_usage(p: &Value) -> Option<Usage> {
 }
 
 /// `claude -p` for short text tasks: small fast model, no tools, not saved in the user's session list.
-fn one_shot_args(prompt: &str) -> Vec<String> {
+fn one_shot_args(prompt: &str) -> [&str; 7] {
     [
         "-p",
         prompt,
@@ -82,8 +77,6 @@ fn one_shot_args(prompt: &str) -> Vec<String> {
         "",
         "--no-session-persistence",
     ]
-    .map(String::from)
-    .to_vec()
 }
 
 impl AgentHarness for Claude {
@@ -113,9 +106,7 @@ impl AgentHarness for Claude {
     }
 
     fn one_shot(&self, cwd: &Path, prompt: &str, input: &str) -> Result<String> {
-        let args = one_shot_args(prompt);
-        let args: Vec<&str> = args.iter().map(String::as_str).collect();
-        config::run("claude", &args, cwd, input)
+        config::run("claude", &one_shot_args(prompt), cwd, input)
     }
 
     fn start_command(&self) -> String {
@@ -153,6 +144,13 @@ impl AgentHarness for Claude {
             root.insert("statusLine".into(), status_line(exe));
         }
         config::write_json(&self.settings, &settings)
+    }
+
+    fn setup(&self) -> String {
+        format!(
+            "Adds Rift's hooks and a status line showing context and plan usage (unless you have your own) to {}.",
+            self.settings.display()
+        )
     }
 }
 
@@ -259,10 +257,7 @@ mod tests {
         assert_eq!(&args[..2], ["-p", "Write a commit message"]);
         let flags = args.join(" ");
         assert!(flags.contains("--model haiku"), "{flags}");
-        assert!(
-            flags.contains("--tools ") && args.contains(&String::new()),
-            "{flags}"
-        );
+        assert!(flags.contains("--tools ") && args.contains(&""), "{flags}");
         assert!(flags.contains("--no-session-persistence"), "{flags}");
     }
 
@@ -321,18 +316,6 @@ mod tests {
             std::fs::read_to_string(dir.path().join("settings.json.bak")).unwrap(),
             original
         );
-    }
-
-    #[test]
-    fn recognizes_its_entry_on_every_os() {
-        let ours = |cmd: &str| is_ours(&json!({ "command": cmd, "args": ["hook", "claude"] }));
-        assert!(ours(r"C:\Users\me\AppData\Local\Rift\rift.exe"));
-        assert!(ours("/usr/bin/rift"));
-        assert!(ours("/Applications/Rift.app/Contents/MacOS/rift"));
-        assert!(!ours("/usr/bin/drift"));
-        assert!(!is_ours(
-            &json!({ "command": "/usr/bin/rift", "args": ["other"] })
-        ));
     }
 
     #[test]

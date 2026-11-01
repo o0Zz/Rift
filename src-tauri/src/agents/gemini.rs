@@ -94,6 +94,10 @@ impl AgentHarness for Gemini {
         config::add_hooks(&mut settings, &EVENTS, &handler(exe), "gemini")?;
         config::write_json(&self.settings, &settings)
     }
+
+    fn setup(&self) -> String {
+        format!("Adds Rift's hooks to {}.", self.settings.display())
+    }
 }
 
 #[cfg(test)]

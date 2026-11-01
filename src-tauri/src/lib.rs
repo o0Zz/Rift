@@ -227,6 +227,8 @@ struct Integration {
     name: &'static str,
     detected: bool,
     installed: bool,
+    /// What Enable writes, shown before the click.
+    setup: String,
 }
 
 #[tauri::command]
@@ -240,18 +242,20 @@ fn agent_integrations(harnesses: State<Harnesses>) -> Result<Vec<Integration>, S
             name: h.name(),
             detected: h.detected(),
             installed: h.hooks_installed(&exe),
+            setup: h.setup(),
         })
         .collect())
 }
 
 /// Writes the agent's hook config (e.g. ~/.claude/settings.json). Only called from the user's explicit click.
-/// Returns what the user still has to do in the agent, if anything.
 #[tauri::command]
-fn agent_install(harnesses: State<Harnesses>, id: String) -> Result<Option<&'static str>, String> {
+fn agent_install(harnesses: State<Harnesses>, id: String) -> Result<(), String> {
     let exe = std::env::current_exe().map_err(err)?;
-    let agent = harnesses.get(&id).ok_or("unknown agent")?;
-    agent.install_hooks(&exe).map_err(err)?;
-    Ok(agent.install_note())
+    harnesses
+        .get(&id)
+        .ok_or("unknown agent")?
+        .install_hooks(&exe)
+        .map_err(err)
 }
 
 // Explorer and git panel. All async: they run off the main thread and never delay a tab switch.

@@ -47,7 +47,7 @@ type SavedTab = { cwd?: string; title: string; agent?: AgentSession; ui?: TabUi 
 type Panels = { explorer: boolean; git: boolean; prompts: boolean };
 type Widths = { tabs: number; explorer: number; git: number; prompts: number };
 type Saved = { tabs: SavedTab[]; active: number; layout?: { groups?: Group[]; panels?: Panels; widths?: Widths } };
-type Integration = { id: string; name: string; detected: boolean; installed: boolean };
+type Integration = { id: string; name: string; detected: boolean; installed: boolean; setup: string };
 type AgentStatus = { pty: number; harness: string; status: Status | null; message: string | null };
 type AgentUsage = { pty: number; context: number | null } & { [K in keyof Limits]: Limit | null };
 
@@ -505,9 +505,8 @@ function App() {
 
   async function enable(id: string) {
     try {
-      const note = await invoke<string | null>("agent_install", { id });
+      await invoke("agent_install", { id });
       await checkIntegrations();
-      if (note) alert(note);
     } catch (e) {
       alert(`Could not enable integration: ${e}`);
     }
@@ -812,7 +811,7 @@ function App() {
             <div class="banner">
               <span>
                 Enable <b>{i.name}</b> integration: tab status icons, notifications and each tab's session restored
-                on restart. Adds Rift's hooks to its settings (your own settings are kept; a .bak copy is written).
+                on restart. {i.setup} Your other settings are kept; a .bak copy is written.
               </span>
               <button onClick={() => enable(i.id)}>Enable</button>
               <button onClick={() => setMissing(missing().filter((m) => m !== i))}>Not now</button>
@@ -856,6 +855,7 @@ function App() {
           <GitPanel
             root={panelTab()?.root}
             branch={panelTab()?.branch}
+            agent={agents()[0]?.name}
             refresh={gitRefresh()}
             onClose={() => togglePanel("git")}
             onHeadChanged={() => {
