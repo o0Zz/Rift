@@ -16,10 +16,6 @@ export type Docks = Record<Side, Dock>;
 /** Where a panel goes: a new group at one end of the dock (or that end's group if it has two), or a tab of a group. */
 export type Target = { side: Side; at: "start" | "end" | "tab" } | { side: Side; with: PanelId };
 
-const ENDS: Record<Side, [string, string]> = { left: ["top", "bottom"], right: ["top", "bottom"], bottom: ["left", "right"] };
-/** "top", "bottom", "left" or "right": what an end of a dock is called. */
-export const endName = (side: Side, at: "start" | "end") => ENDS[side][at === "start" ? 0 : 1];
-
 export const DEFAULT_DOCKS: Docks = {
   left: { groups: [{ panels: ["explorer"] }], size: 240 },
   right: { groups: [{ panels: ["git", "prompts"] }], size: 440 },
@@ -80,6 +76,34 @@ export function insert(docks: Docks, id: PanelId, to: Target): Docks {
 }
 
 export const move = (docks: Docks, id: PanelId, to: Target) => insert(remove(docks, id), id, to);
+
+export type Zone = "before" | "after" | "tab";
+type Box = { left: number; top: number; width: number; height: number };
+
+/** Where a drop at (x, y) on a group lands: its first or last third along the dock's axis = before/after it, else a tab. */
+export function zoneAt(box: Box, x: number, y: number, across: boolean): Zone {
+  const f = across ? (x - box.left) / box.width : (y - box.top) / box.height;
+  return f < 1 / 3 ? "before" : f > 2 / 3 ? "after" : "tab";
+}
+
+/** The edge of the center terminal a drop at (x, y) is near (a quarter of its width, a third of its height), if any. */
+export function edgeAt(box: Box, x: number, y: number): Side | undefined {
+  if (x < box.left + box.width / 4) return "left";
+  if (x > box.left + box.width * 0.75) return "right";
+  if (y > box.top + (box.height * 2) / 3) return "bottom";
+}
+
+/**
+ * Where dropping `id` on the group holding `group` (its panels) in `zone` puts it: next to that group (a dock
+ * that would hold more than two groups joins it as a tab instead), or undefined when nothing would change.
+ */
+export function dropTarget(docks: Docks, id: PanelId, group: PanelId[], zone: Zone): Target | undefined {
+  const other = group.find((p) => p !== id);
+  if (!other) return; // a panel dropped on its own lone group
+  const side = sideOf(docks, other);
+  if (zone === "tab" || remove(docks, id)[side].groups.length >= 2) return { side, with: other };
+  return { side, at: zone === "before" ? "start" : "end" };
+}
 
 /**
  * Any saved shape → valid docks: files, git and prompts exactly once, at most two groups per dock. Terminals

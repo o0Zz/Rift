@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_DOCKS, insert, isShown, mergeDocks, move, remove, show, sideOf, toggle, type Docks } from "./docks";
+import { DEFAULT_DOCKS, dropTarget, edgeAt, insert, isShown, mergeDocks, move, remove, show, sideOf, toggle, zoneAt, type Docks } from "./docks";
 
 const open: Docks = {
   ...DEFAULT_DOCKS,
@@ -76,4 +76,37 @@ describe("docks", () => {
     expect(e.left).toMatchObject({ groups: [{ shown: "explorer" }], size: 200 });
     expect(e.right).toMatchObject({ groups: [{ shown: "prompts" }], size: 500 });
   });
+
+describe("dropping a dragged panel", () => {
+  const box = { left: 100, top: 0, width: 300, height: 600 };
+
+  it("splits before or after the group under the cursor at its ends, joins it as a tab in its middle", () => {
+    expect(zoneAt(box, 200, 50, false)).toBe("before");
+    expect(zoneAt(box, 200, 300, false)).toBe("tab");
+    expect(zoneAt(box, 200, 550, false)).toBe("after");
+    expect(zoneAt(box, 120, 300, true)).toBe("before"); // bottom dock: groups side by side
+    expect(zoneAt(box, 390, 300, true)).toBe("after");
+  });
+
+  it("near an edge of the center terminal, goes to that side's dock", () => {
+    expect(edgeAt(box, 110, 300)).toBe("left");
+    expect(edgeAt(box, 390, 300)).toBe("right");
+    expect(edgeAt(box, 250, 550)).toBe("bottom");
+    expect(edgeAt(box, 250, 100)).toBeUndefined();
+  });
+
+  it("targets the group: split while the dock has room, else a tab; nothing on its own lone group", () => {
+    expect(dropTarget(DEFAULT_DOCKS, "prompts", ["explorer"], "after")).toEqual({ side: "left", at: "end" });
+    expect(dropTarget(DEFAULT_DOCKS, "prompts", ["explorer"], "tab")).toEqual({ side: "left", with: "explorer" });
+    // Prompts out of Git's group, below it.
+    expect(move(open, "prompts", dropTarget(open, "prompts", ["git", "prompts"], "after")!).right.groups).toEqual([
+      { panels: ["git"], shown: "git" },
+      { panels: ["prompts"], shown: "prompts" },
+    ]);
+    const full = move(DEFAULT_DOCKS, "prompts", { side: "right", at: "end" });
+    expect(dropTarget(full, "explorer", ["git"], "before")).toEqual({ side: "right", with: "git" });
+    expect(dropTarget(full, "prompts", ["git"], "before")).toEqual({ side: "right", at: "start" }); // moves within its dock
+    expect(dropTarget(full, "prompts", ["prompts"], "tab")).toBeUndefined();
+  });
+});
 });

@@ -76,8 +76,8 @@ freezing the window) and fails when a change goes over budget.
 - **Terminals panel**: extra shells shared by every tab (a dev server, logs), as many as you want. A new one opens in
   the folder of the last one you used.
 - Panels sit in three docks (left, right, bottom), the same for every tab. Each dock splits in two (top/bottom on the
-  sides, left/right at the bottom) and panels in the same place become tabs. Move one by dragging its header or tab onto a
-  side of the window. Each opens and closes with one shortcut and resizes by its edge.
+  sides, left/right at the bottom) and panels in the same place become tabs. Move one by dragging its header or tab: the spot
+  under the cursor lights up (half of a panel = beside it, its middle = a tab, an edge of the terminal = that side). Each opens and closes with one shortcut and resizes by its edge.
 - **Settings**: dark, light or system theme, terminal font, tab size, and every shortcut can be rebound.
 - **Open in Rift** from the Windows File Explorer right-click menu.
 - **Auto-update** from GitHub Releases: downloads in the background, installs when you close Rift.

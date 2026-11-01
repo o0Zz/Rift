@@ -693,89 +693,18 @@ body,
   background: var(--bg);
 }
 
-/* Shown while a dock tab is dragged: the sides of the window it can be dropped on. */
+/* While a panel is dragged: catches the drag over terminals and panels; the preview shows where it would go. */
 .dock-drops {
   position: fixed;
   z-index: 50;
   inset: 0;
 }
 
-.dock-drop {
-  position: absolute;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 2px dashed transparent;
-  color: transparent;
-}
-
-.dock-drop.left-start {
-  top: 0;
-  left: 0;
-  width: 25%;
-  height: 33.3%;
-}
-
-.dock-drop.left-tab {
-  top: 33.3%;
-  left: 0;
-  width: 25%;
-  height: 33.3%;
-}
-
-.dock-drop.left-end {
-  bottom: 0;
-  left: 0;
-  width: 25%;
-  height: 33.3%;
-}
-
-.dock-drop.right-start {
-  top: 0;
-  right: 0;
-  width: 25%;
-  height: 33.3%;
-}
-
-.dock-drop.right-tab {
-  top: 33.3%;
-  right: 0;
-  width: 25%;
-  height: 33.3%;
-}
-
-.dock-drop.right-end {
-  bottom: 0;
-  right: 0;
-  width: 25%;
-  height: 33.3%;
-}
-
-.dock-drop.bottom-start {
-  bottom: 0;
-  left: 25%;
-  width: 16.7%;
-  height: 35%;
-}
-
-.dock-drop.bottom-tab {
-  bottom: 0;
-  left: 41.7%;
-  width: 16.7%;
-  height: 35%;
-}
-
-.dock-drop.bottom-end {
-  bottom: 0;
-  left: 58.3%;
-  width: 16.7%;
-  height: 35%;
-}
-
-.dock-drop.over {
-  border-color: var(--accent);
+.drop-preview {
+  position: fixed;
+  border: 2px solid var(--accent);
   background: color-mix(in srgb, var(--accent) 15%, transparent);
-  color: var(--fg-bright);
+  pointer-events: none;
 }
 
 .prompt-list {

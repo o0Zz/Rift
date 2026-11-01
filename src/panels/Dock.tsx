@@ -53,6 +53,7 @@ export function DockView(props: {
               <>
                 <div
                   class="dock-group"
+                  data-panels={group().panels.join(" ")}
                   style={i === 0 ? first() : { flex: "1 1 0" }}
                   // The header (each panel renders its own) becomes draggable when pressed outside its buttons.
                   onPointerDown={(e) => {

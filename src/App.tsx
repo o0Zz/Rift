@@ -39,12 +39,13 @@ import { GitPanel } from "./panels/GitPanel";
 import { Prompts } from "./panels/Prompts";
 import { addPrompt, editPrompt, mergePrompts, promptKey, removePrompt, type PromptLists } from "./panels/promptLists";
 import { Resizer } from "./ui/Resizer";
-import { DockView, PANEL_DRAG_TYPE } from "./panels/Dock";
-import { DEFAULT_DOCKS, endName, insert, isShown, isTerminal, mergeDocks, move as movePanel, remove, show, sideOf, SIDES, toggle, type Docks, type PanelId, type Side, type Target } from "./panels/docks";
+import { DockView } from "./panels/Dock";
+import { DEFAULT_DOCKS, insert, isShown, isTerminal, mergeDocks, move as movePanel, remove, zoneAt, edgeAt, dropTarget, show, sideOf, SIDES, toggle, type Docks, type PanelId, type Side, type Target } from "./panels/docks";
 import { FindBar } from "./ui/FindBar";
 import { PromptDialog } from "./ui/PromptDialog";
 import "./App.css";
 
+type Box = { left: number; top: number; width: number; height: number };
 type TabUi = { name?: string; color?: string; group?: string; shell?: string; snap?: string; docs?: string[]; doc?: number };
 type SavedTab = { cwd?: string; title: string; agent?: AgentSession; ui?: TabUi };
 type Widths = { tabs: number };
@@ -137,7 +138,7 @@ function App() {
   const [docks, setDocks] = createSignal<Docks>(DEFAULT_DOCKS);
   const shown = (id: PanelId) => isShown(docks(), id);
   const [dragPanel, setDragPanel] = createSignal<PanelId>();
-  const [dropZone, setDropZone] = createSignal<string>();
+  const [drop, setDrop] = createSignal<{ to: Target; box: Box }>();
   const [widths, setWidths] = createSignal<Widths>({ tabs: 240 });
   // Prompts prepared in advance, per repo; saved on each change (a user action, never in the background).
   const [promptLists, setPromptLists] = createSignal<PromptLists>({});
@@ -809,6 +810,43 @@ function App() {
     );
   }
 
+  const px = (b: Box) => ({ left: `${b.left}px`, top: `${b.top}px`, width: `${b.width}px`, height: `${b.height}px` });
+
+  /** Where dropping the dragged panel at (x, y) puts it, and the box to light up. Runs only during a drag. */
+  function dropAt(id: PanelId, x: number, y: number): { to: Target; box: Box } | undefined {
+    const inside = (r: DOMRect) => x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+    for (const el of document.querySelectorAll<HTMLElement>(".dock-group")) {
+      const r = el.getBoundingClientRect();
+      if (!inside(r)) continue;
+      const across = !!el.closest(".dock.bottom");
+      const zone = zoneAt(r, x, y, across);
+      const to = dropTarget(docks(), id, el.dataset.panels!.split(" ") as PanelId[], zone);
+      if (!to) return;
+      const box = { left: r.left, top: r.top, width: r.width, height: r.height };
+      if ("at" in to) {
+        if (across) box.width /= 2;
+        else box.height /= 2;
+        if (zone === "after") {
+          if (across) box.left += box.width;
+          else box.top += box.height;
+        }
+      }
+      return { to, box };
+    }
+    const r = host.getBoundingClientRect();
+    const side = inside(r) ? edgeAt(r, x, y) : undefined;
+    if (!side) return;
+    const box = { left: r.left, top: r.top, width: r.width, height: r.height };
+    if (side === "bottom") {
+      box.top += (box.height * 2) / 3;
+      box.height /= 3;
+    } else {
+      box.width /= 4;
+      if (side === "right") box.left += box.width * 3;
+    }
+    return { to: { side, at: "end" }, box };
+  }
+
   const dockProps = (side: Side) => ({
     get dock() {
       return docks()[side];
@@ -819,7 +857,7 @@ function App() {
     onResize: (size: number) => setDocks({ ...docks(), [side]: { ...docks()[side], size } }),
     onSplit: (split: number) => setDocks({ ...docks(), [side]: { ...docks()[side], split } }),
     onDragging,
-    onDragPanel: (id: PanelId | undefined) => batch(() => (setDragPanel(id), setDropZone(undefined))),
+    onDragPanel: (id: PanelId | undefined) => batch(() => (setDragPanel(id), setDrop(undefined))),
   });
 
   return (
@@ -983,31 +1021,26 @@ function App() {
         <DockView side="bottom" {...dockProps("bottom")} />
       </main>
       <DockView side="right" {...dockProps("right")} />
-      {/* While a panel is dragged: each side of the window takes it at one end, or as a tab. */}
+      {/* While a panel is dragged, the panel under the cursor (or an edge of the center terminal) lights up where it would go. */}
       <Show when={dragPanel()}>
-        <div class="dock-drops">
-          <For each={SIDES.flatMap((side) => (["start", "tab", "end"] as const).map((at) => ({ side, at, key: `${side}-${at}` })))}>
-            {(zone) => (
-              <div
-                class={`dock-drop ${zone.key}`}
-                classList={{ over: dropZone() === zone.key }}
-                onDragOver={(e) => e.preventDefault()}
-                onDragEnter={() => setDropZone(zone.key)}
-                onDragLeave={() => dropZone() === zone.key && setDropZone(undefined)}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  const id = e.dataTransfer?.getData(PANEL_DRAG_TYPE) as PanelId;
-                  batch(() => {
-                    if (id) setDocks(movePanel(docks(), id, { side: zone.side, at: zone.at }));
-                    setDragPanel(undefined);
-                    setDropZone(undefined);
-                  });
-                }}
-              >
-                {zone.side}: {zone.at === "tab" ? "as a tab" : endName(zone.side, zone.at)}
-              </div>
-            )}
-          </For>
+        <div
+          class="dock-drops"
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDrop(dropAt(dragPanel()!, e.clientX, e.clientY));
+          }}
+          onDragLeave={(e) => e.relatedTarget === null && setDrop(undefined)}
+          onDrop={(e) => {
+            e.preventDefault();
+            const to = drop()?.to;
+            batch(() => {
+              if (to) setDocks(movePanel(docks(), dragPanel()!, to));
+              setDragPanel(undefined);
+              setDrop(undefined);
+            });
+          }}
+        >
+          <Show when={drop()}>{(d) => <div class="drop-preview" style={px(d().box)} />}</Show>
         </div>
       </Show>
     </div>
