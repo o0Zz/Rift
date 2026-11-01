@@ -27,7 +27,7 @@ that, and **speed beats features**: every feature has to keep switching tabs and
 | Switching tabs: main-thread work (p95) | **under 16 ms**, less than one frame |
 | Switching tabs: key press → tab on screen | **about 30 ms** typical, under 50 ms (p95) |
 | New tab | **instant**: a shell is already waiting in the current folder |
-| Windows installer / app | **2.4 MB** / 7 MB |
+| Windows installer | **3.2 MB** |
 
 The benchmark ships with the code (`npm run bench`: tab switching, and 8.7 MB of output printed without
 freezing the window) and fails when a change goes over budget.

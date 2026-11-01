@@ -139,7 +139,7 @@ Frontend ↔ backend: Tauri commands, the PTY `Channel`, and events (`pty-exit`,
 - Release: `git tag vX.Y.Z && git push origin vX.Y.Z` → `release.yml` builds every OS with tauri-action and publishes one GitHub Release with `latest.json`.
 - Signing key `~/.tauri/rift.key` + `rift.key.password` (never in the repo), GitHub secrets `TAURI_SIGNING_PRIVATE_KEY(_PASSWORD)`; public key in tauri.conf.json. Losing it means installed copies cannot update.
 - In-app updater (`src/update.ts`, not in dev/bench): checks at startup and every 6 h, downloads in the background, "Restart now" or installs on close, after `session_freeze` and saving scrollback.
-- Measured: installer 2.4 MB, exe 7.2 MB.
+- Measured (v1.0.0): Windows installer 3.2 MB, macOS dmg 7.7 MB, deb 5.0 MB, AppImage 83 MB.
 
 ## Scope
 - Done: tabs, spare shell, shell profiles, session + per-tab agent resume, scrollback restore, grouped vertical tabs, agent status + notifications + attention tools (Claude Code, Codex, Gemini CLI, Copilot CLI), files / git / prompts panels (diff, commit selected files, history ranges, AI message, stats, top bar), worktrees, documents in tabs (editor + Markdown reader), settings (themes, fonts, tab size, shortcuts, Cmd on macOS), Explorer menu, auto-update, benches.
