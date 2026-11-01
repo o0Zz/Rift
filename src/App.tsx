@@ -34,12 +34,13 @@ import { limitsLabel, limitsTitle, type Limit, type Limits } from "./tabs/usage"
 import { Icon } from "./ui/Icon";
 import { Explorer } from "./panels/Explorer";
 import { isUnder } from "./panels/fileOps";
+import { folderName } from "./tabs/layout";
 import { GitPanel } from "./panels/GitPanel";
 import { Prompts } from "./panels/Prompts";
 import { addPrompt, editPrompt, mergePrompts, promptKey, removePrompt, type PromptLists } from "./panels/promptLists";
 import { Resizer } from "./ui/Resizer";
 import { DockView, PANEL_DRAG_TYPE } from "./panels/Dock";
-import { DEFAULT_DOCKS, isShown, mergeDocks, move as movePanel, SIDES, toggle, type Docks, type PanelId, type Side } from "./panels/docks";
+import { DEFAULT_DOCKS, endName, insert, isShown, isTerminal, mergeDocks, move as movePanel, moveChoices, remove, show, sideOf, SIDES, toggle, type Docks, type PanelId, type Side, type Target } from "./panels/docks";
 import { FindBar } from "./ui/FindBar";
 import { PromptDialog } from "./ui/PromptDialog";
 import "./App.css";
@@ -118,9 +119,9 @@ function App() {
         untrack(() => {
           const l = look();
           for (const t of tabs()) t.view.setLook(l);
-          dockTerm?.setLook(l);
+          for (const c of consoles.values()) c.view?.setLook(l);
           active()?.view.refit();
-          dockTerm?.refit();
+          refitConsoles();
           resizeHiddenTabs();
         }),
       { defer: true },
@@ -136,7 +137,7 @@ function App() {
   const [docks, setDocks] = createSignal<Docks>(DEFAULT_DOCKS);
   const shown = (id: PanelId) => isShown(docks(), id);
   const [dragPanel, setDragPanel] = createSignal<PanelId>();
-  const [dropSide, setDropSide] = createSignal<Side>();
+  const [dropZone, setDropZone] = createSignal<string>();
   const [widths, setWidths] = createSignal<Widths>({ tabs: 240 });
   // Prompts prepared in advance, per repo; saved on each change (a user action, never in the background).
   const [promptLists, setPromptLists] = createSignal<PromptLists>({});
@@ -152,7 +153,7 @@ function App() {
     dragging = d;
     if (!d) {
       active()?.view.refit();
-      dockTerm?.refit();
+      refitConsoles();
       resizeHiddenTabs();
     }
   };
@@ -465,15 +466,59 @@ function App() {
     setDocks(toggle(docks(), id));
   }
 
-  // The terminal panel: one shell shared by every tab (a dev server, logs...). Started the first time the panel
-  // is shown, in the active tab's folder; kept while hidden or moved to another dock; gone when its shell exits.
-  let dockTerm: TermView | undefined;
-  function attachDockTerm(el: HTMLDivElement) {
-    const view = (dockTerm ??= new TermView(el, { onTitle() {}, onCwd() {}, isAgent: () => false, onEscape() {} }, look()));
+  // Terminal panels: shells shared by every tab (a dev server, logs...), as many as wanted, each in any dock.
+  // A new one opens next to the last one used, in its folder; it starts when first shown, keeps running while
+  // hidden or moved, and goes away when closed or when its shell exits. Not restored with the session.
+  type Console = { view?: TermView; cwd(): string | undefined; setCwd(cwd: string): void };
+  const consoles = new Map<PanelId, Console>();
+  let lastConsole: PanelId | undefined;
+  let sizes: ResizeObserver | undefined; // refits the terminals when their area changes size
+  const refitConsoles = () => consoles.forEach((c) => c.view?.refit());
+  const panelName = (id: PanelId) =>
+    isTerminal(id) ? `Terminal ${id.slice(5)}` : { explorer: "Files", git: "Git", prompts: "Prompts" }[id];
+  const consoleShown = () => SIDES.some((s) => docks()[s].groups.some((g) => g.shown && isTerminal(g.shown)));
+
+  function newConsole() {
+    let n = 1;
+    while (consoles.has(`term:${n}`)) n++;
+    const id: PanelId = `term:${n}`;
+    const from = lastConsole && consoles.get(lastConsole);
+    const [cwd, setCwd] = createSignal(from ? from.cwd() : active()?.cwd);
+    consoles.set(id, { cwd, setCwd });
+    const at: Target = lastConsole ? { side: sideOf(docks(), lastConsole), with: lastConsole } : { side: "bottom", at: "tab" };
+    setDocks(insert(docks(), id, at));
+    lastConsole = id;
+  }
+
+  function closeConsole(id: PanelId) {
+    const view = consoles.get(id)?.view;
+    if (view) {
+      sizes?.unobserve(view.el);
+      view.dispose();
+    }
+    consoles.delete(id);
+    if (lastConsole === id) lastConsole = [...consoles.keys()].pop();
+    setDocks(remove(docks(), id));
+  }
+
+  /** The terminals' shortcut: shows or hides the last one used, or opens the first one. */
+  function toggleConsoles() {
+    if (lastConsole) togglePanel(lastConsole);
+    else newConsole();
+  }
+
+  function attachConsole(id: PanelId, el: HTMLDivElement) {
+    const c = consoles.get(id)!;
+    if (!c.view) {
+      c.view = new TermView(el, { onTitle() {}, onCwd: c.setCwd, isAgent: () => false, onEscape() {} }, look());
+      c.view.el.addEventListener("focusin", () => (lastConsole = id));
+      sizes?.observe(c.view.el);
+    }
+    const view = c.view;
     el.appendChild(view.el);
-    const cwd = active()?.cwd;
+    lastConsole = id;
     // Next frame: the panel is in the page, so the terminal can measure itself.
-    requestAnimationFrame(() => (view.ptyId < 0 ? view.start(cwd).then(() => view.focus()) : view.show()));
+    requestAnimationFrame(() => (view.ptyId < 0 ? view.start(c.cwd()).then(() => view.focus()) : view.show()));
   }
 
   function onAgentStatus({ pty, harness, status, message }: AgentStatus) {
@@ -565,7 +610,8 @@ function App() {
     else if (action === "toggleFiles") togglePanel("explorer");
     else if (action === "toggleGit") togglePanel("git");
     else if (action === "togglePrompts") togglePanel("prompts");
-    else if (action === "toggleTerminal") togglePanel("terminal");
+    else if (action === "toggleTerminal") toggleConsoles();
+    else if (action === "newTerminal") newConsole();
     else if (action === "settings") setSettingsOpen(true);
     else if (action === "find") setFinding(true);
     else if (action === "renameTab") active() && setRenameRequest({ tab: active()! });
@@ -597,12 +643,8 @@ function App() {
         }
       }),
       listen<number>("pty-exit", (e) => {
-        if (dockTerm && e.payload === dockTerm.ptyId) {
-          dockTerm.dispose();
-          dockTerm = undefined;
-          if (shown("terminal")) togglePanel("terminal");
-          return;
-        }
+        const term = [...consoles].find(([, c]) => c.view?.ptyId === e.payload);
+        if (term) return closeConsole(term[0]);
         const tab = tabs().find((t) => t.view.ptyId === e.payload);
         if (tab) closeTab(tab, true);
       }),
@@ -635,15 +677,15 @@ function App() {
     // Registered at startup: notifications shown before a listener exists report no click.
     const notificationClicks = onAction((e) => openNotifiedTab(e.notification?.extra?.pty));
     let frame = 0;
-    const resize = new ResizeObserver(() => {
+    const resize = (sizes = new ResizeObserver(() => {
       cancelAnimationFrame(frame);
       if (dragging) return;
       frame = requestAnimationFrame(() => {
         active()?.view.refit();
-        dockTerm?.refit();
+        refitConsoles();
         resizeHiddenTabs();
       });
-    });
+    }));
     resize.observe(host);
     const onSystemTheme = (e: MediaQueryListEvent) => setSystemIsDark(e.matches);
     systemDark.addEventListener("change", onSystemTheme);
@@ -741,17 +783,28 @@ function App() {
         />
       );
     }
+    const cwd = consoles.get(id)?.cwd;
     return (
       <aside class="panel terminal">
         <div class="panel-head">
-          <span class="panel-title">Terminal</span>
+          <span class="panel-title" title={cwd?.()}>
+            {panelName(id)}
+            {cwd?.() ? ` · ${folderName(cwd()!)}` : ""}
+          </span>
           <span class="head-buttons">
-            <button class="icon-btn" title="Close (Ctrl+Shift+J)" onClick={() => togglePanel("terminal")}>
+            <button
+              class="icon-btn"
+              title="New terminal in this folder (Ctrl+Shift+K)"
+              onClick={() => ((lastConsole = id), newConsole())}
+            >
+              <Icon name="plus" />
+            </button>
+            <button class="icon-btn" title="Close this terminal (ends its shell)" onClick={() => closeConsole(id)}>
               <Icon name="close" />
             </button>
           </span>
         </div>
-        <div class="dock-term" ref={attachDockTerm} />
+        <div class="dock-term" ref={(el) => attachConsole(id, el)} />
       </aside>
     );
   }
@@ -760,12 +813,15 @@ function App() {
     get dock() {
       return docks()[side];
     },
+    name: panelName,
     render: renderPanel,
-    onShow: (id: PanelId) => setDocks({ ...docks(), [side]: { ...docks()[side], shown: id } }),
-    onMove: (id: PanelId, to: Side) => setDocks(movePanel(docks(), id, to)),
+    choices: (id: PanelId) => moveChoices(docks(), id, panelName),
+    onShow: (id: PanelId) => setDocks(show(docks(), id)),
+    onMove: (id: PanelId, to: Target) => setDocks(movePanel(docks(), id, to)),
     onResize: (size: number) => setDocks({ ...docks(), [side]: { ...docks()[side], size } }),
+    onSplit: (split: number) => setDocks({ ...docks(), [side]: { ...docks()[side], split } }),
     onDragging,
-    onDragPanel: (id: PanelId | undefined) => batch(() => (setDragPanel(id), setDropSide(undefined))),
+    onDragPanel: (id: PanelId | undefined) => batch(() => (setDragPanel(id), setDropZone(undefined))),
   });
 
   return (
@@ -871,8 +927,8 @@ function App() {
           </Show>
           <button
             class="icon-btn"
-            classList={{ on: shown("terminal") }}
-            onClick={() => togglePanel("terminal")}
+            classList={{ on: consoleShown() }}
+            onClick={toggleConsoles}
             title="Terminal (Ctrl+Shift+J)"
           >
             <Icon name="terminal" />
@@ -929,28 +985,28 @@ function App() {
         <DockView side="bottom" {...dockProps("bottom")} />
       </main>
       <DockView side="right" {...dockProps("right")} />
-      {/* While a dock tab is dragged: drop it on a side of the window to move it there. */}
+      {/* While a dock tab is dragged: each side of the window takes it at one end, or as a tab. */}
       <Show when={dragPanel()}>
         <div class="dock-drops">
-          <For each={SIDES}>
-            {(side) => (
+          <For each={SIDES.flatMap((side) => (["start", "tab", "end"] as const).map((at) => ({ side, at, key: `${side}-${at}` })))}>
+            {(zone) => (
               <div
-                class={`dock-drop ${side}`}
-                classList={{ over: dropSide() === side }}
+                class={`dock-drop ${zone.key}`}
+                classList={{ over: dropZone() === zone.key }}
                 onDragOver={(e) => e.preventDefault()}
-                onDragEnter={() => setDropSide(side)}
-                onDragLeave={() => dropSide() === side && setDropSide(undefined)}
+                onDragEnter={() => setDropZone(zone.key)}
+                onDragLeave={() => dropZone() === zone.key && setDropZone(undefined)}
                 onDrop={(e) => {
                   e.preventDefault();
                   const id = e.dataTransfer?.getData(PANEL_DRAG_TYPE) as PanelId;
                   batch(() => {
-                    if (id) setDocks(movePanel(docks(), id, side));
+                    if (id) setDocks(movePanel(docks(), id, { side: zone.side, at: zone.at }));
                     setDragPanel(undefined);
-                    setDropSide(undefined);
+                    setDropZone(undefined);
                   });
                 }}
               >
-                Move to {side}
+                {zone.side}: {zone.at === "tab" ? "as a tab" : endName(zone.side, zone.at)}
               </div>
             )}
           </For>

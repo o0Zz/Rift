@@ -21,7 +21,8 @@ export function Resizer(props: {
     const vertical = props.edge === "top" || props.edge === "bottom";
     const at = (ev: PointerEvent) => (vertical ? ev.clientY : ev.clientX);
     const from = at(e);
-    const start = props.size ?? (el.previousElementSibling as HTMLElement).offsetHeight;
+    const box = (props.edge === "bottom" ? el.previousElementSibling : el.parentElement) as HTMLElement;
+    const start = props.size ?? (vertical ? box.offsetHeight : box.offsetWidth);
     props.onDragging?.(true);
     const move = (ev: PointerEvent) => props.onResize(resized(props.edge, start, at(ev) - from, props.min, props.max));
     const up = () => {

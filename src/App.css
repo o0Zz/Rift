@@ -141,7 +141,7 @@ body,
 .terms {
   position: relative;
   flex: 1;
-  min-height: 0;
+  min-height: 120px;
 }
 
 .term {
@@ -604,11 +604,43 @@ body,
   border-left: 1px solid var(--line);
 }
 
+/* Shrinks before the tab's own terminal goes under its minimum height. */
 .dock.bottom {
+  flex: 0 1 auto;
+  min-height: 80px;
   border-top: 1px solid var(--line);
 }
 
-.dock > aside {
+.dock-groups {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.dock-groups.across {
+  flex-direction: row;
+}
+
+.dock-group {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.dock-group + .resizer.bottom + .dock-group {
+  border-top: 1px solid var(--line);
+}
+
+.dock-groups.across > .dock-group + .dock-group {
+  border-left: 1px solid var(--line);
+}
+
+.dock-group > aside {
+  flex: 1;
   min-height: 0;
 }
 
@@ -625,13 +657,17 @@ body,
 .dock-tabs {
   display: flex;
   flex: none;
+  overflow-x: auto;
+  scrollbar-width: none;
   gap: 2px;
   padding: 4px 6px 0;
   border-bottom: 1px solid var(--line-soft);
 }
 
 .dock-tab {
+  flex: none;
   padding: 4px 10px;
+  white-space: nowrap;
   border: none;
   border-bottom: 2px solid transparent;
   background: none;
@@ -673,25 +709,67 @@ body,
   color: transparent;
 }
 
-.dock-drop.left {
+.dock-drop.left-start {
   top: 0;
+  left: 0;
+  width: 25%;
+  height: 33.3%;
+}
+
+.dock-drop.left-tab {
+  top: 33.3%;
+  left: 0;
+  width: 25%;
+  height: 33.3%;
+}
+
+.dock-drop.left-end {
   bottom: 0;
   left: 0;
-  width: 30%;
+  width: 25%;
+  height: 33.3%;
 }
 
-.dock-drop.right {
+.dock-drop.right-start {
   top: 0;
   right: 0;
-  bottom: 0;
-  width: 30%;
+  width: 25%;
+  height: 33.3%;
 }
 
-.dock-drop.bottom {
-  right: 30%;
+.dock-drop.right-tab {
+  top: 33.3%;
+  right: 0;
+  width: 25%;
+  height: 33.3%;
+}
+
+.dock-drop.right-end {
   bottom: 0;
-  left: 30%;
-  height: 40%;
+  right: 0;
+  width: 25%;
+  height: 33.3%;
+}
+
+.dock-drop.bottom-start {
+  bottom: 0;
+  left: 25%;
+  width: 16.7%;
+  height: 35%;
+}
+
+.dock-drop.bottom-tab {
+  bottom: 0;
+  left: 41.7%;
+  width: 16.7%;
+  height: 35%;
+}
+
+.dock-drop.bottom-end {
+  bottom: 0;
+  left: 58.3%;
+  width: 16.7%;
+  height: 35%;
 }
 
 .dock-drop.over {
