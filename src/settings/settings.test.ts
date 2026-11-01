@@ -42,7 +42,7 @@ describe("actionFor with the default keys", () => {
     expect(actionFor(key("E", { shift: true }), DEFAULT_KEYS)).toBe("toggleFiles");
     expect(actionFor(key("G", { shift: true }), DEFAULT_KEYS)).toBe("toggleGit");
     expect(actionFor(key("O", { shift: true }), DEFAULT_KEYS)).toBe("togglePrompts");
-    expect(actionFor(key("J", { shift: true }), DEFAULT_KEYS)).toBe("toggleTerminal");
+    expect(actionFor(key("J", { shift: true }), DEFAULT_KEYS)).toBeUndefined();
     expect(actionFor(key("K", { shift: true }), DEFAULT_KEYS)).toBe("newTerminal");
     expect(actionFor(key(","), DEFAULT_KEYS)).toBe("settings");
     expect(actionFor({ key: "ArrowLeft", ctrlKey: false, shiftKey: false, altKey: true, metaKey: false }, DEFAULT_KEYS)).toBe("focusLeft");

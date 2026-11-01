@@ -119,7 +119,6 @@ terminal.
 | Files panel | `Ctrl+Shift+E` | `Cmd+Shift+E` |
 | Git panel | `Ctrl+Shift+G` | `Cmd+Shift+G` |
 | Prompts panel | `Ctrl+Shift+O` | `Cmd+Shift+O` |
-| Show / hide terminals | `Ctrl+Shift+J` | `Cmd+Shift+J` |
 | New terminal (in the current terminal's folder) | `Ctrl+Shift+K` | `Cmd+Shift+K` |
 | Focus the pane on that side | `Alt+arrows` | `Ctrl+Alt+arrows` |
 | Next tab that needs you | `Ctrl+Shift+U` | `Cmd+Shift+U` |

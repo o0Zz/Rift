@@ -10,7 +10,6 @@ export const ACTIONS = {
   toggleFiles: "Show / hide files panel",
   toggleGit: "Show / hide git panel",
   togglePrompts: "Show / hide prompts panel",
-  toggleTerminal: "Show / hide terminals",
   newTerminal: "New terminal",
   focusLeft: "Focus the pane on the left",
   focusRight: "Focus the pane on the right",
@@ -62,7 +61,6 @@ export function defaultKeys(mac: boolean): Keymap {
       toggleFiles: ["Cmd+Shift+E"],
       toggleGit: ["Cmd+Shift+G"],
       togglePrompts: ["Cmd+Shift+O"],
-      toggleTerminal: ["Cmd+Shift+J"],
       newTerminal: ["Cmd+Shift+K"],
       // Alt+arrows move by word in macOS terminals.
       focusLeft: ["Ctrl+Alt+ArrowLeft"],
@@ -87,7 +85,6 @@ export function defaultKeys(mac: boolean): Keymap {
     toggleFiles: ["Ctrl+Shift+E"],
     toggleGit: ["Ctrl+Shift+G"],
     togglePrompts: ["Ctrl+Shift+O"],
-    toggleTerminal: ["Ctrl+Shift+J"],
     newTerminal: ["Ctrl+Shift+K"],
     focusLeft: ["Alt+ArrowLeft"],
     focusRight: ["Alt+ArrowRight"],

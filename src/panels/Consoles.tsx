@@ -2,7 +2,7 @@ import { createSignal } from "solid-js";
 import { TermView, type TermLook } from "../terminal/TermView";
 import { folderName } from "../tabs/layout";
 import { Icon } from "../ui/Icon";
-import { groupOf, insert, MAIN, remove, toggle, type Pane, type PanelId, type Target } from "./panes";
+import { groupOf, insert, MAIN, remove, type Pane, type PanelId, type Target } from "./panes";
 
 type Console = { view?: TermView; cwd(): string | undefined; setCwd(cwd: string): void };
 
@@ -46,12 +46,6 @@ export function createConsoles(o: {
     o.setPanes(remove(o.panes(), id));
   }
 
-  /** The terminals' shortcut: shows or hides the last one used, or opens the first one. */
-  function toggleLast() {
-    if (last) o.setPanes(toggle(o.panes(), last));
-    else open();
-  }
-
   function attach(id: PanelId, el: HTMLDivElement) {
     const c = consoles.get(id)!;
     if (!c.view) {
@@ -92,7 +86,6 @@ export function createConsoles(o: {
   return {
     open,
     close,
-    toggleLast,
     render,
     view: (id: PanelId) => consoles.get(id)?.view,
     /** The terminal panel whose shell is `pty`, if any. */

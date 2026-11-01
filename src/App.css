@@ -168,14 +168,14 @@ body,
 
 /* Sidebar */
 
-/* Resizable column: holds a panel and its drag handle. */
-.pane {
+/* The tab list's column: the sidebar and its width handle. */
+.sidebar-col {
   position: relative;
   display: flex;
   flex: none;
 }
 
-.pane > aside {
+.sidebar-col > aside {
   flex: 1;
   min-width: 0;
 }

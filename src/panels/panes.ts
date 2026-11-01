@@ -117,10 +117,15 @@ export function insert(root: Pane, id: PanelId, to: Target): Pane {
   return mapTree(root, (p) => (p.id === target ? wrap(p) : p))!;
 }
 
-/** Moves a panel; nothing happens when it would land where it is (on its own lone group). */
-export function move(root: Pane, id: PanelId, to: Target): Pane {
+/** Whether dropping panel `id` at `to` leaves it where it is: on its own group, where it is alone. */
+export function sameSpot(root: Pane, id: PanelId, to: Target): boolean {
   const from = groupOf(root, id);
-  if (from?.id === to.pane && from.panels.length === 1) return root;
+  return from?.id === to.pane && from.panels.length === 1;
+}
+
+/** Moves a panel; nothing happens when it would land where it is (`sameSpot`). */
+export function move(root: Pane, id: PanelId, to: Target): Pane {
+  if (sameSpot(root, id, to)) return root;
   const rest = remove(root, id);
   if (to.pane !== "root" && !index(rest).has(to.pane)) return root;
   return insert(rest, id, to);

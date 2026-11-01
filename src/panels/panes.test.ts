@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_PANES, groupOf, index, isGroup, isOpen, isShown, mergePanes, move, nextPane, previewBox, remove, setSizes, show, toggle, zoneAt, type Pane } from "./panes";
+import { DEFAULT_PANES, groupOf, index, isGroup, isOpen, isShown, mergePanes, move, nextPane, previewBox, remove, sameSpot, setSizes, show, toggle, zoneAt, type Pane } from "./panes";
 
 /** The tree without ids or sizes: [row: ...], [col: ...], groups as their panels ("*" = shown). */
 function shape(p: Pane): unknown {
@@ -45,7 +45,11 @@ describe("panes", () => {
   });
 
   it("does nothing when a panel is dropped on its own lone group", () => {
-    expect(move(open, "explorer", { pane: groupOf(open, "explorer")!.id, at: "left" })).toBe(open);
+    const own = groupOf(open, "explorer")!.id;
+    expect(sameSpot(open, "explorer", { pane: own, at: "left" })).toBe(true);
+    expect(move(open, "explorer", { pane: own, at: "left" })).toBe(open);
+    // In a group with others it can still move: to the end of its tabs, or beside them.
+    expect(sameSpot(open, "git", { pane: groupOf(open, "git")!.id, at: "left" })).toBe(false);
   });
 
   it("resizes one split", () => {

@@ -1,5 +1,5 @@
 import { batch, createMemo, createSignal, For, Show, type JSX } from "solid-js";
-import { index, isGroup, isOpen, MAIN, move, nextPane, previewBox, setSizes, show, zoneAt, type Box, type Group, type Pane, type PanelId, type Split, type Target } from "./panes";
+import { index, isGroup, isOpen, MAIN, move, nextPane, previewBox, sameSpot, setSizes, show, zoneAt, type Box, type Group, type Pane, type PanelId, type Split, type Target } from "./panes";
 
 /** Drag type of a panel (its header or tab) being moved elsewhere. */
 const PANEL_DRAG_TYPE = "application/x-rift-panel";
@@ -33,7 +33,7 @@ export function Panes(props: {
       if (x < r.left || x > r.right || y < r.top || y > r.bottom) continue;
       const pane = group.dataset.pane!;
       const at = zoneAt(r, x, y, pane !== MAIN);
-      if (!at || move(props.root, id, { pane, at }) === props.root) return; // nowhere new
+      if (!at || sameSpot(props.root, id, { pane, at })) return; // nowhere new
       return { to: { pane, at }, box: at === "tab" ? r : previewBox(r, at) };
     }
   }
@@ -107,8 +107,7 @@ type Props = {
  * where it would go). Only shown panels are mounted (panels load when shown); terminals keep their shell alive.
  */
 function PaneView(props: Props & { id: string; style?: JSX.CSSProperties }) {
-  // Keeps the last value while the pane is being removed (its parent drops it in the same update).
-  const pane = createMemo<Pane>((last) => props.panes().get(props.id) ?? last, props.panes().get(props.id)!);
+  const pane = () => props.panes().get(props.id)!;
   // A pane's kind never changes for its id: a group split in two gets a new parent, it does not become one.
   return isGroup(pane()!) ? (
     <GroupView {...props} group={() => pane() as Group} />

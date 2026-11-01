@@ -26,8 +26,7 @@ import {
   type TabFilter,
 } from "./tabs/layout";
 import { Tab, type GitStats } from "./tabs/Tab";
-import { DocView } from "./docs/DocView";
-import { afterClose, placeDoc } from "./docs/place";
+import { createDocs } from "./docs/docs";
 import { Sidebar } from "./tabs/Sidebar";
 import { GitStatsView } from "./tabs/GitStats";
 import { limitsLabel, limitsTitle, type Limit, type Limits } from "./tabs/usage";
@@ -283,7 +282,7 @@ function App() {
     if (saved?.ui?.snap) tab.snap = saved.ui.snap;
     // Restored documents are read only when first shown.
     if (saved?.ui?.docs?.length) {
-      tab.docs = saved.ui.docs.map((path) => makeDoc(tab, path));
+      tab.docs = saved.ui.docs.map((path) => docs.make(tab, path));
       tab.current = Math.min(saved.ui.doc ?? -1, tab.docs.length - 1);
     }
     const onCwd = (cwd: string) => {
@@ -362,57 +361,7 @@ function App() {
     }
   }
 
-  // Documents: files opened from the files panel, shown in the tab instead of its terminal (top bar sub-tabs).
-  // `fromLink`: reached by a link in a Markdown file, which anyone may have written: a file that is not text is
-  // shown in the file manager, never opened (a link to an .exe would run it).
-  function makeDoc(tab: Tab, path: string, fromLink = false): DocView {
-    const doc: DocView = new DocView(host, path, {
-      // Not text (binary, too big): the default app opens it instead.
-      onNotText: () => {
-        invoke(fromLink ? "fs_reveal" : "fs_open", { path });
-        const i = tab.docs.indexOf(doc);
-        if (i >= 0) closeDoc(tab, i, true);
-      },
-      onOpenFile: (p) => openDoc(p, tab, true),
-    });
-    return doc;
-  }
-
-  /** Shows document `index` of the tab, or its terminal (-1). */
-  function showDoc(tab: Tab, index: number) {
-    const front = tab === active();
-    if (front) tab.shown.hide();
-    tab.current = index;
-    if (!front) return;
-    tab.shown.show();
-    tab.shown.focus();
-  }
-
-  function openDoc(path: string, tab = active(), fromLink = false) {
-    if (!tab) return;
-    const { index, replace } = placeDoc(tab.docs, tab.current, path, settings().docs === "single");
-    if (index < tab.docs.length && !replace) return showDoc(tab, index);
-    const docs = [...tab.docs];
-    const [old] = docs.splice(index, replace ? 1 : 0, makeDoc(tab, path, fromLink));
-    old?.dispose();
-    tab.docs = docs;
-    showDoc(tab, index);
-  }
-
-  function closeDoc(tab: Tab, index: number, force = false) {
-    const doc = tab.docs[index];
-    if (!force && doc.dirty && !confirm(`Discard unsaved changes to ${doc.name}?`)) return;
-    const shown = tab.current === index;
-    batch(() => {
-      tab.current = afterClose(tab.current, index);
-      tab.docs = tab.docs.filter((d) => d !== doc);
-    });
-    doc.dispose();
-    if (shown && tab === active()) {
-      tab.shown.show();
-      tab.shown.focus();
-    }
-  }
+  const docs = createDocs({ host: () => host, active, single: () => settings().docs === "single" });
 
   function step(dir: 1 | -1) {
     const order = visualOrder(tabs(), groups());
@@ -573,7 +522,6 @@ function App() {
     else if (action === "toggleFiles") togglePanel("explorer");
     else if (action === "toggleGit") togglePanel("git");
     else if (action === "togglePrompts") togglePanel("prompts");
-    else if (action === "toggleTerminal") consoles.toggleLast();
     else if (action === "newTerminal") consoles.open();
     else if (action === "focusLeft") focusPane("left");
     else if (action === "focusRight") focusPane("right");
@@ -678,7 +626,7 @@ function App() {
         setPanels: (open) => {
           for (const id of ["explorer", "git"] as const) if (shown(id) !== open) togglePanel(id);
         },
-        openDoc: (i, file) => openDoc(`${dirs[0]}/${file}`, tabs()[i]),
+        openDoc: (i, file) => docs.open(`${dirs[0]}/${file}`, tabs()[i]),
         showsDoc: (i) => tabs()[i].current >= 0,
       });
     });
@@ -699,11 +647,11 @@ function App() {
         <Explorer
           root={panelTab()?.root ?? panelTab()?.cwd}
           refresh={filesRefresh()}
-          onOpenFile={(path) => openDoc(path)}
+          onOpenFile={(path) => docs.open(path)}
           onDeleted={(path) => {
             // Its documents close (asking first about unsaved changes); the git panel shows the deletion.
             for (const tab of tabs()) {
-              for (let i = tab.docs.length - 1; i >= 0; i--) if (isUnder(tab.docs[i].path, path)) closeDoc(tab, i);
+              for (let i = tab.docs.length - 1; i >= 0; i--) if (isUnder(tab.docs[i].path, path)) docs.close(tab, i);
             }
             if (shown("git")) setGitRefresh(gitRefresh() + 1);
           }}
@@ -724,7 +672,7 @@ function App() {
             const key = promptKey(promptRepo()!);
             const text = promptLists()[key]?.[i];
             if (!tab || !text) return;
-            if (tab.current >= 0) showDoc(tab, -1);
+            if (tab.current >= 0) docs.show(tab, -1);
             tab.view.paste(text);
             changePrompts(removePrompt(promptLists(), key, i));
           }}
@@ -778,7 +726,7 @@ function App() {
         >
           {(tab) => (
             <div class="doc-tabs">
-              <button class="doc-tab" classList={{ on: tab().current < 0 }} onClick={() => showDoc(tab(), -1)}>
+              <button class="doc-tab" classList={{ on: tab().current < 0 }} onClick={() => docs.show(tab(), -1)}>
                 Terminal
               </button>
               <For each={tab().docs}>
@@ -787,8 +735,8 @@ function App() {
                     class="doc-tab"
                     classList={{ on: tab().current === i() }}
                     title={doc.path}
-                    onClick={() => showDoc(tab(), i())}
-                    onAuxClick={(e) => e.button === 1 && closeDoc(tab(), i())}
+                    onClick={() => docs.show(tab(), i())}
+                    onAuxClick={(e) => e.button === 1 && docs.close(tab(), i())}
                   >
                     <span class="doc-name">{doc.name}</span>
                     <Show when={doc.dirty}>
@@ -797,7 +745,7 @@ function App() {
                     <button
                       class="doc-close"
                       title="Close"
-                      onClick={(e) => (e.stopPropagation(), closeDoc(tab(), i()))}
+                      onClick={(e) => (e.stopPropagation(), docs.close(tab(), i()))}
                     >
                       <Icon name="close" size={10} />
                     </button>
@@ -878,7 +826,7 @@ function App() {
 
   return (
     <div class="app">
-      <div class="pane" style={{ width: `${tabsWidth()}px` }}>
+      <div class="sidebar-col" style={{ width: `${tabsWidth()}px` }}>
         <Sidebar
           tabs={tabs()}
           groups={groups()}
