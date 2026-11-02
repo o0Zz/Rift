@@ -234,6 +234,16 @@ function App() {
     }, 1500);
   }
 
+  // A command finished in a terminal of the repo the git panel shows (`git pull`, a build, an edit):
+  // reload it in place. Once per burst of prompts, and only while the panel is open on that repo.
+  let gitPanelTimer = 0;
+  function refreshGitPanel(root: string) {
+    clearTimeout(gitPanelTimer);
+    gitPanelTimer = setTimeout(() => {
+      if (shown("git") && panelTab()?.root === root && changedRepos.delete(root)) setGitRefresh(gitRefresh() + 1);
+    }, 300);
+  }
+
   /** Saves every shell tab's history (agent tabs are redisplayed by resuming). Before closing or updating. */
   function saveHistories() {
     return Promise.all(
@@ -292,7 +302,10 @@ function App() {
         batch(() => {
           tab.root = head?.root;
           tab.branch = head?.branch;
-          if (head) changedRepos.add(head.root);
+          if (head) {
+            changedRepos.add(head.root);
+            refreshGitPanel(head.root);
+          }
           refreshStats(tab);
         }),
       );

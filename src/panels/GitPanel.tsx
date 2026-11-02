@@ -13,7 +13,7 @@ type Branch = { name: string; current: boolean };
  * Branch (switch / create), pull and push, changed files with their diff and commit of the checked files;
  * History: the last commits; a click shows one commit's changes, Shift+click those of a range of commits.
  * Not live: loads when shown, when the shown repo changes, after an action, on ⟳, or when `refresh` changes
- * (its agent finished). Every git command runs on a click, never in the background.
+ * (an agent in its repo finished, or a command did in a terminal there). Never on a timer or a watcher.
  */
 export function GitPanel(props: {
   root?: string;
@@ -185,7 +185,8 @@ export function GitPanel(props: {
   }
 
   async function pull() {
-    if (!(await act("pull", () => invoke<string>("git_pull", { root: props.root })))) return;
+    // Even a failed pull changes the repo: a conflict leaves a merge in progress and files to resolve.
+    await act("pull", () => invoke<string>("git_pull", { root: props.root }));
     reload();
     props.onHeadChanged?.();
   }
@@ -229,7 +230,18 @@ export function GitPanel(props: {
       },
     ),
   );
-  createEffect(on(() => props.refresh, () => props.root && load(props.root, true), { defer: true }));
+  createEffect(
+    on(
+      () => props.refresh,
+      () => {
+        const root = props.root;
+        if (!root) return;
+        load(root, true);
+        if (view() === "history") loadLog(root);
+      },
+      { defer: true },
+    ),
+  );
 
   const FileRow = (p: { change: Change; check?: boolean }) => (
     <div class="git-file" classList={{ active: selected()?.path === p.change.path }} title={p.change.path}>
