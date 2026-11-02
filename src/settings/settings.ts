@@ -10,6 +10,11 @@ export const ACTIONS = {
   toggleFiles: "Show / hide files panel",
   toggleGit: "Show / hide git panel",
   togglePrompts: "Show / hide prompts panel",
+  newTerminal: "New terminal",
+  focusLeft: "Focus the pane on the left",
+  focusRight: "Focus the pane on the right",
+  focusUp: "Focus the pane above",
+  focusDown: "Focus the pane below",
   nextAttention: "Next tab that needs me",
   find: "Find in terminal",
   zoomIn: "Zoom in",
@@ -56,6 +61,12 @@ export function defaultKeys(mac: boolean): Keymap {
       toggleFiles: ["Cmd+Shift+E"],
       toggleGit: ["Cmd+Shift+G"],
       togglePrompts: ["Cmd+Shift+O"],
+      newTerminal: ["Cmd+Shift+K"],
+      // Alt+arrows move by word in macOS terminals.
+      focusLeft: ["Ctrl+Alt+ArrowLeft"],
+      focusRight: ["Ctrl+Alt+ArrowRight"],
+      focusUp: ["Ctrl+Alt+ArrowUp"],
+      focusDown: ["Ctrl+Alt+ArrowDown"],
       nextAttention: ["Cmd+Shift+U"],
       find: ["Cmd+F"],
       zoomIn: ["Cmd+=", "Cmd++", "Cmd+Shift++"],
@@ -74,6 +85,11 @@ export function defaultKeys(mac: boolean): Keymap {
     toggleFiles: ["Ctrl+Shift+E"],
     toggleGit: ["Ctrl+Shift+G"],
     togglePrompts: ["Ctrl+Shift+O"],
+    newTerminal: ["Ctrl+Shift+K"],
+    focusLeft: ["Alt+ArrowLeft"],
+    focusRight: ["Alt+ArrowRight"],
+    focusUp: ["Alt+ArrowUp"],
+    focusDown: ["Alt+ArrowDown"],
     nextAttention: ["Ctrl+Shift+U"],
     find: ["Ctrl+Shift+F"], // Ctrl+F is the shell's (bash: forward one character)
     zoomIn: ["Ctrl+=", "Ctrl++", "Ctrl+Shift++"],
@@ -89,7 +105,7 @@ export const DEFAULT_KEYS: Keymap = defaultKeys(IS_MAC);
 
 export const DEFAULTS: Settings = {
   theme: "dark",
-  fontSize: 14,
+  fontSize: 12,
   // Windows, macOS, Linux defaults, then whatever monospace font the system has.
   fontFamily: "'Cascadia Mono', Consolas, Menlo, 'DejaVu Sans Mono', monospace",
   shell: "",

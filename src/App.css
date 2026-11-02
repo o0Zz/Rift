@@ -168,14 +168,14 @@ body,
 
 /* Sidebar */
 
-/* Resizable column: holds a panel and its drag handle. */
-.pane {
+/* The tab list's column: the sidebar and its width handle. */
+.sidebar-col {
   position: relative;
   display: flex;
   flex: none;
 }
 
-.pane > aside {
+.sidebar-col > aside {
   flex: 1;
   min-width: 0;
 }
@@ -191,10 +191,6 @@ body,
 
 .resizer.right {
   right: -3px;
-}
-
-.resizer.left {
-  left: -3px;
 }
 
 /* Between two boxes of a panel: sets the height of the one above. */
@@ -590,13 +586,120 @@ body,
   user-select: none;
 }
 
-.panel.explorer {
-  border-right: 1px solid var(--line);
+/* The tree of splits: a split lays out its children in a row or a column, a 1px line between each two that
+   is also the drag handle (a wider invisible hit area). A group shows one panel, with tabs when it holds several. */
+.panes {
+  display: flex;
+  flex: 1;
+  min-width: 0;
 }
 
-.panel.git,
-.panel.prompts {
-  border-left: 1px solid var(--line);
+.split {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+.split.col {
+  flex-direction: column;
+}
+
+.split-handle {
+  position: relative;
+  z-index: 5;
+  flex: none;
+  background: var(--line);
+}
+
+.split.row > .split-handle {
+  width: 1px;
+  cursor: col-resize;
+}
+
+.split.col > .split-handle {
+  height: 1px;
+  cursor: row-resize;
+}
+
+.split-handle::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+}
+
+.split-handle:hover,
+.split-handle:active {
+  background: var(--accent);
+}
+
+/* Its size comes from the split, never from its content: a panel reloading never re-lays out the tree. */
+.pane-group {
+  position: relative;
+  contain: strict;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--panel);
+}
+
+.pane-group > aside,
+.pane-group > .main {
+  flex: 1;
+  min-height: 0;
+}
+
+.pane-tabs {
+  display: flex;
+  flex: none;
+  overflow-x: auto;
+  scrollbar-width: none;
+  gap: 2px;
+  padding: 4px 6px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.pane-tab {
+  flex: none;
+  padding: 4px 10px;
+  white-space: nowrap;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--fg-muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.pane-tab:hover {
+  color: var(--fg-bright);
+}
+
+.pane-tab.on {
+  border-bottom-color: var(--accent);
+  color: var(--fg-bright);
+}
+
+/* A terminal panel's shell (shared by every tab). */
+.pane-term {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  background: var(--bg);
+}
+
+/* While a panel is dragged: catches the drag over terminals and panels; the preview shows where it would go. */
+.pane-drops {
+  position: fixed;
+  z-index: 50;
+  inset: 0;
+}
+
+.drop-preview {
+  position: fixed;
+  border: 2px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  pointer-events: none;
 }
 
 .prompt-list {

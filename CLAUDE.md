@@ -4,11 +4,10 @@ A fast terminal built around coding agents (Claude Code, Codex, Gemini CLI, Copi
 
 ## Performance comes first (hard requirement)
 
-**Speed beats every feature.** A feature that makes Rift slower does not ship, however useful it is.
+**Speed beats every feature.** A feature that makes Rift slower does not ship.
 
-- Before building a feature, estimate its cost on the budget below. If it can slow tab switch, new tab, typing, output or startup, or adds idle work, **say so up front and push back hard**: name the cost, propose a cheaper design or dropping it. Never implement it silently, never soften the warning.
-- If the user still wants it, build the cheapest version, run `npm run bench` and report the numbers. Over budget = not done.
-- Every change to tabs, terminal, panels or rendering runs the bench before it is committed.
+- Before building, estimate the cost on the budget below. If it can slow tab switch, new tab, typing, output or startup, or adds idle work, **say so up front and push back hard** (name the cost, propose a cheaper design or dropping it). Never implement it silently.
+- If the user still wants it: cheapest version, `npm run bench`, report the numbers. Over budget = not done. Every change to tabs, terminal, panels or rendering runs the bench before it is committed.
 
 | Action                               | Budget        |
 |--------------------------------------|---------------|
@@ -20,138 +19,132 @@ A fast terminal built around coding agents (Claude Code, Codex, Gemini CLI, Copi
 | Idle CPU with 10 tabs                | ~0 %          |
 
 How we hold it:
-- Each tab's terminal stays **mounted**; switching only toggles `display`. Never destroy/recreate a terminal or replay scrollback. Hidden tabs receive PTY output but do not render.
-- Nothing runs on a tab switch except showing the tab: panels, git and stats load later, debounced, off the main thread.
-- No polling, no file watchers, no timers while idle. No UI-thread work that scales with scrollback, repo size or number of tabs.
+- Each tab's terminal stays **mounted**; a switch only toggles `display`. Never recreate a terminal or replay scrollback. Hidden tabs receive PTY output but do not render.
+- Nothing runs on a tab switch but showing the tab: panels, git, stats and the session save come later, debounced. No polling, watchers or idle timers; no UI-thread work that scales with scrollback, repo size or tab count.
 - One spare shell is pre-spawned so "new tab" just attaches it.
-- `.topbar`/`.sidebar` have `contain: layout paint style`, `.terms` `contain: strict`; the top bar updates one frame after the switch (`barTab` in rAF). Without them a switch cost ~4 ms more and failed the bench.
-- Measured rejections (keep them): WebGL renderer (~54 ms vs ~15 ms p95 cycling 20 tabs, ~16 context cap); refitting the terminal while dragging a resizer (100+ ms per frame); resizing hidden tabs on their next switch (~149 ms p95: they resize in idle time instead, `resizeHiddenTabs`); live panels (user's choice: no watcher); Monaco (MBs, slow start: CodeMirror instead).
-- Known floor: xterm resumes a hidden terminal via IntersectionObserver, ~1 extra frame (20-27 ms p50 key → rendered). Next thing to attack if switching ever feels slow.
+- `.topbar`/`.sidebar` `contain: layout paint style`, `.terms` and `.pane-group` `contain: strict`; the top bar updates one frame after the switch (`barTab` in rAF). Without them a switch cost ~4 ms more.
+- Measured rejections (keep them): WebGL renderer (~54 vs ~15 ms p95 cycling 20 tabs, ~16 context cap); refitting while dragging a resizer (100+ ms/frame); resizing hidden tabs on their next switch (~149 ms p95: done in idle time instead, `resizeHiddenTabs`); live panels (user's choice); Monaco (CodeMirror instead); per-tab terminal splits (N shells per tab, N terminals rendered per switch).
+- Known floor: xterm resumes a hidden terminal via IntersectionObserver, ~1 extra frame (20-27 ms p50 key → rendered). Next to attack if switching ever feels slow.
 
 ## Stack
 
-- **Tauri 2** (Rust backend, system WebView). No Electron.
+- **Tauri 2** (Rust, system WebView). No Electron.
 - **Rust**: PTY via `portable-pty` (ConPTY on Windows), git via the `git` CLI (the user's config/hooks), state in the app data dir (`%APPDATA%\dev.rift.terminal\`: `session.json`, `settings.json`, `prompts.json`, `scrollback/`).
 - **Frontend**: TypeScript + Solid. Terminal: **xterm.js, DOM renderer**. Editor: CodeMirror 6 (lazy).
-- **Shells** (`shell.rs`): default Windows: PowerShell 7, else Windows PowerShell; Linux/macOS: `$SHELL` (fallback zsh on macOS, bash on Linux). Profiles (installed only): PowerShell 7, Windows PowerShell, Command Prompt, Git Bash, WSL; Unix: login shell + `/etc/shells`. Default in Settings; right-click + for another; a new tab inherits the active tab's shell (`ui.shell`). The spare shell is only for the default shell.
+- **Shells** (`shell.rs`): default PowerShell 7, else Windows PowerShell; Linux/macOS `$SHELL` (fallback zsh / bash). Profiles (installed only, listed once): PowerShell 7, Windows PowerShell, cmd, Git Bash, WSL; Unix: login shell + `/etc/shells`. Default in Settings; right-click + for another; a new tab inherits the active tab's shell (`ui.shell`). The spare shell is only for the default shell.
 
 ## Architecture
 
 ```
 src-tauri/src/
-  pty.rs            spawn, resize, read/write, spare shell (Tauri-free, tested against real shells)
+  pty.rs            spawn, resize, write (one writer thread per shell), spare shell (Tauri-free, tested on real shells)
   shell.rs          per-OS shells + integration (cwd reporting, startup command), user rc files untouched
   session.rs        what to restore: tabs (cwd, opaque ui) + agent session per tab
   scrollback.rs     per-tab history (`<id>.ans`) saved on close, shown again on restore
   hook.rs           `rift hook` client + server: named pipe (Windows) / Unix socket
-  agents/           AgentHarness trait + adapters (claude, codex, gemini, copilot); config.rs: shared hook-file and one-shot helpers
-  git.rs            branch from .git/HEAD (no process); status/diff/stats/commit/worktree via git CLI (CREATE_NO_WINDOW)
-  files.rs          one directory level per call (never walks recursively)
+  agents/           AgentHarness trait + adapters (claude, codex, gemini, copilot); config.rs: hook files, one-shot runs
+  git.rs            branch from .git/HEAD (no process); status/diff/stats/commit/worktree via git CLI
+  process.rs        runs git and one-shots: no window, stdin + both outputs at once, killed with its children on timeout
+  files.rs          one directory level per call (never recursive)
   settings.rs       settings.json (frontend owns its shape)
   explorer_menu.rs  "Open in Rift" registry entries (HKCU) + `rift.exe <dir>` parsing
-  lib.rs / main.rs  Tauri commands + setup / `rift hook|status <harness>` subcommands, else the app
+  lib.rs / main.rs  Tauri commands + setup / `rift hook|status <harness>`, else the app
 src/
   App.tsx           wiring: restore/save, keys, agent status, top bar, Enable banners
-  tabs/             layout.ts (pure: order, moves, titles, notify rule; tested), Tab.ts (state as Solid signals), Sidebar.tsx, GitStats.tsx, icons.tsx, nav.ts
+  tabs/             layout.ts (pure: order, moves, titles, notify rule), Tab.ts (Solid signals), Sidebar, GitStats, icons, nav
   terminal/         TermView.ts (one xterm per tab), themes.ts, osc.ts, paths.ts
-  panels/           Explorer, GitPanel, Prompts, diff.ts, fileIcons.ts
-  ui/               Menu, Resizer (+ resize.ts, pure), Icon, PromptDialog, FindBar
-  docs/             DocView.ts (one open file), place.ts (pure; tested), editor.ts + markdown.ts (lazy chunks)
-  settings/         settings.ts (pure + tested), SettingsPage.tsx
+  panels/           panes.ts (tree of splits, pure), PaneTree.tsx (tree + drag and drop), Consoles.tsx (terminal panels), Explorer, GitPanel, Prompts, diff.ts, fileIcons.ts
+  docs/             docs.ts (open/show/close in a tab), DocView.ts, place.ts (pure), editor.ts + markdown.ts (lazy)
+  ui/               Menu, Resizer (+ resize.ts), Icon, PromptDialog, FindBar
+  settings/         settings.ts (pure), SettingsPage.tsx
   update.ts, bench.ts
 ```
 
-Frontend ↔ backend: Tauri commands, the PTY `Channel`, and events (`pty-exit`, `agent-status`, `agent-usage`, `open-dir`). Add a module only when its feature is built. No abstraction until a second user exists, except `AgentHarness` (stated requirement).
+Frontend ↔ backend: Tauri commands, the PTY `Channel`, events (`pty-exit`, `agent-status`, `agent-usage`, `open-dir`). A module only when its feature is built; no abstraction until a second user exists, except `AgentHarness` (stated requirement). No migration or compatibility code: a saved shape that no longer fits falls back to defaults (`merge*` only validate).
 
 ## Decisions (keep them)
 
 ### Terminal
-- `pty_open` takes a Tauri `Channel`; output goes as `InvokeResponseBody::Raw` bytes (no JSON) to `term.write(Uint8Array)`. Exit = `pty-exit`, detected by waiting on the child (ConPTY keeps the pipe open after exit).
-- New tabs open in the **active tab's folder**, after it, in its group. Spare shell: one shell waiting in a folder (home at launch); `pty_prewarm(cwd)` once the active tab and its folder are stable for 1 s. `pty_open` takes it only for the same folder (case/trailing-separator insensitive), default shell, no startup command; its output is buffered and replayed on attach.
-- ConPTY sends `ESC[6n` at startup and blocks until answered; xterm answers. `TermView` queues input until `pty_open` returns (the replayed spare output triggers the answer before the id is known). Tests answer by hand (`\x1b[1;1R`).
-- portable-pty loads any `conpty.dll` found by name, and WezTerm puts an old one on `PATH` (its `OpenConsole.exe` hung Rift at startup, waiting in `ClosePseudoConsole`): `lock_dll_search` (`SetDefaultDllDirectories`, first thing in `run`) limits DLL search to the app folder and System32. Commands that create or close a pseudo console (`pty_open`, `pty_close`, `shell_set_default`, `session_restore`) are `command(async)`: they wait for the console host and must not run on the main thread. `pty_write`/`pty_resize` stay sync (hot path, no wait).
-- Shell integration: PowerShell `-NoExit -EncodedCommand <init + startup>` (wraps the user's prompt to emit OSC 9;9); cmd `/K` with a `PROMPT` emitting OSC 9;9; bash (also Git Bash, MSYS paths converted) `--rcfile` sourcing ~/.bashrc, then OSC 7; zsh `ZDOTDIR` whose files source the user's own, then OSC 7. Startup command via `RIFT_STARTUP`. WSL and other shells run plain. User profiles untouched.
-- Shortcuts: capture-phase `keydown` (`tabs/nav.ts`), so xterm never sees them; dispatched only through `settings.ts` `actionFor`. Windows/Linux new/close tab = Ctrl+Shift+T/W (plain Ctrl+T/W belong to the shell and the agents); macOS uses Cmd+T/W/F. A shortcut needs Ctrl, Alt or Cmd, or is F1-F12 (`isValidShortcut`).
-- The webview never reloads: F5 / Ctrl+R / Cmd+R are blocked outside a terminal (`isReloadKey`; a reload restarts every shell). F5 = refresh the files and git panels.
-- Find: Ctrl+Shift+F (`FindBar`, search addon). Links: Ctrl+click only (`open_url`, http(s) only). Zoom: Ctrl+= / - / 0.
-- Shift+Enter in an agent tab sends ESC+CR (new line); in a shell it stays Enter. Image paste: the agent reads the clipboard on its own key (Alt+V on Windows, sent by xterm as `ESC v`; Ctrl+V on Linux/macOS); a paste without text sends 0x16. Both are Claude's keys, untested in the other agents.
-- Drag a file from the files panel onto a terminal types its path (`quotePath`). OS file-manager drops are not supported: Tauri's native drag-drop breaks HTML5 drag and drop on Windows (`dragDropEnabled: false`).
+- `pty_open` takes a Tauri `Channel`; output = `InvokeResponseBody::Raw` bytes to `term.write(Uint8Array)`. Exit = `pty-exit`, from waiting on the child (ConPTY keeps the pipe open). `pty_write` only queues to the shell's writer thread: a shell that stops reading blocks nothing.
+- New tabs open in the **active tab's folder**, after it, in its group. Spare shell: waits in a folder (home at launch); `pty_prewarm(cwd)` once the active tab and folder are stable for 1 s; `pty_open` takes it only for the same folder (case/trailing-separator insensitive), default shell, no startup command; its output is replayed on attach.
+- portable-pty loads any `conpty.dll` found by name; WezTerm puts an old one on `PATH` (its `OpenConsole.exe` hung Rift at startup in `ClosePseudoConsole`): `lock_dll_search` (`SetDefaultDllDirectories`, first thing in `run`) limits DLL search to the app folder and System32. Commands that create or close a pseudo console (`pty_open`, `pty_close`, `shell_set_default`, `session_restore`) are `command(async)`: they wait for the console host, never on the main thread. `pty_write`/`pty_resize` stay sync (hot path).
+- ConPTY sends `ESC[6n` at startup and blocks until answered; xterm answers. `TermView` queues input until `pty_open` returns. Tests answer by hand (`\x1b[1;1R`).
+- Shell integration reports the cwd at every prompt (OSC 9;9 PowerShell/cmd, OSC 7 bash/zsh, Git Bash MSYS paths converted) without touching the user's rc files (wrappers that source them). Startup command via `RIFT_STARTUP`. WSL/others run plain.
+- Shortcuts: capture-phase `keydown`, so xterm never sees them; dispatched only through `settings.ts` `actionFor`. Windows/Linux new/close tab = Ctrl+Shift+T/W (Ctrl+T/W/F belong to the shell and agents); macOS Cmd+T/W/F. A shortcut needs Ctrl, Alt or Cmd, or is F1-F12.
+- The webview never reloads (it would restart every shell): F5 / Ctrl+R / Cmd+R blocked outside a terminal (`isReloadKey`). F5 = refresh files and git panels.
+- Find Ctrl+Shift+F (search addon). Links: Ctrl+click, http(s) only (`open_url`). Zoom Ctrl+= / - / 0. Default font 12 px.
+- Shift+Enter in an agent tab sends ESC+CR. Image paste: the agent reads the clipboard on its own key (Alt+V on Windows = `ESC v`; Ctrl+V elsewhere); a paste without text sends 0x16. Claude's keys, untested in other agents.
+- Drag a file from the files panel onto a terminal types its path (`quotePath`). No OS file-manager drops: Tauri's native drag-drop breaks HTML5 drag and drop on Windows (`dragDropEnabled: false`).
 
 ### Sidebar and attention
-- Vertical tabs. One global tab array + `group` per tab; the **visual order** (`visualOrder`) drives the sidebar and Ctrl+PgUp/PgDn. Named groups (collapsible, colored, draggable); a colored group's color always wins over the tab's (`ownRowColor`). Activating a tab in a collapsed group expands it.
-- Title: user name > agent's terminal title > folder name; a title ending in `.exe` is ignored. Icon: shell prompt, or the agent's icon by harness id (from hooks; no process polling). Under the tab: branch + git stats. Tab row size Compact / Comfortable / Large (36 / 44 / 52 px, `--tab-row`, no refit).
-- Name/color/group/shell/snap/docs are opaque `ui` per tab, groups and panel state `layout`: the backend never interprets them.
-- Badges: working = spinning magenta, done = green, blocked = yellow; unread dot + toast when done/blocked and not in front. `needsAttention` = blocked, or done and unread. Ctrl+Shift+U goes to the next one (blocked first). Filter All / Needs me / Working. Window title `Rift <version> — N waiting`. Taskbar flashes (`requestUserAttention`) in the background. A seen "done" fades after 3 s (`fadeDoneWhenSeen`). Esc in a working/blocked agent tab sets it idle (`statusAfterEscape`): agents fire no hook on interrupt.
-- Closing with agents working/blocked asks first (`onCloseRequested`). Window focus from Tauri `onFocusChanged` (`document.hasFocus()` is unreliable in WebView2).
-- "New <agent> in a worktree…" (one entry per agent used on this machine): `git_worktree_add` creates/checks out the branch in `<repo>.worktrees/<branch>`, then a tab there runs `AgentHarness::start_command`.
-- UI: icons from `ui/Icon.tsx` (SVG, `currentColor`), never Unicode glyphs. Menus work from the keyboard and render in a `Portal` (the sidebar's `contain: paint` clipped them); F2 renames. Focus returns to the terminal after a menu, rename or tab click. Text input uses `ui/PromptDialog.tsx`, never `window.prompt` (blocked in WebView2).
+- Vertical tabs, one global array + `group` per tab; the **visual order** (`visualOrder`) drives the sidebar and Ctrl+PgUp/PgDn. Named groups (collapsible, colored, draggable); a group's color wins over the tab's. Activating a tab in a collapsed group expands it.
+- Title: user name > agent's terminal title > folder (a title ending in `.exe` is ignored). Icon: shell prompt or the agent's (by harness id, from hooks). Under it: branch + git stats. Row size 36 / 44 / 52 px (`--tab-row`, no refit).
+- Per-tab `ui` (name, color, group, shell, snap, docs) and `layout` (groups, panes, widths) are opaque to the backend.
+- Badges: working = spinning magenta, done = green, blocked = yellow; unread dot + toast when done/blocked and not in front. `needsAttention` = blocked, or done and unread. Ctrl+Shift+U = next one (blocked first). Filter All / Needs me / Working. Title `Rift <version> — N waiting`; taskbar flashes in the background; a seen "done" fades after 3 s. Esc in a working/blocked agent tab sets it idle (agents fire no hook on interrupt).
+- Closing with agents working/blocked asks first. Window focus from Tauri `onFocusChanged` (`document.hasFocus()` is unreliable in WebView2).
+- "New <agent> in a worktree…": `git_worktree_add` → `<repo>.worktrees/<branch>`, a tab there runs `AgentHarness::start_command`.
+- UI: SVG icons (`ui/Icon.tsx`, `currentColor`), never Unicode glyphs. Menus keyboard-usable, in a `Portal` (`contain: paint` clipped them); F2 renames. Focus returns to the terminal after a menu, rename or tab click. Text input via `ui/PromptDialog.tsx` (`window.prompt` is blocked in WebView2).
 
 ### Panels and top bar
-- Files (left, Ctrl+Shift+E), git (right, Ctrl+Shift+G), prompts (right, Ctrl+Shift+O). Resizable (`ui/Resizer.tsx`); state and widths saved in `layout`.
-- **Not live**: panels load when shown, when the shown tab changes, or on ⟳/F5. They follow `panelTab`, which trails the active tab by 150 ms (holding Ctrl+PgDn never loads every tab passed). All commands async; stale answers dropped. The git panel reloads in place (checks and open diff kept, `keepChecked`) when an agent in its repo finishes, and on a switch to a tab of the same repo only if a prompt or agent event marked it changed (`changedRepos`). GitPanel loads on `on(() => props.root)` only: a plain effect re-ran `load()` on every answer (git in a loop).
-- Explorer root = repo root, else cwd; folders listed on first expand, cached until ⟳. Delete (macOS also Cmd+Backspace) or the menu moves to Recycle Bin / Trash (`fs_trash`, `trash` crate; never a permanent delete) after a confirm; documents under it close (`isUnder`).
-- Each tab knows its repo root + branch: `git_head` reads `.git/HEAD` at every prompt (OSC 9;9 / OSC 7). Git stats (`git_stats`, two git commands in parallel, ~80 ms): 1.5 s after a prompt or agent status change (coalesced per tab) and after a commit, **never on a tab switch**.
-- Top bar (Warp-style): active tab title, git button (branch + `+added −deleted ↑ahead ↓behind`), Claude's 5h/7d plan usage.
-- Commit: checkboxes, message, Ctrl+Enter. `git::commit` commits exactly the checked files (`git add` for untracked, then `git commit --only`; renames via `Change.orig`); pathspecs NUL-separated on stdin with `--literal-pathspecs`.
-- Git actions, all on a click: branch menu (last 30 local branches: `git switch`; "New branch…" = `git switch -c`), Pull (the user's merge/rebase config), Push (no upstream → `-u <first remote> HEAD`), Commit & Push. `GIT_TERMINAL_PROMPT=0`. `onHeadChanged` re-reads branch + stats of every tab of that repo.
-- History (Changes | History): `git log -n200`. Click = the commit's files, Shift+click = the range, both ends included (`pickCommits`, `commitRange`, `inRange`); a file → its diff. Commit ids checked hex before reaching git. Commit list and file list resize in height (bottom `Resizer`, not saved).
-- ✨ Generate: the checked files' diff (capped 60 KB) → `one_shot` of the first agent used on this machine (order Claude, Codex, Gemini, Copilot; the tooltip names it). Conventional Commits, no co-author line (`COMMIT_PROMPT`). Killed after 120 s with its child processes (`config::run`; npm `.cmd` shims start node).
-- Prompts: one list per repo (`promptKey`: case/separator-insensitive) in `prompts.json` (frontend owns the shape, `mergePrompts`), saved on each edit. Enter adds/saves, Shift+Enter = new line. The ← button or a drag onto the terminal (`PROMPT_DRAG_TYPE`, removed on `dragend` if dropped) pastes it (`TermView.paste`, bracketed, no Enter) and removes it.
+- Panes (`panes.ts`, `PaneTree.tsx`): one tree of splits for every tab, saved as `layout.panes`. A split = row/column with flex weights (`sizes`) and a 1px handle between children; a leaf = a group of panels, tabs when several (`shown` undefined = closed, keeps its place). "main" (the tab's top bar, terminals, documents) is one leaf alone in its group; its `<main>` is built once and moved there, so tab terminals never remount. Panes render by id (`index`, `For` over ids): a move or resize never remounts siblings. Defaults [files | main | git + prompts]; Ctrl+Shift+E / G / O show or hide.
+- Move by dragging a panel's header (outside its buttons) or tab; the spot under the cursor lights up like VS Code: a pane's outer quarter = beside it (`zoneAt`, `insert`: a sibling when the parent runs that way, else a new split), its middle = a tab (none on main), within 24 px of the window edge = a full side; `sameSpot` = no-op. No right-click menu (user's choice). Alt+arrows (Ctrl+Alt on macOS) focus the pane on that side (`nextPane`): main → its terminal or document, a terminal panel → its shell, else `[data-autofocus]` (the new-prompt box) or the first input.
+- Terminal panels (`Consoles.tsx`, `term:<n>`): shells for the whole window, not per tab. + in the top bar or a terminal's header (Ctrl+Shift+K) opens one as a tab of the last used (the first below main), in its folder (OSC cwd), else the active tab's. Starts when first shown, survives hiding and moves, gone on × or shell exit. Not restored, no scrollback.
+- **Not live**: panels load when shown, when the shown tab changes, or on ⟳/F5. They follow `panelTab`, 150 ms behind the active tab. Commands async, stale answers dropped. The git panel reloads in place (checks and diff kept) when an agent in its repo finishes, and on a switch to a tab of the same repo only if marked changed (`changedRepos`). GitPanel loads on `on(() => props.root)` only (a plain effect looped git).
+- Explorer root = repo root, else cwd; folders listed on first expand, cached until ⟳. Delete (macOS Cmd+Backspace) moves to Recycle Bin / Trash after a confirm (`fs_trash`, never permanent); documents under it close.
+- Each tab knows its repo root + branch: `git_head` reads `.git/HEAD` at every prompt. Stats (`git_stats`, ~80 ms): 1.5 s after a prompt or agent status change (coalesced per tab) and after a commit, **never on a tab switch**.
+- Top bar (Warp-style): title, + (new terminal), prompts, git button (branch + `+added −deleted ↑ahead ↓behind`), Claude's 5h/7d plan usage.
+- Git, all on a click: commit exactly the checked files (`git commit --only`, pathspecs on stdin with `--literal-pathspecs`), branch menu, Pull (user's config), Push (no upstream → `-u <first remote> HEAD`), history (Shift+click = a range, both ends). `GIT_TERMINAL_PROMPT=0`; any git command killed after 5 min. Commit ids checked hex. `onHeadChanged` re-reads branch + stats of every tab of the repo.
+- ✨ Generate: checked files' diff (capped 60 KB) → `one_shot` of the first agent used here (tooltip names it), Conventional Commits, no co-author (`COMMIT_PROMPT`), killed after 120 s with its children.
+- Prompts: one list per repo (`promptKey`) in `prompts.json`, saved on each edit. ← or a drag onto the terminal pastes it (bracketed, no Enter) and removes it.
 
 ### Documents (files opened in a tab)
-- A click in the files panel opens the file **in the tab**, instead of its terminal; the top bar becomes sub-tabs `Terminal | file × | ...` (same height: terminals never refit). Setting: one document at a time (replaces the shown or last one, never one with unsaved changes, `placeDoc`) or a new sub-tab each time. Not text (binary, not UTF-8, > 5 MB, `files::read_text`) → default app.
-- `DocView` is like `TermView`: mounted for the tab's life, `display` toggle. Reads the file only once shown and still visible (a restore activates every tab); re-checks the mtime 150 ms after being shown (changed outside + no unsaved edits → reloaded). No watcher. Measured: switching to a document tab = 1.5-1.9 ms of work.
-- Editor `docs/editor.ts`: lazy chunk (~114 KB gz), languages per file (`@codemirror/language-data`). Highlighting, search, undo, Ctrl+S; no LSP/autocomplete. Line endings kept (`lineSeparator`). Terminal font via CSS variables.
-- Markdown reader (`docs/markdown.ts`, lazy, marked + **DOMPurify**: the page can call Rift's commands, so files never bring scripts, handlers, forms or `style`), Edit/Read in the top bar. Links: http(s) → browser, relative → opened in Rift, never navigate the app. Relative images via the asset protocol (`localImage` + `convertFileSrc`).
+- A click in the files panel opens the file **in the tab** (`docs.ts`); the top bar becomes sub-tabs `Terminal | file × | ...` (same height: no refit). Setting: one document at a time (`placeDoc`: replaces the shown or last one, never an unsaved one) or a sub-tab each. Not text (binary, not UTF-8, > 5 MB) → default app; from a Markdown link → shown in the file manager, never opened (a link to an .exe would run it).
+- `DocView` is like `TermView`: mounted for the tab's life, `display` toggle; reads the file once shown and still visible; re-checks the mtime 150 ms after being shown (changed outside, no unsaved edits → reloaded). No watcher. Switching to a document tab ≈ 1.5-1.9 ms.
+- Editor (`editor.ts`, lazy ~114 KB gz, `@codemirror/language-data`): highlighting, search, undo, Ctrl+S; line endings kept; terminal font via CSS variables. No LSP/autocomplete.
+- Markdown reader (`markdown.ts`, lazy, marked + **DOMPurify**: the page can call Rift's commands, so no scripts, handlers, forms or `style`), Edit/Read in the top bar. Links: http(s) → browser, relative → opened in Rift, never navigate the app. Relative images via the asset protocol.
 - Unsaved changes: confirm before closing the document, its tab or Rift. Open documents saved per tab (`ui.docs`, `ui.doc`).
 
 ### Settings and themes
-- Overlay (⚙ or Ctrl+,; Esc closes); Rift's shortcuts are off while open. `settings.ts` is the single source: `ACTIONS`, `defaultKeys(mac)`, `mergeSettings` (any saved shape → valid), `comboOf`, `actionFor`, `bind`. Settings load before tabs restore.
-- Every UI color is a CSS variable (`:root` dark, `[data-theme="light"]`), never a literal. Terminal palettes in `terminal/themes.ts`. "System" follows `prefers-color-scheme` live.
-- Theme/font apply live via `TermView.setLook`; the effect tracks only theme + font (a shortcut edit must not re-render terminals). A font change re-wraps: visible tab now, hidden ones in idle time.
+- Overlay (⚙ or Ctrl+,; Esc closes); shortcuts off while open. `settings.ts` is the single source (`ACTIONS`, `defaultKeys(mac)`, `mergeSettings`, `actionFor`, `bind`). Settings load before tabs restore.
+- Every UI color is a CSS variable (`:root` dark, `[data-theme="light"]`). Terminal palettes in `terminal/themes.ts`. "System" follows `prefers-color-scheme` live.
+- Theme/font apply live (`TermView.setLook`); the effect tracks only theme + font. A font change re-wraps the visible tab now, hidden ones in idle time.
 
 ### Session restore
-- Frontend owns the tab list (`session_update`); hooks own the agent binding per pty. `SessionStore` writes on every change (tmp + rename), never before the frontend's first report, never after the freeze (`WindowEvent::Destroyed`, not the cancellable close request).
-- A restored tab binds its session at `pty_open` and runs the harness's `resume_command` in its cwd (its own session, not the last one). `SessionEnded` unbinds only a matching id (`/clear`). Resume ids are validated (UUID for Claude, `config::safe_id` for the others): no injection from a tampered file.
-- Scrollback: on close and before an update restart, each **shell** tab's last 2000 lines are serialized with colors to `scrollback/<snap>.ans`, written back on restore under a dim "── restored ──" line. Agent tabs skipped (resume redisplays). Orphans pruned; ids validated.
-- `session_restore` first closes every tab shell (spare kept): dev reloads would leak shells. Bench mode uses temp session/settings files; `RIFT_DATA_DIR` gives an isolated profile (and disables single instance) for demos.
+- Frontend owns the tab list (`session_update`, sent 300 ms after the last change, at once before closing or updating: `flushSave`); hooks own the agent binding per pty. `SessionStore` writes tmp + rename, never before the first report, never after the freeze (`WindowEvent::Destroyed`).
+- A restored tab binds its session at `pty_open` and runs the harness's `resume_command` in its cwd (its own session). `SessionEnded` unbinds only a matching id (`/clear`). Resume ids validated (UUID for Claude, `config::safe_id` for others).
+- Scrollback: on close and before an update restart, each **shell** tab's last 2000 lines (with colors) to `scrollback/<snap>.ans` (tmp + rename), written back under a dim "── restored ──" line. Agent tabs skipped (resume redisplays). Orphans pruned; ids validated.
+- `session_restore` first closes every tab shell (dev reloads would leak them). Bench mode: fresh temp session/settings/prompts files. `RIFT_DATA_DIR` = isolated profile, no single instance.
 
 ### Agent harness
-- Everything agent-specific goes through `AgentHarness` (`agents/mod.rs`): `id`, `name`, `detected` (its config folder exists: only those get "Enable", a worktree entry and Generate), `parse_hook`, `resume_command`, `start_command`, `hooks_installed`, `install_hooks`, `setup` (what Enable writes and where, shown before the click), `one_shot`. UI and session code never mention an agent by name; they use `AgentHarness`, `AgentEvent`, `AgentSession { harness, session_id }`.
-- Hook pipeline: shells get `RIFT_TAB_ID` (pty id) and `RIFT_PIPE` (`\\.\pipe\rift-<pid>`, or `$XDG_RUNTIME_DIR`/temp `rift-<pid>.sock`). The agent's hook runs `rift hook <harness>`, forwarding stdin + tab id; outside Rift a silent no-op; always exits 0, prints nothing. The server handles connections **sequentially** (status depends on order). Hook call ~11-25 ms.
-- Agent config files are written only on the user's "Enable" click (never otherwise; uninstall not built): other settings and key order kept, older Rift entries replaced, `.bak` written, temp file + rename (`config::write_json`).
-- Claude Code: `~/.claude/settings.json`, **exec form** (`"command": "<path>\rift.exe", "args": ["hook", "claude"]`; shell form would go through Git Bash). `SessionStart` → idle + bind, `SessionEnd` → unbind, `UserPromptSubmit`/`PostToolUse` → working, `Stop` → done, `Notification` → blocked (except `idle_prompt`). The same click sets `statusLine` to `rift status claude` (forward slashes, quoted only with a space) unless the user has their own (kept, counts as installed). It prints `ctx 34% · 5h 23% · 7d 41%` back into Claude and forwards the JSON → `agent-usage` (`agents::parse_usage`): context on the tab, plan limits in the top bar. Event-driven only. One-shot `claude -p --model haiku --tools "" --no-session-persistence`.
-- Other agents, built from their docs/source and not run live (none installed or logged in here):
-  - Codex: `~/.codex/hooks.json`, command line through `cmd /C` / `$SHELL -lc`. `PermissionRequest` → blocked. Codex runs new hooks only once trusted: `setup` tells the user to approve them with `/hooks` (Rift never writes trust hashes). Resume `codex resume <id>`; one-shot `codex exec --ephemeral --sandbox read-only`.
-  - Gemini CLI: `~/.gemini/settings.json`, command line through PowerShell (`& '<exe>' hook gemini`) / bash. `BeforeAgent`/`AfterTool` → working, `AfterAgent` → done, `Notification` → blocked. Hooks must print nothing and never exit 2 (= block). Resume `gemini --resume <id>`; one-shot `gemini -p … -m flash-lite`.
-  - Copilot CLI: Rift's own file `~/.copilot/hooks/rift.json` (or `$COPILOT_HOME`), rewritten whole, exec form. PascalCase events so payloads are Claude-shaped; `Notification` matcher `permission_prompt|elicitation_dialog` → blocked. Resume `copilot --resume=<id>`; one-shot reads instructions + diff from stdin (`-p` ignores stdin).
-  - No status line / usage for them (none offers one to external commands).
-  - OpenCode: not built. Its plugins run in a shared background server (no tab environment) and its plugin API is mid-rewrite (V1 docs vs V2 source).
-- npm installs agents as `.cmd` shims on Windows: `config::program` searches PATH for `.exe`/`.cmd`/`.bat`; Rust escapes batch arguments (tested end-to-end through a node shim).
+- Everything agent-specific goes through `AgentHarness` (`agents/mod.rs`): `id`, `name`, `detected` (config folder exists: only those get Enable, a worktree entry and Generate), `parse_hook`, `resume_command`, `start_command`, `hooks_installed`, `install_hooks`, `setup` (what Enable writes, shown before the click), `one_shot`. `Harnesses::new(home)` lists them. UI and session code never name an agent.
+- Hooks: shells get `RIFT_TAB_ID` and `RIFT_PIPE` (`\\.\pipe\rift-<pid>`, or `$XDG_RUNTIME_DIR`/temp `rift-<pid>.sock`). `rift hook <harness>` forwards stdin + tab id; outside Rift a silent no-op; always exits 0, prints nothing. The server handles connections **in order** (status depends on it), drops a client silent for 2 s and survives a failed connection. ~11-25 ms per hook.
+- Agent config files are written only on the user's Enable click: other settings and key order kept, Rift's own entries replaced, `.bak` + tmp + rename.
+- Claude Code: **exec form** hooks (a shell form would go through Git Bash); `idle_prompt` notifications are not a block. Enable also sets `statusLine` to `rift status claude` (forward slashes, quoted only with a space: PowerShell would not run a quoted path) unless the user has one: it prints `ctx 34% · 5h 23% · 7d 41%` and forwards the JSON (`agent-usage`: context on the tab, plan limits in the top bar).
+- Codex, Gemini CLI, Copilot CLI: built from their docs/source, never run live (event mappings in each adapter + tests). Codex runs new hooks only once trusted (`/hooks`; Rift never writes trust hashes). Gemini hooks never print nor exit 2 (= block). Copilot gets Rift's own file, rewritten whole, PascalCase events for Claude-shaped payloads. No status line for them. OpenCode not built (plugins in a shared server, API mid-rewrite).
+- npm agents are `.cmd` shims on Windows: `config::program` searches PATH for `.exe`/`.cmd`/`.bat`; batch arguments escaped (tested through a node shim).
 
 ## Windows specifics
-- Explorer menu ("Open in Rift" = new tab in the running window): Settings → Windows. `HKCU\Software\Classes\{Directory\shell, Directory\Background\shell, Drive\shell}\Rift`, command `"<exe>" "%V"`. Windows 11: under "Show more options" (top level needs MSIX + `IExplorerCommand`). Tests use `HKCU\Software\RiftTest-*`.
-- Single instance (off in bench mode): a second `rift.exe <dir>` forwards to the running Rift (`open-dir` → new tab) and exits. `dir_arg` fixes Explorer's drive-root quoting (`"C:\"` → `C:"`).
+- Explorer menu (Settings → Windows): HKCU registry entries only (Windows 11: under "Show more options"; the top level needs MSIX). Tests use `HKCU\Software\RiftTest-*`.
+- Single instance (off in bench mode): a second `rift.exe <dir>` forwards to the running Rift (`open-dir` → new tab). `dir_arg` fixes Explorer's drive-root quoting (`"C:\"` → `C:"`).
 
 ## Releases and CI
-- Repo https://github.com/o0Zz/Rift (public). CI: `lint` on Linux (fmt, clippy, tsc, vitest) + `test` on windows/ubuntu/macos (node available: a test runs an npm-style shim), then on master `installers` per OS (artifacts). Time is Rust compilation (~150 s cold): never add a second full compile per OS. The bench stays local (needs a visible window).
+- Repo https://github.com/o0Zz/Rift (public). CI: `lint` on Linux (fmt, clippy, tsc, vitest) + `test` on windows/ubuntu/macos, then on master `installers` per OS. Rust compilation is the time (~150 s cold): never a second full compile per OS. The bench stays local (needs a visible window). Clippy runs on Linux only: check `#[cfg(windows)]` code by hand.
 - Packaging: Windows NSIS; macOS universal `.dmg`, **unsigned**; Linux AppImage (self-updates) + `.deb`.
-- Versioning: repo stays `0.0.0`; CI builds `0.0.0+RUN` (dev) or `X.Y.Z+RUN` (tag `vX.Y.Z`), shown as `X.Y.Z.RUN`. The updater compares X.Y.Z only. First release: v1.0.0 (2026-11-01).
-- Release: `git tag vX.Y.Z && git push origin vX.Y.Z` → `release.yml` builds every OS with tauri-action and publishes one GitHub Release with `latest.json`.
-- Signing key `~/.tauri/rift.key` + `rift.key.password` (never in the repo), GitHub secrets `TAURI_SIGNING_PRIVATE_KEY(_PASSWORD)`; public key in tauri.conf.json. Losing it means installed copies cannot update.
-- In-app updater (`src/update.ts`, not in dev/bench): checks at startup and every 6 h, downloads in the background, "Restart now" or installs on close, after `session_freeze` and saving scrollback.
-- Measured: installer 2.4 MB, exe 7.2 MB.
+- Versioning: repo stays `0.0.0`; CI builds `0.0.0+RUN` or `X.Y.Z+RUN` (tag `vX.Y.Z`), shown `X.Y.Z.RUN`; the updater compares X.Y.Z. First release v1.0.0 (2026-11-01): installers 3.2 MB (Windows), 7.7 MB (dmg), 5.0 MB (deb), 83 MB (AppImage).
+- Release: `git tag vX.Y.Z && git push origin vX.Y.Z` → `release.yml` (tauri-action, every OS, one GitHub Release with `latest.json`).
+- Signing key `~/.tauri/rift.key` + `rift.key.password` (never in the repo), secrets `TAURI_SIGNING_PRIVATE_KEY(_PASSWORD)`, public key in tauri.conf.json. Losing it = installed copies cannot update.
+- Updater (`update.ts`, not in dev/bench): at startup and every 6 h, downloads in the background, "Restart now" or installs on close, after `session_freeze` and saving scrollback.
 
 ## Scope
-- Done: tabs, spare shell, shell profiles, session + per-tab agent resume, scrollback restore, grouped vertical tabs, agent status + notifications + attention tools (Claude Code, Codex, Gemini CLI, Copilot CLI), files / git / prompts panels (diff, commit selected files, history ranges, AI message, stats, top bar), worktrees, documents in tabs (editor + Markdown reader), settings (themes, fonts, tab size, shortcuts, Cmd on macOS), Explorer menu, auto-update, benches.
-- Next: multi-window, split panes, command palette (Ctrl+Shift+P), launch configurations, global hotkey, stage hunks, review comments sent to the tab's agent.
-- Out of scope (cost speed or not the product): Warp blocks / rewritten input editor (fights PSReadLine), built-in AI agent, Warp Drive / notebooks / team or session sharing, cloud agents, IDE features in the editor (LSP, autocomplete, project search), accounts. Revisit only if asked.
+- Done: tabs, spare shell, shell profiles, session + per-tab agent resume, scrollback restore, grouped vertical tabs, agent status + notifications + attention tools (4 agents), files / git / prompts / terminal panels in a tree of splits, worktrees, documents in tabs (editor + Markdown reader), settings, Explorer menu, auto-update, benches.
+- Next: multi-window, command palette (Ctrl+Shift+P), launch configurations, global hotkey, stage hunks, review comments sent to the tab's agent.
+- Out of scope (cost speed or not the product): Warp blocks / rewritten input editor, built-in AI agent, Warp Drive / notebooks / sharing, cloud agents, IDE features (LSP, autocomplete, project search), accounts. Revisit only if asked.
 
 ## Conventions
 - Rust: `cargo fmt`, `cargo clippy -- -D warnings`. Frontend: `tsc --noEmit`, vitest.
-- Every feature ships with tests in the same change. Prefer end-to-end: real PTY, real git repo in a temp dir, real hook JSON through the pipe.
-- Commits: **Conventional Commits** (`feat(scope): description`), one short subject line, optional brief body, no sign-off trailers.
-- Dev loop: keep `npm run tauri dev` running (the user watches changes live). Run tests with `CARGO_TARGET_DIR=src-tauri/target/test` so they don't fight the running app over `rift.exe`.
+- Every feature ships with tests. Prefer end-to-end: real PTY, real git repo in a temp dir, real hook JSON through the pipe.
+- Commits: **Conventional Commits**, one short subject line, optional brief body, no sign-off trailers.
+- Dev loop: keep `npm run tauri dev` running (the user watches live). Tests and bench with `CARGO_TARGET_DIR=src-tauri/target/test` so they don't fight the running app over `rift.exe`.
 
 ## Commands
 ```
@@ -160,7 +153,7 @@ npm run tauri build               # package
 cd src-tauri && cargo test        # backend tests (real shells)
 npm test                          # frontend tests (vitest)
 npm run typecheck                 # tsc --noEmit
-npm run bench                     # tab switch + heavy output in the real WebView (keep the window visible; fails over budget)
+npm run bench                     # tab switch + heavy output in the real WebView (window visible; fails over budget)
 npx tauri icon src-tauri/icons/rift.svg   # regenerate icons; then delete icons/android, icons/ios, 64x64.png and
                                   # touch tauri.conf.json (icons are re-embedded only when it changes)
 ```

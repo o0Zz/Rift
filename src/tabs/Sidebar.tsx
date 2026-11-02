@@ -22,8 +22,8 @@ export type SidebarProps = {
   onUpdateGroup(id: string, patch: Partial<Group>): void;
   onDeleteGroup(id: string): void;
   onCloseGroup(id: string): void;
-  panels: { explorer: boolean; git: boolean };
-  onTogglePanel(panel: "explorer" | "git"): void;
+  filesShown: boolean;
+  onToggleFiles(): void;
   onOpenSettings(): void;
   /** Sidebar filter: all tabs, those that need the user, or those whose agent is working. */
   filter: TabFilter;
@@ -213,8 +213,8 @@ export function Sidebar(props: SidebarProps) {
         <span class="head-buttons">
           <button
             class="icon-btn"
-            classList={{ on: props.panels.explorer }}
-            onClick={() => props.onTogglePanel("explorer")}
+            classList={{ on: props.filesShown }}
+            onClick={() => props.onToggleFiles()}
             title="Files (Ctrl+Shift+E)"
           >
             <Icon name="folder" />

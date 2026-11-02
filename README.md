@@ -27,7 +27,7 @@ that, and **speed beats features**: every feature has to keep switching tabs and
 | Switching tabs: main-thread work (p95) | **under 16 ms**, less than one frame |
 | Switching tabs: key press → tab on screen | **about 30 ms** typical, under 50 ms (p95) |
 | New tab | **instant**: a shell is already waiting in the current folder |
-| Windows installer / app | **2.4 MB** / 7 MB |
+| Windows installer | **3.2 MB** |
 
 The benchmark ships with the code (`npm run bench`: tab switching, and 8.7 MB of output printed without
 freezing the window) and fails when a change goes over budget.
@@ -73,7 +73,11 @@ freezing the window) and fails when a change goes over budget.
   Shift+click another one to see the changes of the whole range. Drag the lists' bottom edge to resize them.
 - **Prompts panel**: write your next prompts ahead of time, one list per repo. Click one to edit it (Enter saves,
   Shift+Enter for a new line); its ← arrow, or dragging it onto the terminal, pastes it there (you press Enter) and it leaves the list.
-- Panels open and close with one shortcut and resize by dragging their edge.
+- **Terminals panel**: extra shells shared by every tab (a dev server, logs), as many as you want. `+` in the top bar
+  opens one, in the folder of the last one you used.
+- Arrange the panels and the terminal like in VS Code, the same for every tab: drag a panel by its header or tab, and
+  the spot under the cursor lights up. Drop it on a side of any panel to split it there, on its middle to make it a tab,
+  or on the window's edge for a full side. Drag the lines between them to resize; Alt+arrows move the focus.
 - **Settings**: dark, light or system theme, terminal font, tab size, and every shortcut can be rebound.
 - **Open in Rift** from the Windows File Explorer right-click menu.
 - **Auto-update** from GitHub Releases: downloads in the background, installs when you close Rift.
@@ -115,6 +119,8 @@ terminal.
 | Files panel | `Ctrl+Shift+E` | `Cmd+Shift+E` |
 | Git panel | `Ctrl+Shift+G` | `Cmd+Shift+G` |
 | Prompts panel | `Ctrl+Shift+O` | `Cmd+Shift+O` |
+| New terminal (in the current terminal's folder) | `Ctrl+Shift+K` | `Cmd+Shift+K` |
+| Focus the pane on that side | `Alt+arrows` | `Ctrl+Alt+arrows` |
 | Next tab that needs you | `Ctrl+Shift+U` | `Cmd+Shift+U` |
 | Find in terminal | `Ctrl+Shift+F` | `Cmd+F` |
 | Zoom in / out / reset | `Ctrl+=` / `Ctrl+-` / `Ctrl+0` | `Cmd+=` / `Cmd+-` / `Cmd+0` |

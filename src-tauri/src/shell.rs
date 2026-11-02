@@ -21,10 +21,11 @@ pub enum Shell {
 }
 
 /// A shell offered to the user ("New tab with…", default shell in settings).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct Profile {
     pub id: String,
     pub name: String,
+    #[serde(skip)]
     pub shell: Shell,
 }
 
@@ -32,7 +33,7 @@ impl Shell {
     /// PowerShell 7 if installed, Windows PowerShell otherwise.
     #[cfg(windows)]
     pub fn default_for_platform() -> Self {
-        profiles().remove(0).shell
+        profiles()[0].shell.clone()
     }
 
     /// The user's login shell ($SHELL), else zsh on macOS and bash elsewhere.
@@ -45,7 +46,10 @@ impl Shell {
 
     /// The shell of profile `id` (see `profiles()`), if installed.
     pub fn from_profile(id: &str) -> Option<Self> {
-        profiles().into_iter().find(|p| p.id == id).map(|p| p.shell)
+        profiles()
+            .iter()
+            .find(|p| p.id == id)
+            .map(|p| p.shell.clone())
     }
 
     /// The shell command line, running `startup` once the shell is ready.
@@ -63,11 +67,15 @@ impl Shell {
 }
 
 /// The shells installed here, the platform default first.
-pub fn profiles() -> Vec<Profile> {
-    #[cfg(windows)]
-    return windows::profiles();
-    #[cfg(unix)]
-    return unix::profiles();
+/// The installed shells, looked up once (PATH and file checks): a new tab with its own shell reads the list.
+pub fn profiles() -> &'static [Profile] {
+    static PROFILES: std::sync::OnceLock<Vec<Profile>> = std::sync::OnceLock::new();
+    PROFILES.get_or_init(|| {
+        #[cfg(windows)]
+        return windows::profiles();
+        #[cfg(unix)]
+        return unix::profiles();
+    })
 }
 
 #[cfg(windows)]

@@ -106,7 +106,17 @@ pub fn hook_command(exe: &Path, id: &str, shell: HookShell) -> String {
     let path = exe.to_string_lossy();
     match shell {
         // A quoted path is a string to PowerShell: the call operator runs it.
-        HookShell::PowerShell => format!("& '{}' hook {id}", path.replace('\'', "''")),
+        HookShell::PowerShell => {
+            let quoted: String = path
+                .chars()
+                .flat_map(|c| {
+                    let quote =
+                        matches!(c, '\'' | '\u{2018}' | '\u{2019}' | '\u{201A}' | '\u{201B}');
+                    std::iter::repeat_n(c, if quote { 2 } else { 1 })
+                })
+                .collect();
+            format!("& '{quoted}' hook {id}")
+        }
         HookShell::Cmd => format!("\"{path}\" hook {id}"),
         HookShell::Posix => format!("'{}' hook {id}", path.replace('\'', r"'\''")),
     }
@@ -154,78 +164,19 @@ fn run_for(
     input: &str,
     timeout: std::time::Duration,
 ) -> Result<String> {
-    use std::io::{Read, Write};
-    use std::process::{Command, Stdio};
-    let mut cmd = Command::new(program(name));
-    cmd.current_dir(cwd)
-        .args(args)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-    }
-    let mut child = cmd
-        .spawn()
-        .with_context(|| format!("could not run `{name}` (is it installed and on PATH?)"))?;
-    let mut stdin = child.stdin.take().unwrap();
-    let input = input.to_string();
-    // Write from another thread: a large diff must not deadlock against the agent's own output.
-    let writer = std::thread::spawn(move || stdin.write_all(input.as_bytes()));
-    // Both streams read at once, so neither fills up and blocks the agent.
-    fn read_all(mut r: impl Read + Send + 'static) -> std::thread::JoinHandle<Vec<u8>> {
-        std::thread::spawn(move || {
-            let mut buf = Vec::new();
-            let _ = r.read_to_end(&mut buf);
-            buf
-        })
-    }
-    let stdout = read_all(child.stdout.take().unwrap());
-    let stderr = read_all(child.stderr.take().unwrap());
-    let deadline = std::time::Instant::now() + timeout;
-    let status = loop {
-        if let Some(status) = child.try_wait()? {
-            break status;
-        }
-        if std::time::Instant::now() >= deadline {
-            kill_tree(&mut child);
-            bail!(
-                "{name} did not answer in {} s (waiting for a login or an approval?)",
-                timeout.as_secs()
-            );
-        }
-        std::thread::sleep(std::time::Duration::from_millis(50));
-    };
-    let _ = writer.join();
-    let stdout = stdout.join().unwrap_or_default();
-    let stderr = stderr.join().unwrap_or_default();
-    if !status.success() {
-        let err = String::from_utf8_lossy(&stderr);
+    let mut cmd = crate::process::command(program(name));
+    cmd.current_dir(cwd).args(args);
+    let out = crate::process::output(cmd, input.as_bytes(), timeout, name)?;
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr);
         let err = if err.trim().is_empty() {
-            String::from_utf8_lossy(&stdout)
+            String::from_utf8_lossy(&out.stdout)
         } else {
             err
         };
         bail!("{name} failed: {}", err.trim());
     }
-    Ok(String::from_utf8_lossy(&stdout).trim().to_string())
-}
-
-/// Kills `child` and, on Windows, what it started (`taskkill /T`): killing an npm `.cmd` shim alone leaves
-/// its node process running.
-fn kill_tree(child: &mut std::process::Child) {
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        let _ = std::process::Command::new("taskkill")
-            .args(["/T", "/F", "/PID", &child.id().to_string()])
-            .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
-            .output();
-    }
-    let _ = child.kill();
-    let _ = child.wait();
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
 #[cfg(test)]
@@ -276,6 +227,12 @@ mod tests {
         assert_eq!(
             hook_command(exe, "gemini", HookShell::PowerShell),
             r"& 'C:\A B\rift.exe' hook gemini"
+        );
+        // PowerShell also ends a '...' string at typographic quotes: doubled like '.
+        let quoted = Path::new("C:\\Bob\u{2019}s 'apps'\\rift.exe");
+        assert_eq!(
+            hook_command(quoted, "gemini", HookShell::PowerShell),
+            "& 'C:\\Bob\u{2019}\u{2019}s ''apps''\\rift.exe' hook gemini"
         );
         assert_eq!(
             hook_command(exe, "codex", HookShell::Cmd),
