@@ -125,6 +125,84 @@ pub fn commit(root: &Path, files: &[(String, bool)], message: &str) -> Result<St
     Ok(text.lines().next().unwrap_or_default().to_string())
 }
 
+/// Throws away the changes of exactly the given files (`(path, untracked)`, both sides of a rename): a file HEAD
+/// has goes back to it (index and working tree); one HEAD lacks (untracked, newly added, a rename's new name) is
+/// unstaged and moved to the Recycle Bin / Trash, never deleted for good. Other files are left alone.
+pub fn discard(root: &Path, files: &[(String, bool)]) -> Result<()> {
+    if files.is_empty() {
+        bail!("No file selected");
+    }
+    // In the index, not in HEAD: added, or the new side of a rename (--no-renames splits it into D + A).
+    let out = check(git(
+        root,
+        &[
+            "diff",
+            "--cached",
+            "--no-renames",
+            "--name-only",
+            "--diff-filter=A",
+            "-z",
+        ],
+    )?)?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    let added: std::collections::HashSet<&str> =
+        text.split('\0').filter(|p| !p.is_empty()).collect();
+    let spec = |paths: &[&String]| {
+        let mut spec = Vec::new();
+        for path in paths {
+            spec.extend_from_slice(path.as_bytes());
+            spec.push(0);
+        }
+        spec
+    };
+    let from_stdin = ["--pathspec-from-file=-", "--pathspec-file-nul"];
+    let staged_new: Vec<_> = files
+        .iter()
+        .filter(|(p, _)| added.contains(p.as_str()))
+        .map(|(p, _)| p)
+        .collect();
+    let tracked: Vec<_> = files
+        .iter()
+        .filter(|(p, untracked)| !untracked && !added.contains(p.as_str()))
+        .map(|(p, _)| p)
+        .collect();
+    let new: Vec<_> = files
+        .iter()
+        .filter(|(p, untracked)| *untracked || added.contains(p.as_str()))
+        .map(|(p, _)| p)
+        .collect();
+    if !staged_new.is_empty() {
+        // `rm --cached` works before the first commit too; -f: staged and edited again is fine here.
+        let args = [
+            &["--literal-pathspecs", "rm", "--cached", "-f", "-q"][..],
+            &from_stdin,
+        ]
+        .concat();
+        check(git_with_input(root, &args, Some(&spec(&staged_new)))?)?;
+    }
+    if !tracked.is_empty() {
+        let args = [
+            &[
+                "--literal-pathspecs",
+                "restore",
+                "--source=HEAD",
+                "--staged",
+                "--worktree",
+            ][..],
+            &from_stdin,
+        ]
+        .concat();
+        check(git_with_input(root, &args, Some(&spec(&tracked)))?)?;
+    }
+    for path in new {
+        let file = root.join(path);
+        if file.exists() {
+            crate::files::trash(&file).with_context(|| format!("Move {path} to the trash"))?;
+        }
+    }
+    Ok(())
+}
+
 /// What the tab shows next to its branch: lines changed against HEAD, commits ahead/behind upstream.
 #[derive(Debug, Default, PartialEq, Serialize)]
 pub struct Stats {
@@ -672,6 +750,52 @@ mod tests {
         assert!(commit(r, &[("kept.txt".into(), false)], "  ").is_err());
         let err = commit(r, &[("does-not-exist.txt".into(), false)], "msg").unwrap_err();
         assert!(!err.to_string().is_empty());
+    }
+
+    #[test]
+    fn discard_reverts_only_the_selected_files() {
+        let dir = repo();
+        let r = dir.path();
+        std::fs::write(r.join("kept.txt"), "changed\n").unwrap();
+        run(r, &["add", "kept.txt"]); // staged too: both go back to HEAD
+        std::fs::remove_file(r.join("gone.txt")).unwrap();
+        std::fs::write(r.join("[id].tsx"), "new\n").unwrap();
+        std::fs::write(r.join("added.txt"), "added\n").unwrap();
+        run(r, &["add", "added.txt"]);
+        std::fs::write(r.join("left out.txt"), "not now\n").unwrap();
+
+        let files = [
+            ("kept.txt", false),
+            ("gone.txt", false),
+            ("[id].tsx", true),
+            ("added.txt", false),
+        ]
+        .map(|(p, u)| (p.to_string(), u));
+        discard(r, &files).unwrap();
+        // core.autocrlf may check it out with CRLF.
+        let kept = std::fs::read_to_string(r.join("kept.txt")).unwrap();
+        assert_eq!(kept.replace('\r', ""), "one\ntwo\n");
+        assert!(r.join("gone.txt").exists());
+        // New files are in the Recycle Bin / Trash, not deleted for good.
+        assert!(!r.join("[id].tsx").exists() && !r.join("added.txt").exists());
+        let left: Vec<_> = status(r).unwrap().into_iter().map(|c| c.path).collect();
+        assert_eq!(left, ["left out.txt"]);
+        assert!(discard(r, &[]).is_err());
+    }
+
+    #[test]
+    fn discard_undoes_a_rename() {
+        let dir = repo();
+        let r = dir.path();
+        run(r, &["mv", "kept.txt", "renamed.txt"]);
+        let change = status(r)
+            .unwrap()
+            .into_iter()
+            .find(|c| c.status == "R")
+            .unwrap();
+        discard(r, &[(change.path, false), (change.orig.unwrap(), false)]).unwrap();
+        assert!(status(r).unwrap().is_empty());
+        assert!(r.join("kept.txt").exists() && !r.join("renamed.txt").exists());
     }
 
     #[test]

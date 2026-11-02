@@ -1,6 +1,16 @@
 import { createEffect, createSignal, For, on, Show } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
-import { commitFiles as files, commitRange, diffLineClass, inRange, keepChecked, pickCommits, type Change } from "./diff";
+import {
+  commitFiles as files,
+  commitRange,
+  diffLineClass,
+  discardQuestion,
+  inRange,
+  keepChecked,
+  pickCommits,
+  type Change,
+} from "./diff";
+import { TRASH_NAME } from "./fileOps";
 import { Icon } from "../ui/Icon";
 import { createMenu } from "../ui/Menu";
 import { PromptDialog } from "../ui/PromptDialog";
@@ -38,7 +48,7 @@ export function GitPanel(props: {
   const [selected, setSelected] = createSignal<Change>();
   const [diff, setDiff] = createSignal<string>();
   const [message, setMessage] = createSignal("");
-  const [busy, setBusy] = createSignal<"commit" | "generate" | "push" | "pull" | "branch">();
+  const [busy, setBusy] = createSignal<"commit" | "generate" | "push" | "pull" | "branch" | "discard">();
   const [note, setNote] = createSignal<{ text: string; error?: boolean }>();
   const [commits, setCommits] = createSignal<Commit[] | string>();
   const [picks, setPicks] = createSignal<string[]>([]);
@@ -147,7 +157,10 @@ export function GitPanel(props: {
   const toggleAll = () => setChecked(new Set(allChecked() ? [] : list().map((c) => c.path)));
 
   /** Runs one git action with its busy state; its answer (or error) shows under the header. */
-  async function act(kind: "commit" | "generate" | "push" | "pull" | "branch", run: () => Promise<string | void>) {
+  async function act(
+    kind: "commit" | "generate" | "push" | "pull" | "branch" | "discard",
+    run: () => Promise<string | void>,
+  ) {
     setBusy(kind);
     setNote(undefined);
     try {
@@ -189,6 +202,20 @@ export function GitPanel(props: {
     await act("pull", () => invoke<string>("git_pull", { root: props.root }));
     reload();
     props.onHeadChanged?.();
+  }
+
+  /** Back to HEAD: the checked files, or the one right-clicked. Asks first (tracked changes cannot be undone). */
+  async function discard(changes: Change[]) {
+    if (busy() || !changes.length || !confirm(discardQuestion(changes, TRASH_NAME))) return;
+    await act("discard", () => invoke<void>("git_discard", { root: props.root, files: files(changes) }));
+    // Even a partial failure changed some files.
+    reload();
+    props.onHeadChanged?.();
+  }
+
+  function fileMenu(e: MouseEvent, change: Change) {
+    e.preventDefault();
+    menu.open(e, [{ label: "Discard changes…", run: () => discard([change]) }]);
   }
 
   async function changeBranch(command: "git_switch" | "git_create_branch", branch: string) {
@@ -244,7 +271,13 @@ export function GitPanel(props: {
   );
 
   const FileRow = (p: { change: Change; check?: boolean }) => (
-    <div class="git-file" classList={{ active: selected()?.path === p.change.path }} title={p.change.path}>
+    <div
+      class="git-file"
+      classList={{ active: selected()?.path === p.change.path }}
+      title={p.change.path}
+      // Only pending changes can be discarded, not those of a past commit.
+      onContextMenu={(e) => p.check && fileMenu(e, p.change)}
+    >
       <Show when={p.check}>
         <input type="checkbox" checked={checked().has(p.change.path)} onChange={() => toggle(p.change.path)} />
       </Show>
@@ -319,6 +352,17 @@ export function GitPanel(props: {
                         <span>
                           {picked().length} of {list().length} files selected
                         </span>
+                        <button
+                          class="icon-btn git-discard"
+                          title="Discard the changes to the selected files"
+                          disabled={!!busy() || picked().length === 0}
+                          onClick={(e) => {
+                            e.preventDefault(); // inside the label: would also toggle every checkbox
+                            discard(picked());
+                          }}
+                        >
+                          <Icon name="discard" />
+                        </button>
                       </label>
                       <For each={list()}>{(change) => <FileRow change={change} check />}</For>
                     </>

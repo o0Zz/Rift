@@ -304,6 +304,11 @@ async fn git_commit(
     git::commit(root.as_ref(), &files, &message).map_err(err)
 }
 
+#[tauri::command]
+async fn git_discard(root: String, files: Vec<(String, bool)>) -> Result<(), String> {
+    git::discard(root.as_ref(), &files).map_err(err)
+}
+
 /// The user's own convention for commit messages (see their CLAUDE.md).
 const COMMIT_PROMPT: &str = "Write a git commit message for the diff on stdin, following Conventional Commits. \
 Subject line: `type(scope): description`, where type is one of feat, fix, docs, style, refactor, perf, test, \
@@ -635,6 +640,7 @@ pub fn run() {
             git_commit_files,
             git_commit_diff,
             git_commit,
+            git_discard,
             git_worktree_add,
             git_stats,
             open_url,

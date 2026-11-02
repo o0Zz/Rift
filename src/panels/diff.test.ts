@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { commitFiles, commitRange, diffLineClass, inRange, keepChecked, pickCommits } from "./diff";
+import { commitFiles, commitRange, diffLineClass, discardQuestion, inRange, keepChecked, pickCommits } from "./diff";
 
 it("keeps the user's unchecks across a reload and checks new files", () => {
   const before = [{ path: "a", status: "M" }, { path: "b", status: "M" }, { path: "gone", status: "M" }];
@@ -34,6 +34,24 @@ it("lists files to commit, with both sides of a rename", () => {
     ["b2.ts", false],
     ["b.ts", false],
   ]);
+});
+
+it("asks before discarding, saying what is lost and what goes to the trash", () => {
+  expect(discardQuestion([{ path: "a.ts", status: "M" }], "Trash")).toBe(
+    "Discard the changes to a.ts? Their changes are lost for good.",
+  );
+  expect(discardQuestion([{ path: "n.ts", status: "?" }], "Recycle Bin")).toBe(
+    "Discard the changes to n.ts? New files go to the Recycle Bin.",
+  );
+  expect(
+    discardQuestion(
+      [
+        { path: "a.ts", status: "M" },
+        { path: "b.ts", status: "A" },
+      ],
+      "Trash",
+    ),
+  ).toBe("Discard the changes to 2 files? Their changes are lost for good. New files go to the Trash.");
 });
 
 it("picks one commit, or a range with Shift (oldest to newest, both included)", () => {

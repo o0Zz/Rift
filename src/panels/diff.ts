@@ -43,6 +43,19 @@ export function inRange(order: string[], picks: string[], hash: string): boolean
   return picks.length === 2 && k >= i && k <= j;
 }
 
+/** The confirm before Discard: names one file, counts several, says what can and cannot be undone. */
+export function discardQuestion(changes: Change[], trash: string): string {
+  const what = changes.length === 1 ? changes[0].path : `${changes.length} files`;
+  const isNew = (c: Change) => c.status === "?" || c.status === "A";
+  const lost = changes.some((c) => !isNew(c));
+  const fresh = changes.some(isNew);
+  const parts = [
+    lost ? "Their changes are lost for good." : "",
+    fresh ? `New files go to the ${trash}.` : "",
+  ].filter(Boolean);
+  return `Discard the changes to ${what}? ${parts.join(" ")}`;
+}
+
 /** `(path, untracked)` pairs for the backend; a rename also commits its old path. */
 export function commitFiles(changes: Change[]): [string, boolean][] {
   return changes.flatMap((c) => [

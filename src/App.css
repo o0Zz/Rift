@@ -882,6 +882,10 @@ body,
   font-size: 12px;
 }
 
+.git-file.all .git-discard {
+  margin-left: auto;
+}
+
 .git-path {
   cursor: pointer;
 }
