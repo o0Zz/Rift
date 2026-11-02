@@ -157,6 +157,11 @@ body,
   pointer-events: auto !important;
 }
 
+/* The alternate screen (vim, Claude Code full screen) has nothing to scroll: no scrollbar. */
+.term.alt-screen .xterm-scrollable-element > .scrollbar.vertical {
+  display: none !important;
+}
+
 .term .xterm-scrollable-element > .scrollbar > .slider {
   background: color-mix(in srgb, var(--fg-muted) 45%, transparent) !important;
 }

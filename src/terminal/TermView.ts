@@ -67,6 +67,9 @@ export class TermView {
         return cwd !== undefined;
       });
     }
+    // Full-screen apps (vim, Claude Code with "tui": "fullscreen") draw on the alternate screen, which has no
+    // scrollback: the scrollbar would only show a full, useless thumb. Hidden there; the app scrolls itself.
+    this.term.buffer.onBufferChange((b) => this.el.classList.toggle("alt-screen", b.type === "alternate"));
     this.term.onData((data) => this.write(data));
     this.term.onResize(({ cols, rows }) => this.pty.then((id) => invoke("pty_resize", { id, cols, rows })));
     this.term.attachCustomKeyEventHandler((e) => {
