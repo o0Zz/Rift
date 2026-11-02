@@ -66,10 +66,10 @@ export function Prompts(props: {
                     >
                       <button
                         class="icon-btn"
-                        title="Paste into the terminal"
+                        title="Apply: paste into the terminal (no Enter)"
                         onClick={(e) => (e.stopPropagation(), props.onSend(i()))}
                       >
-                        <Icon name="send" size={14} />
+                        <Icon name="apply" size={14} />
                       </button>
                       <span class="prompt-text">{text}</span>
                       <span class="prompt-buttons">

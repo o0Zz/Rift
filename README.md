@@ -72,7 +72,7 @@ freezing the window) and fails when a change goes over budget.
   (or commit and push), pull, push, switch or create a branch, and a history: click a commit to see its changes,
   Shift+click another one to see the changes of the whole range. Drag the lists' bottom edge to resize them.
 - **Prompts panel**: write your next prompts ahead of time, one list per repo. Click one to edit it (Enter saves,
-  Shift+Enter for a new line); its ← arrow, or dragging it onto the terminal, pastes it there (you press Enter) and it leaves the list.
+  Shift+Enter for a new line); its ✓ Apply button, or dragging it onto the terminal, pastes it there (you press Enter) and it leaves the list.
 - **Terminals panel**: extra shells shared by every tab (a dev server, logs), as many as you want. `+` in the top bar
   opens one, in the folder of the last one you used.
 - Arrange the panels and the terminal like in VS Code, the same for every tab: drag a panel by its header or tab, and
