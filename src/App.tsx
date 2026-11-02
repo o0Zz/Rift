@@ -7,7 +7,19 @@ import { onAction, sendNotification } from "@tauri-apps/plugin-notification";
 import { TermView, type AgentSession, type TermLook } from "./terminal/TermView";
 import { TERMINAL_THEMES } from "./terminal/themes";
 import { neighbour } from "./tabs/nav";
-import { actionFor, DEFAULTS, displayVersion, isReloadKey, mergeSettings, resolveTheme, TAB_ROW_HEIGHT, type Settings } from "./settings/settings";
+import {
+  actionFor,
+  DEFAULTS,
+  displayVersion,
+  isReloadKey,
+  mergeSettings,
+  resolveTheme,
+  TAB_ROW_HEIGHT,
+  wheelSteps,
+  zoomed,
+  type Settings,
+  type ZoomArea,
+} from "./settings/settings";
 import { SettingsPage } from "./settings/SettingsPage";
 import { startUpdates, type Updater } from "./update";
 import {
@@ -103,6 +115,12 @@ function App() {
   createEffect(() => {
     document.documentElement.style.setProperty("--doc-mono", settings().fontFamily);
     document.documentElement.style.setProperty("--doc-mono-size", `${settings().fontSize}px`);
+  });
+  // Panel and document text scales (Ctrl+wheel over one): CSS variables, no work per panel or document.
+  createEffect(() => {
+    for (const [area, scale] of Object.entries(settings().scale)) {
+      document.documentElement.style.setProperty(`--scale-${area}`, String(scale));
+    }
   });
   createEffect(() =>
     document.documentElement.style.setProperty("--tab-row", `${TAB_ROW_HEIGHT[settings().tabSize]}px`),
@@ -515,10 +533,33 @@ function App() {
     }
   }
 
-  function zoom(step: number) {
-    const fontSize = step === 0 ? DEFAULTS.fontSize : Math.min(32, Math.max(8, settings().fontSize + step));
-    if (fontSize !== settings().fontSize) changeSettings({ ...settings(), fontSize });
+  /** The area an element belongs to (`data-zoom`); outside any (sidebar, top bar), none. */
+  const zoomArea = (el: EventTarget | null) =>
+    ((el as Element | null)?.closest?.("[data-zoom]") as HTMLElement | null)?.dataset.zoom as ZoomArea | undefined;
+
+  // Applied live, saved once the zooming stops: a wheel spin would otherwise write settings.json per notch.
+  let zoomSave = 0;
+  function zoom(area: ZoomArea, step: number) {
+    const next = zoomed(settings(), area, step);
+    if (next === settings()) return;
+    setSettings(next);
+    clearTimeout(zoomSave);
+    zoomSave = setTimeout(() => invoke("settings_save", { value: settings() }), 500);
   }
+
+  // Ctrl+wheel (also a touchpad pinch) resizes what is under the cursor, never the whole page.
+  let wheelPending = 0;
+  function onWheel(e: WheelEvent) {
+    if (!e.ctrlKey) return;
+    e.preventDefault();
+    e.stopPropagation(); // xterm would scroll
+    const area = zoomArea(e.target);
+    const r = wheelSteps(wheelPending, e.deltaY, e.deltaMode);
+    wheelPending = r.pending;
+    if (area && r.steps) zoom(area, Math.sign(r.steps));
+  }
+  document.addEventListener("wheel", onWheel, { capture: true, passive: false });
+  onCleanup(() => document.removeEventListener("wheel", onWheel, { capture: true }));
 
   function onKey(e: KeyboardEvent) {
     // Never reload the app (it would restart every shell); in a terminal xterm takes the key first.
@@ -543,9 +584,10 @@ function App() {
     else if (action === "settings") setSettingsOpen(true);
     else if (action === "find") setFinding(true);
     else if (action === "renameTab") active() && setRenameRequest({ tab: active()! });
-    else if (action === "zoomIn") zoom(1);
-    else if (action === "zoomOut") zoom(-1);
-    else if (action === "zoomReset") zoom(0);
+    else if (action === "zoomIn" || action === "zoomOut" || action === "zoomReset") {
+      // The focused area; the terminal when the focus is nowhere in particular.
+      zoom(zoomArea(document.activeElement) ?? "terminal", action === "zoomIn" ? 1 : action === "zoomOut" ? -1 : 0);
+    }
     else if (action === "refreshPanels") {
       const root = panelTab()?.root;
       if (root) changedRepos.delete(root);
@@ -826,7 +868,7 @@ function App() {
           </div>
         )}
       </For>
-      <div class="terms" ref={host}>
+      <div class="terms" ref={host} data-zoom="terminal">
         <Show when={finding() && active()}>
           <FindBar
             find={(text, backwards) => active()!.view.find(text, backwards)}

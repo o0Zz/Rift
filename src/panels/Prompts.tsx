@@ -33,7 +33,7 @@ export function Prompts(props: {
   }
 
   return (
-    <aside class="panel prompts">
+    <aside class="panel prompts" data-zoom="prompts">
       <div class="panel-head">
         <span class="panel-title" title={props.repo}>
           Prompts{props.repo ? ` · ${folderName(props.repo)}` : ""}

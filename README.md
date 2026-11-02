@@ -59,7 +59,7 @@ freezing the window) and fails when a change goes over budget.
 - New tabs open **in the current tab's folder**, in its group.
 - Instant switching with `Ctrl+PgUp` / `Ctrl+PgDn`. `F2` renames, menus work from the keyboard.
 - **Your scrollback comes back** after a restart, colors included.
-- Find in the scrollback, `Ctrl`+click links, zoom, `Shift+Enter` for a new line in Claude Code, drag a file
+- Find in the scrollback, `Ctrl`+click links, zoom (`Ctrl`+wheel over a terminal, the files, git or prompts panel or a document resizes just that), `Shift+Enter` for a new line in Claude Code, drag a file
   from the files panel to type its path.
 
 ### Everything around the terminal
@@ -123,7 +123,7 @@ terminal.
 | Focus the pane on that side | `Alt+arrows` | `Ctrl+Alt+arrows` |
 | Next tab that needs you | `Ctrl+Shift+U` | `Cmd+Shift+U` |
 | Find in terminal | `Ctrl+Shift+F` | `Cmd+F` |
-| Zoom in / out / reset | `Ctrl+=` / `Ctrl+-` / `Ctrl+0` | `Cmd+=` / `Cmd+-` / `Cmd+0` |
+| Zoom in / out / reset (what has the focus; `Ctrl`+wheel: what is under the cursor) | `Ctrl+=` / `Ctrl+-` / `Ctrl+0` | `Cmd+=` / `Cmd+-` / `Cmd+0` |
 | Rename tab | `F2` | `F2` |
 | Refresh the files and git panels | `F5` (never reloads Rift) | `F5` |
 | Settings | `Ctrl+,` | `Cmd+,` |

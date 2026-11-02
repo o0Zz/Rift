@@ -63,7 +63,7 @@ export function createConsoles(o: {
   function render(id: PanelId, title: string) {
     const cwd = consoles.get(id)?.cwd;
     return (
-      <aside class="panel terminal">
+      <aside class="panel terminal" data-zoom="terminal">
         <div class="panel-head">
           <span class="panel-title" title={cwd?.()}>
             {title}

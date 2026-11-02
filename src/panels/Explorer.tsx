@@ -161,7 +161,7 @@ export function Explorer(props: {
   }
 
   return (
-    <aside class="panel explorer" onContextMenu={(e) => e.preventDefault()}>
+    <aside class="panel explorer" data-zoom="files" onContextMenu={(e) => e.preventDefault()}>
       <div class="panel-head">
         <span class="panel-title" title={props.root}>
           {props.root ? folderName(props.root) : "Files"}

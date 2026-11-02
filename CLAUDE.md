@@ -72,7 +72,7 @@ Frontend ↔ backend: Tauri commands, the PTY `Channel`, events (`pty-exit`, `ag
 - Shell integration reports the cwd at every prompt (OSC 9;9 PowerShell/cmd, OSC 7 bash/zsh, Git Bash MSYS paths converted) without touching the user's rc files (wrappers that source them). Startup command via `RIFT_STARTUP`. WSL/others run plain.
 - Shortcuts: capture-phase `keydown`, so xterm never sees them; dispatched only through `settings.ts` `actionFor`. Windows/Linux new/close tab = Ctrl+Shift+T/W (Ctrl+T/W/F belong to the shell and agents); macOS Cmd+T/W/F. A shortcut needs Ctrl, Alt or Cmd, or is F1-F12.
 - The webview never reloads (it would restart every shell): F5 / Ctrl+R / Cmd+R blocked outside a terminal (`isReloadKey`). F5 = refresh files and git panels.
-- Find Ctrl+Shift+F (search addon). Links: Ctrl+click, http(s) only (`open_url`). Zoom Ctrl+= / - / 0. Default font 12 px.
+- Find Ctrl+Shift+F (search addon). Links: Ctrl+click, http(s) only (`open_url`). Zoom (`zoomed`, `wheelSteps`): Ctrl+wheel resizes the area under the cursor (`data-zoom`), Ctrl+= / - / 0 the focused one (else terminals). Terminals = `fontSize` (default 12 px, all terminals: one cell size); files, git, prompts, docs = `scale` (0.6-2, CSS variables `--scale-*`, panel sizes in em, headers fixed). Applied live, saved 500 ms after the last step.
 - Shift+Enter in an agent tab sends ESC+CR. Image paste: the agent reads the clipboard on its own key (Alt+V on Windows = `ESC v`; Ctrl+V elsewhere); a paste without text sends 0x16. Claude's keys, untested in other agents.
 - Drag a file from the files panel onto a terminal types its path (`quotePath`). No OS file-manager drops: Tauri's native drag-drop breaks HTML5 drag and drop on Windows (`dragDropEnabled: false`).
 

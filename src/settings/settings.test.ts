@@ -11,6 +11,8 @@ import {
   isValidShortcut,
   mergeSettings,
   resolveTheme,
+  wheelSteps,
+  zoomed,
 } from "./settings";
 
 const key = (key: string, mods: { ctrl?: boolean; shift?: boolean; alt?: boolean } = {}) => ({
@@ -164,4 +166,35 @@ it("shows the CI run number as a 4th version number", () => {
   expect(displayVersion("1.2.3+45")).toBe("1.2.3.45");
   expect(displayVersion("0.0.0+7")).toBe("0.0.0.7");
   expect(displayVersion("0.0.0")).toBe("0.0.0");
+});
+
+describe("zoom", () => {
+  it("steps the terminal font, or one panel's scale, within limits; 0 goes back to normal", () => {
+    const s = DEFAULTS;
+    expect(zoomed(s, "terminal", 1).fontSize).toBe(13);
+    expect(zoomed(s, "terminal", -1).fontSize).toBe(11);
+    expect(zoomed({ ...s, fontSize: 32 }, "terminal", 1).fontSize).toBe(32);
+    expect(zoomed({ ...s, fontSize: 20 }, "terminal", 0).fontSize).toBe(12);
+    const git = zoomed(zoomed(s, "git", 1), "git", 1);
+    expect(git.scale).toEqual({ files: 1, git: 1.2, prompts: 1, docs: 1 });
+    expect(zoomed(git, "git", 0).scale.git).toBe(1);
+    let small = s;
+    for (let i = 0; i < 10; i++) small = zoomed(small, "docs", -1);
+    expect(small.scale.docs).toBe(0.6);
+    expect(zoomed(small, "docs", -1)).toBe(small); // at the limit: unchanged, nothing to save
+  });
+
+  it("keeps a valid saved scale, drops a bad one", () => {
+    const s = mergeSettings({ scale: { files: 1.5, git: 9, prompts: "big" } });
+    expect(s.scale).toEqual({ files: 1.5, git: 1, prompts: 1, docs: 1 });
+  });
+
+  it("turns wheel distance into whole steps, up = bigger, the rest kept for the next event", () => {
+    expect(wheelSteps(0, -100, 0)).toEqual({ steps: 1, pending: 0 }); // one mouse notch up
+    expect(wheelSteps(0, 100, 0)).toEqual({ steps: -1, pending: 0 });
+    expect(wheelSteps(0, -3, 1)).toEqual({ steps: 1, pending: 20 }); // lines (Firefox-style): 3 x 40 px
+    const a = wheelSteps(0, -60, 0); // a touchpad pinch, in small amounts
+    expect(a.steps).toBe(0);
+    expect(wheelSteps(a.pending, -60, 0)).toEqual({ steps: 1, pending: 20 });
+  });
 });

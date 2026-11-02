@@ -586,6 +586,24 @@ body,
   user-select: none;
 }
 
+/* Text scale per panel (Ctrl+wheel over it, settings `scale`); sizes inside are in em of this. The header
+   keeps the normal size, so headers of panes side by side stay aligned. */
+.panel.explorer {
+  font-size: calc(13px * var(--scale-files, 1));
+}
+
+.panel.git {
+  font-size: calc(13px * var(--scale-git, 1));
+}
+
+.panel.prompts {
+  font-size: calc(13px * var(--scale-prompts, 1));
+}
+
+.panel > .panel-head {
+  font-size: 13px;
+}
+
 /* The tree of splits: a split lays out its children in a row or a column, a 1px line between each two that
    is also the drag handle (a wider invisible hit area). A group shows one panel, with tabs when it holds several. */
 .panes {
@@ -833,14 +851,14 @@ body,
   width: 22px;
   overflow: hidden;
   font-family: "Segoe UI", system-ui, sans-serif;
-  font-size: 11px;
+  font-size: 0.846em; /* 11px at the normal scale */
   font-weight: 800;
   line-height: 16px;
   text-align: center;
 }
 
 .file-badge.long {
-  font-size: 9px;
+  font-size: 0.692em;
   letter-spacing: -0.04em;
 }
 
@@ -879,7 +897,7 @@ body,
 
 .git-file.all {
   color: var(--fg-muted);
-  font-size: 12px;
+  font-size: 0.923em;
 }
 
 .git-file.all .git-discard {
@@ -942,7 +960,7 @@ body,
 
 .commit-note {
   color: var(--ok);
-  font-size: 12px;
+  font-size: 0.923em;
   white-space: pre-wrap;
 }
 
@@ -995,7 +1013,7 @@ body,
 
 .git-busy {
   color: var(--fg-muted);
-  font-size: 12px;
+  font-size: 0.923em;
 }
 
 .git-note {
@@ -1025,7 +1043,7 @@ body,
   flex: none;
   color: var(--branch);
   font-family: "Cascadia Mono", Consolas, monospace;
-  font-size: 12px;
+  font-size: 0.923em;
 }
 
 .git-subject {
@@ -1039,7 +1057,7 @@ body,
 .git-when {
   flex: none;
   color: var(--fg-dim);
-  font-size: 11px;
+  font-size: 0.846em;
 }
 
 .s-M { color: var(--s-m); }
@@ -1062,7 +1080,7 @@ body,
   overflow: auto;
   padding: 4px 0;
   font-family: "Cascadia Mono", Consolas, monospace;
-  font-size: 12px;
+  font-size: 0.923em;
   user-select: text;
 }
 
@@ -1660,7 +1678,7 @@ button.doc-tab {
   padding: 28px 40px 80px;
   color: var(--md-fg);
   font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
-  font-size: 16px;
+  font-size: calc(16px * var(--scale-docs, 1));
   line-height: 1.7;
   user-select: text;
 }

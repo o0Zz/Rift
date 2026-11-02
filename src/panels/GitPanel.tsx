@@ -291,7 +291,7 @@ export function GitPanel(props: {
   );
 
   return (
-    <aside class="panel git">
+    <aside class="panel git" data-zoom="git">
       <div class="panel-head">
         <span class="panel-title">
           <Show when={props.branch} fallback="Git">

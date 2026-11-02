@@ -38,8 +38,19 @@ export type Settings = {
   docs: "single" | "tabs";
   /** Height of a sidebar tab row. */
   tabSize: TabSize;
+  /** Text scale of the panels and documents (1 = normal); terminals use `fontSize`. Ctrl+wheel over one. */
+  scale: Record<ScaledArea, number>;
   keys: Keymap;
 };
+
+/** What Ctrl+wheel or Ctrl+= / - / 0 resizes: the area under the cursor (wheel) or with the focus (keys). */
+export type ZoomArea = "terminal" | ScaledArea;
+export type ScaledArea = "files" | "git" | "prompts" | "docs";
+const SCALED: ScaledArea[] = ["files", "git", "prompts", "docs"];
+const SCALE_MIN = 0.6;
+const SCALE_MAX = 2;
+const FONT_MIN = 8;
+const FONT_MAX = 32;
 
 export type TabSize = "compact" | "comfortable" | "large";
 /** Tab row height in px per size (compact = the original 36 px). */
@@ -111,6 +122,7 @@ export const DEFAULTS: Settings = {
   shell: "",
   docs: "single",
   tabSize: "comfortable",
+  scale: { files: 1, git: 1, prompts: 1, docs: 1 },
   keys: DEFAULT_KEYS,
 };
 
@@ -124,13 +136,42 @@ export function mergeSettings(saved: unknown): Settings {
   }
   return {
     theme: s.theme === "light" || s.theme === "system" || s.theme === "dark" ? s.theme : DEFAULTS.theme,
-    fontSize: typeof s.fontSize === "number" && s.fontSize >= 8 && s.fontSize <= 32 ? s.fontSize : DEFAULTS.fontSize,
+    fontSize:
+      typeof s.fontSize === "number" && s.fontSize >= FONT_MIN && s.fontSize <= FONT_MAX ? s.fontSize : DEFAULTS.fontSize,
     fontFamily: typeof s.fontFamily === "string" && s.fontFamily.trim() ? s.fontFamily : DEFAULTS.fontFamily,
     shell: typeof s.shell === "string" ? s.shell : DEFAULTS.shell,
     docs: s.docs === "tabs" ? "tabs" : DEFAULTS.docs,
     tabSize: s.tabSize && s.tabSize in TAB_ROW_HEIGHT ? s.tabSize : DEFAULTS.tabSize,
+    scale: Object.fromEntries(
+      SCALED.map((area) => {
+        const v = (s.scale as Record<string, unknown> | undefined)?.[area];
+        return [area, typeof v === "number" && v >= SCALE_MIN && v <= SCALE_MAX ? v : 1];
+      }),
+    ) as Record<ScaledArea, number>,
     keys,
   };
+}
+
+/** One zoom step (+1 bigger, -1 smaller, 0 back to normal) on one area; the same object when already at a limit. */
+export function zoomed(s: Settings, area: ZoomArea, step: number): Settings {
+  if (area === "terminal") {
+    const fontSize = step === 0 ? DEFAULTS.fontSize : Math.min(FONT_MAX, Math.max(FONT_MIN, s.fontSize + step));
+    return fontSize === s.fontSize ? s : { ...s, fontSize };
+  }
+  // In tenths, rounded: 0.1 steps never drift to 1.0000000002.
+  const raw = step === 0 ? 1 : Math.min(SCALE_MAX, Math.max(SCALE_MIN, s.scale[area] + step / 10));
+  const next = Math.round(raw * 10) / 10;
+  return next === s.scale[area] ? s : { ...s, scale: { ...s.scale, [area]: next } };
+}
+
+const WHEEL_STEP = 100; // px of wheel per zoom step: one mouse notch
+
+/** Ctrl+wheel: wheel distance in, whole zoom steps out. The rest carries over (a touchpad sends small amounts). */
+export function wheelSteps(pending: number, deltaY: number, deltaMode: number): { steps: number; pending: number } {
+  const px = deltaMode === 1 ? deltaY * 40 : deltaMode === 2 ? deltaY * 800 : deltaY;
+  const total = pending - px; // wheel up (negative delta) = bigger
+  const steps = Math.trunc(total / WHEEL_STEP);
+  return { steps, pending: total - steps * WHEEL_STEP };
 }
 
 type KeyLike = Pick<KeyboardEvent, "key" | "ctrlKey" | "shiftKey" | "altKey" | "metaKey">;

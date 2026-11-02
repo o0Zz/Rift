@@ -32,6 +32,7 @@ export class DocView {
     this.markdown = isMarkdown(path);
     this.editingSig[1](!this.markdown);
     this.el.className = "doc";
+    this.el.dataset.zoom = "docs";
     this.el.style.display = "none";
     this.el.addEventListener("click", (e) => this.onLink(e));
     host.appendChild(this.el);
