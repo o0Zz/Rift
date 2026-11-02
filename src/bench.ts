@@ -10,6 +10,10 @@ export type BenchApi = {
   /** Opens a file of the bench repo (relative path) in tab `index`; it shows instead of the terminal. */
   openDoc(index: number, file: string): void;
   showsDoc(index: number): boolean;
+  /** Gives every tab its own shell in a terminal panel (each tab then displays two terminals). */
+  openConsoles(): Promise<void>;
+  /** Tab `index`'s terminal panel, if it has one. */
+  consoleOf(index: number): TermView | undefined;
 };
 
 // Tabs showing a document instead of their terminal: the Markdown reader and the code editor.
@@ -53,20 +57,24 @@ async function measure(api: BenchApi, i: number, doSwitch: () => void): Promise<
     await sleep(0);
     return { work: sync + layout, latency: performance.now() - t0, doc: true };
   }
-  const view = api.views()[i];
-  let rendered: Sample | undefined;
+  // The tab's terminal, and its terminal panel's when it has one: the switch is done once both are rendered.
+  const views = [api.views()[i], api.consoleOf(i)].filter((v) => v !== undefined);
+  const rendered = new Map<TermView, Sample>();
   const t0 = performance.now();
-  const sub = view.term.onRender(() => {
-    // document.timeline.currentTime is the current frame's start, so this is the render frame's main-thread time.
-    const now = performance.now();
-    rendered ??= { work: now - Number(document.timeline.currentTime), latency: now - t0 };
-  });
+  const subs = views.map((view) =>
+    view.term.onRender(() => {
+      // document.timeline.currentTime is the current frame's start, so this is the render frame's main-thread time.
+      const now = performance.now();
+      if (!rendered.has(view)) rendered.set(view, { work: now - Number(document.timeline.currentTime), latency: now - t0 });
+    }),
+  );
   doSwitch();
   const sync = performance.now() - t0;
-  for (let i = 0; i < 4 && !rendered; i++) await frame();
-  sub.dispose();
-  return rendered
-    ? { work: sync + rendered.work, latency: rendered.latency }
+  for (let i = 0; i < 4 && rendered.size < views.length; i++) await frame();
+  subs.forEach((s) => s.dispose());
+  const all = [...rendered.values()];
+  return all.length
+    ? { work: sync + Math.max(...all.map((r) => r.work)), latency: Math.max(...all.map((r) => r.latency)) }
     : { work: sync, latency: performance.now() - t0 };
 }
 
@@ -167,6 +175,12 @@ export async function run(api: BenchApi) {
   api.setPanels(true);
   await sleep(5000);
   results.push(summarize("cycle with files + git panels open", await scenario(api, cycle.slice(0, 40), 250)));
+  // Every tab with its own shell in a terminal panel: each switch displays two terminals (worst case).
+  api.setPanels(false);
+  await api.openConsoles();
+  for (let i = 0; i < TABS; i++) await fill(api.consoleOf(i)!);
+  await sleep(5000);
+  results.push(summarize("cycle, every tab with a terminal panel", await scenario(api, cycle)));
   const output = await invoke<[string, number] | null>("bench_output_file");
   if (output) {
     // A fresh tab: the others hold lines written straight into xterm, which ConPTY's own screen model does

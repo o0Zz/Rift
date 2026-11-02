@@ -73,8 +73,8 @@ freezing the window) and fails when a change goes over budget.
   Shift+click another one to see the changes of the whole range. Drag the lists' bottom edge to resize them.
 - **Prompts panel**: write your next prompts ahead of time, one list per repo. Click one to edit it (Enter saves,
   Shift+Enter for a new line); its ✓ Apply button, or dragging it onto the terminal, pastes it there (you press Enter) and it leaves the list.
-- **Terminals panel**: extra shells shared by every tab (a dev server, logs), as many as you want. `+` in the top bar
-  opens one, in the folder of the last one you used.
+- **Terminals panel**: extra shells for the current tab (a dev server, logs), as many as you want. `+` in the top bar
+  opens one in the tab's folder; other tabs show a \"Start a terminal here\" button in the same panel.
 - Arrange the panels and the terminal like in VS Code, the same for every tab: drag a panel by its header or tab, and
   the spot under the cursor lights up. Drop it on a side of any panel to split it there, on its middle to make it a tab,
   or on the window's edge for a full side. Drag the lines between them to resize; Alt+arrows move the focus.

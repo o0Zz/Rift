@@ -382,6 +382,7 @@ function App() {
     const unsaved = tab.docs.filter((d) => d.dirty).map((d) => d.name);
     if (!force && unsaved.length && !confirm(`Discard unsaved changes to ${unsaved.join(", ")}?`)) return;
     tab.docs.forEach((d) => d.dispose());
+    consoles.dropTab(tab);
     tab.view.dispose();
     const rest = order.filter((t) => t !== tab);
     setTabs(tabs().filter((t) => t !== tab));
@@ -459,7 +460,7 @@ function App() {
   }
 
   let sizes: ResizeObserver | undefined; // refits the terminals when their area changes size
-  const consoles = createConsoles({ panes, setPanes, cwd: () => active()?.cwd, look, sizes: () => sizes });
+  const consoles = createConsoles({ panes, setPanes, active, look, sizes: () => sizes });
   const refitConsoles = () => consoles.views().forEach((v) => v.refit());
   const panelName = (id: PanelId) =>
     isTerminal(id) ? `Terminal ${id.slice(5)}` : ({ explorer: "Files", git: "Git", prompts: "Prompts", main: "Terminal" } as const)[id];
@@ -614,7 +615,7 @@ function App() {
       }),
       listen<number>("pty-exit", (e) => {
         const term = consoles.byPty(e.payload);
-        if (term) return consoles.close(term);
+        if (term) return consoles.close(term.id, term.tab);
         const tab = tabs().find((t) => t.view.ptyId === e.payload);
         if (tab) closeTab(tab, true);
       }),
@@ -683,6 +684,14 @@ function App() {
         },
         openDoc: (i, file) => docs.open(`${dirs[0]}/${file}`, tabs()[i]),
         showsDoc: (i) => tabs()[i].current >= 0,
+        openConsoles: async () => {
+          for (const tab of tabs()) {
+            activate(tab);
+            consoles.open();
+            await new Promise((r) => setTimeout(r, 300)); // its shell starts
+          }
+        },
+        consoleOf: (i) => consoles.viewOf(tabs()[i]),
       });
     });
     onCleanup(() => {
