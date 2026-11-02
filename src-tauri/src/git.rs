@@ -558,10 +558,20 @@ pub fn commit_files(root: &Path, from: Option<&str>, to: &str) -> Result<Vec<Cha
                 &["diff", "--name-status", "-z", "-M", &base, to],
             )?)?
         }
-        // `show` also works for the first commit, which has no parent to diff against.
+        // `show` also works for the first commit, which has no parent to diff against. A merge is compared
+        // with its first parent (what the merge brought in, like GitHub): the default combined diff lists
+        // cleanly merged files but shows no line of them.
         None => check(git(
             root,
-            &["show", "--format=", "--name-status", "-z", "-M", to],
+            &[
+                "show",
+                "--format=",
+                "--diff-merges=first-parent",
+                "--name-status",
+                "-z",
+                "-M",
+                to,
+            ],
         )?)?,
     };
     Ok(parse_name_status(&String::from_utf8_lossy(&out.stdout)))
@@ -580,7 +590,16 @@ pub fn commit_diff(root: &Path, from: Option<&str>, to: &str, path: &str) -> Res
         }
         None => check(git(
             root,
-            &["show", "--format=", "--no-color", "-M", to, "--", path],
+            &[
+                "show",
+                "--format=",
+                "--diff-merges=first-parent",
+                "--no-color",
+                "-M",
+                to,
+                "--",
+                path,
+            ],
         )?)?,
     };
     Ok(capped_diff(&out))
@@ -796,6 +815,41 @@ mod tests {
         discard(r, &[(change.path, false), (change.orig.unwrap(), false)]).unwrap();
         assert!(status(r).unwrap().is_empty());
         assert!(r.join("kept.txt").exists() && !r.join("renamed.txt").exists());
+    }
+
+    #[test]
+    fn a_merge_shows_what_it_brought_in() {
+        let dir = repo();
+        let r = dir.path();
+        run(r, &["checkout", "-q", "-b", "side"]);
+        std::fs::write(
+            r.join("kept.txt"),
+            "one
+two
+three
+",
+        )
+        .unwrap();
+        run(r, &["commit", "-qam", "side"]);
+        run(r, &["checkout", "-q", "main"]);
+        std::fs::write(
+            r.join("gone.txt"),
+            "y
+",
+        )
+        .unwrap();
+        run(r, &["commit", "-qam", "main"]);
+        run(r, &["merge", "-q", "--no-edit", "side"]);
+        let head = git(r, &["rev-parse", "HEAD"]).unwrap();
+        let head = String::from_utf8_lossy(&head.stdout).trim().to_string();
+        let files: Vec<_> = commit_files(r, None, &head)
+            .unwrap()
+            .into_iter()
+            .map(|c| (c.path, c.status))
+            .collect();
+        assert_eq!(files, [("kept.txt".to_string(), "M".to_string())]);
+        let d = commit_diff(r, None, &head, "kept.txt").unwrap();
+        assert!(d.contains("+three"), "{d}");
     }
 
     #[test]
