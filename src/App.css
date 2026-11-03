@@ -947,17 +947,25 @@ body,
   cursor: pointer;
 }
 
+/* Message box + buttons (git commit, new prompt). A wide panel (at the bottom) keeps them on one row and the box
+   on one line; a narrow one (on a side) wraps the buttons below. The box grows with its text, then scrolls. */
 .commit-box {
   display: flex;
   flex: none;
-  flex-direction: column;
+  flex-wrap: wrap;
+  align-items: flex-end;
   gap: 6px;
   padding: 8px;
   border-top: 1px solid var(--line-soft);
 }
 
 .commit-box textarea {
-  height: 64px;
+  flex: 1 1 260px;
+  min-width: 0;
+  field-sizing: content;
+  min-height: calc(1.4em + 14px);
+  max-height: calc(10 * 1.4em + 14px);
+  box-sizing: border-box; /* the heights above include padding (12px) and border (2px) */
   padding: 6px;
   border: 1px solid var(--chip);
   border-radius: 4px;
@@ -966,6 +974,7 @@ body,
   background: var(--input-bg);
   color: var(--fg-bright);
   font: inherit;
+  line-height: 1.4; /* after font, which resets it */
 }
 
 .commit-box textarea:focus {
@@ -974,8 +983,16 @@ body,
 
 .commit-actions {
   display: flex;
-  justify-content: flex-end;
+  flex: none;
+  margin-left: auto; /* right side, also when wrapped on a row of its own */
   gap: 6px;
+}
+
+/* No field-sizing (WebKit: macOS, Linux): a fixed box of a few lines, as before. */
+@supports not (field-sizing: content) {
+  .commit-box textarea {
+    height: calc(3 * 1.4em + 14px);
+  }
 }
 
 .commit-actions button {
