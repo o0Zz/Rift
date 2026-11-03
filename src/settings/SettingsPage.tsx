@@ -2,7 +2,7 @@ import { createSignal, For, Show, onCleanup, onMount } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 import { Icon } from "../ui/Icon";
-import { ACTIONS, bind, comboOf, DEFAULT_KEYS, isValidShortcut, type Action, type Settings, type TabSize, type ThemeChoice } from "./settings";
+import { ACTIONS, bind, comboOf, DEFAULT_KEYS, FONT_MAX, FONT_MIN, isValidShortcut, type Action, type Settings, type TabSize, type ThemeChoice } from "./settings";
 
 /** Settings overlay. While open, Rift's own shortcuts are off (App), so keys can be recorded. */
 export function SettingsPage(props: {
@@ -80,6 +80,10 @@ export function SettingsPage(props: {
     ["light", "Light"],
     ["system", "System"],
   ];
+  const docModes: [Settings["docs"], string][] = [
+    ["single", "One at a time"],
+    ["tabs", "New tab each time"],
+  ];
   const tabSizes: [TabSize, string][] = [
     ["compact", "Compact"],
     ["comfortable", "Comfortable"],
@@ -109,12 +113,13 @@ export function SettingsPage(props: {
           <div class="setting">
             <label>Opening a file</label>
             <div class="segmented">
-              <button classList={{ on: props.settings.docs === "single" }} onClick={() => set({ docs: "single" })}>
-                One at a time
-              </button>
-              <button classList={{ on: props.settings.docs === "tabs" }} onClick={() => set({ docs: "tabs" })}>
-                New tab each time
-              </button>
+              <For each={docModes}>
+                {([value, label]) => (
+                  <button classList={{ on: props.settings.docs === value }} onClick={() => set({ docs: value })}>
+                    {label}
+                  </button>
+                )}
+              </For>
             </div>
           </div>
 
@@ -148,12 +153,12 @@ export function SettingsPage(props: {
             <input
               id="font-size"
               type="number"
-              min="8"
-              max="32"
+              min={FONT_MIN}
+              max={FONT_MAX}
               value={props.settings.fontSize}
               onChange={(e) => {
                 const v = Number(e.currentTarget.value);
-                if (v >= 8 && v <= 32) set({ fontSize: v });
+                if (v >= FONT_MIN && v <= FONT_MAX) set({ fontSize: v });
               }}
             />
           </div>

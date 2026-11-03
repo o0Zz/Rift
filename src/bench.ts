@@ -2,7 +2,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { TermView } from "./terminal/TermView";
 
-export type BenchApi = {
+type BenchApi = {
   newTab(): void;
   setPanels(open: boolean): void;
   views(): TermView[];

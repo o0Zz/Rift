@@ -14,6 +14,7 @@ import {
   mergeSettings,
   resolveTheme,
   TAB_ROW_HEIGHT,
+  type Action,
   wheelSteps,
   zoomed,
   type Settings,
@@ -73,14 +74,14 @@ function App() {
   const [agents, setAgents] = createSignal<Integration[]>([]);
   const [shells, setShells] = createSignal<{ id: string; name: string }[]>([]);
   invoke<{ id: string; name: string }[]>("shell_profiles").then(setShells);
-  // The default shell (settings) is the backend's: spare shells start with it.
-  createEffect(on(() => settings().shell, (id) => invoke("shell_set_default", { id: id || null }), { defer: true }));
   const [update, setUpdate] = createSignal<{ version: string; restart: () => Promise<void> }>();
   // Plan limits from the latest status line (they are per account, not per tab).
   const [limits, setLimits] = createSignal<Limits>({});
   // From Tauri's window events: document.hasFocus() is not reliable in WebView2.
   const [windowFocused, setWindowFocused] = createSignal(true);
   const [settings, setSettings] = createSignal<Settings>(DEFAULTS);
+  // The default shell (settings) is the backend's: spare shells start with it.
+  createEffect(on(() => settings().shell, (id) => invoke("shell_set_default", { id: id || null }), { defer: true }));
   const [settingsOpen, setSettingsOpen] = createSignal(false);
   const [finding, setFinding] = createSignal(false);
   // The last shell the user typed in: Find searches it (a terminal panel's shell, or the tab's own).
@@ -138,9 +139,7 @@ function App() {
           const l = look();
           for (const t of tabs()) t.view.setLook(l);
           for (const v of consoles.views()) v.setLook(l);
-          active()?.view.refit();
-          refitConsoles();
-          resizeHiddenTabs();
+          refitAll();
         }),
       { defer: true },
     ),
@@ -166,11 +165,7 @@ function App() {
   let dragging = false;
   const onDragging = (d: boolean) => {
     dragging = d;
-    if (!d) {
-      active()?.view.refit();
-      refitConsoles();
-      resizeHiddenTabs();
-    }
+    if (!d) refitAll();
   };
   // The tab the side panels show. Follows the active tab only once it stays put for a moment,
   // so holding Ctrl+PgDn never makes the panels load each tab it passes.
@@ -184,13 +179,14 @@ function App() {
       const same = root === panelTab()?.root;
       setPanelTab(tab);
       // Another repo loads anyway; the same one reloads only if something may have changed it.
-      if (root && changedRepos.delete(root) && same && shown("git")) setGitRefresh(gitRefresh() + 1);
+      if (root && changedRepos.delete(root) && same && shown("git")) reloadGit();
     }, 150);
   });
   // Repos where files may have changed since the git panel loaded them: a prompt came back or an agent
   // moved. Switching tabs reloads the panel only for those, so a switch where nothing happened costs nothing.
   const changedRepos = new Set<string>();
   const [gitRefresh, setGitRefresh] = createSignal(0); // bumped to reload the git panel in place
+  const reloadGit = () => setGitRefresh(gitRefresh() + 1);
   const [filesRefresh, setFilesRefresh] = createSignal(0); // bumped to reload the files panel (F5)
   // Keep the spare shell in the active tab's folder, so a new tab there (which opens in the same
   // folder) is instant. Only once the tab and its folder stay put: each move costs a shell start.
@@ -260,7 +256,7 @@ function App() {
   function refreshGitPanel(root: string) {
     clearTimeout(gitPanelTimer);
     gitPanelTimer = setTimeout(() => {
-      if (shown("git") && panelTab()?.root === root && changedRepos.delete(root)) setGitRefresh(gitRefresh() + 1);
+      if (shown("git") && panelTab()?.root === root && changedRepos.delete(root)) reloadGit();
     }, 300);
   }
 
@@ -477,6 +473,13 @@ function App() {
     idleJob = requestIdleCallback(step);
   }
 
+  /** The terminals' area changed size: the visible ones refit now, hidden tabs in idle time. */
+  function refitAll() {
+    active()?.view.refit();
+    for (const v of consoles.views()) v.refit();
+    resizeHiddenTabs();
+  }
+
   function togglePanel(id: PanelId) {
     setPanes(toggle(panes(), id));
   }
@@ -491,7 +494,6 @@ function App() {
     look,
     sizes: () => sizes,
   });
-  const refitConsoles = () => consoles.views().forEach((v) => v.refit());
   const panelName = (id: PanelId) =>
     isTerminal(id) ? `Terminal ${id.slice(5)}` : ({ explorer: "Files", git: "Git", prompts: "Prompts", main: "Terminal" } as const)[id];
 
@@ -509,7 +511,7 @@ function App() {
     // Finished in the repo the git panel shows (any tab): reload it now to show the agent's changes.
     if (shell.status === "done" && tab.root && shown("git") && panelTab()?.root === tab.root) {
       changedRepos.delete(tab.root);
-      setGitRefresh(gitRefresh() + 1);
+      reloadGit();
     }
     // A terminal panel's shell is in front only while its panel is shown.
     const visible = active() === tab && windowFocused() && (shell.place === "main" || shown(shell.place));
@@ -597,6 +599,41 @@ function App() {
   document.addEventListener("wheel", onWheel, { capture: true, passive: false });
   onCleanup(() => document.removeEventListener("wheel", onWheel, { capture: true }));
 
+  // The focused area; the terminal when the focus is nowhere in particular.
+  const zoomFocused = (step: number) => zoom(zoomArea(document.activeElement) ?? "terminal", step);
+
+  // One handler per shortcut action (a missing one does not compile).
+  const shortcuts: Record<Action, () => void> = {
+    newTab: () => newTab(),
+    closeTab: () => active() && closeTab(active()!),
+    nextTab: () => step(1),
+    prevTab: () => step(-1),
+    toggleFiles: () => togglePanel("explorer"),
+    toggleGit: () => togglePanel("git"),
+    togglePrompts: () => togglePanel("prompts"),
+    newTerminal: () => consoles.open(),
+    focusLeft: () => focusPane("left"),
+    focusRight: () => focusPane("right"),
+    focusUp: () => focusPane("up"),
+    focusDown: () => focusPane("down"),
+    settings: () => setSettingsOpen(true),
+    find: () => setFinding(true),
+    renameTab: () => active() && setRenameRequest({ tab: active()! }),
+    zoomIn: () => zoomFocused(1),
+    zoomOut: () => zoomFocused(-1),
+    zoomReset: () => zoomFocused(0),
+    refreshPanels: () => {
+      const root = panelTab()?.root;
+      if (root) changedRepos.delete(root);
+      reloadGit();
+      setFilesRefresh(filesRefresh() + 1);
+    },
+    nextAttention: () => {
+      const next = nextNeedingAttention(visualOrder(tabs(), groups()), active());
+      if (next) activate(next);
+    },
+  };
+
   function onKey(e: KeyboardEvent) {
     // Never reload the app (it would restart every shell); in a terminal xterm takes the key first.
     if (isReloadKey(e) && !(e.target as Element).closest?.(".xterm")) e.preventDefault();
@@ -606,34 +643,7 @@ function App() {
     // Capture phase: handled before xterm sees the key.
     e.preventDefault();
     e.stopPropagation();
-    if (action === "newTab") newTab();
-    else if (action === "closeTab") active() && closeTab(active()!);
-    else if (action === "nextTab" || action === "prevTab") step(action === "nextTab" ? 1 : -1);
-    else if (action === "toggleFiles") togglePanel("explorer");
-    else if (action === "toggleGit") togglePanel("git");
-    else if (action === "togglePrompts") togglePanel("prompts");
-    else if (action === "newTerminal") consoles.open();
-    else if (action === "focusLeft") focusPane("left");
-    else if (action === "focusRight") focusPane("right");
-    else if (action === "focusUp") focusPane("up");
-    else if (action === "focusDown") focusPane("down");
-    else if (action === "settings") setSettingsOpen(true);
-    else if (action === "find") setFinding(true);
-    else if (action === "renameTab") active() && setRenameRequest({ tab: active()! });
-    else if (action === "zoomIn" || action === "zoomOut" || action === "zoomReset") {
-      // The focused area; the terminal when the focus is nowhere in particular.
-      zoom(zoomArea(document.activeElement) ?? "terminal", action === "zoomIn" ? 1 : action === "zoomOut" ? -1 : 0);
-    }
-    else if (action === "refreshPanels") {
-      const root = panelTab()?.root;
-      if (root) changedRepos.delete(root);
-      setGitRefresh(gitRefresh() + 1);
-      setFilesRefresh(filesRefresh() + 1);
-    }
-    else if (action === "nextAttention") {
-      const next = nextNeedingAttention(visualOrder(tabs(), groups()), active());
-      if (next) activate(next);
-    }
+    shortcuts[action]();
   }
 
   onMount(() => {
@@ -690,11 +700,7 @@ function App() {
     const resize = (sizes = new ResizeObserver(() => {
       cancelAnimationFrame(frame);
       if (dragging) return;
-      frame = requestAnimationFrame(() => {
-        active()?.view.refit();
-        refitConsoles();
-        resizeHiddenTabs();
-      });
+      frame = requestAnimationFrame(refitAll);
     }));
     resize.observe(host);
     const onSystemTheme = (e: MediaQueryListEvent) => setSystemIsDark(e.matches);
@@ -755,7 +761,7 @@ function App() {
             for (const tab of tabs()) {
               for (let i = tab.docs.length - 1; i >= 0; i--) if (isUnder(tab.docs[i].path, path)) docs.close(tab, i);
             }
-            if (shown("git")) setGitRefresh(gitRefresh() + 1);
+            if (shown("git")) reloadGit();
           }}
           onClose={() => togglePanel("explorer")}
         />

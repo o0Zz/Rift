@@ -4,6 +4,7 @@ import { createMenu } from "../ui/Menu";
 import { folderName } from "../tabs/layout";
 import { fileBadge } from "./fileIcons";
 import { Icon } from "../ui/Icon";
+import { Loaded, PanelHead } from "../ui/Panel";
 import { PATH_DRAG_TYPE } from "../terminal/TermView";
 import { isDeleteKey, isUnder, TRASH_NAME } from "./fileOps";
 
@@ -36,9 +37,9 @@ function FileIcon(p: { name: string; dir: boolean; open: boolean }) {
 const join = (dir: string, name: string) =>
   `${dir.replace(/[\\/]+$/, "")}${dir.includes("\\") ? "\\" : "/"}${name}`;
 
-/** File tree of `root`. Each folder is listed once, when first expanded (cached until ⟳). */
 /**
- * Files of the tab's repo (or folder). A click opens a file in the tab (`onOpenFile`), not in another app, and
+ * File tree of the tab's repo (or folder). Each folder is listed once, when first expanded (cached until ⟳).
+ * A click opens a file in the tab (`onOpenFile`), not in another app, and
  * selects it: focus stays here, so Delete moves it to the trash (`onDeleted` closes its documents).
  */
 export function Explorer(props: {
@@ -55,12 +56,7 @@ export function Explorer(props: {
   let body!: HTMLDivElement;
 
   async function load(dir: string) {
-    let result: Entry[] | string;
-    try {
-      result = await invoke<Entry[]>("fs_list", { dir });
-    } catch (e) {
-      result = String(e);
-    }
+    const result = await invoke<Entry[]>("fs_list", { dir }).catch((e) => String(e));
     setListings(new Map(listings()).set(dir, result));
   }
 
@@ -85,7 +81,7 @@ export function Explorer(props: {
   createEffect(on(() => props.refresh, refresh, { defer: true }));
 
   async function remove(path: string, parent: string) {
-    const name = path.split(/[\\/]/).pop();
+    const name = folderName(path);
     if (!confirm(`Move ${name} to the ${TRASH_NAME}?`)) return;
     try {
       await invoke("fs_trash", { path });
@@ -113,68 +109,61 @@ export function Explorer(props: {
   function Folder(p: { dir: string; depth: number }) {
     const entries = () => listings().get(p.dir);
     return (
-      <Show when={entries()} fallback={<div class="tree-note" style={{ "padding-left": `${p.depth * 12 + 22}px` }}>…</div>}>
-        {(list) =>
-          typeof list() === "string" ? (
-            <div class="tree-note error">{list() as string}</div>
-          ) : (
-            <For each={list() as Entry[]}>
-              {(entry) => {
-                const path = join(p.dir, entry.name);
-                const open = () => expanded().has(path);
-                return (
-                  <>
-                    <div
-                      class="tree-row"
-                      classList={{ selected: selected()?.path === path }}
-                      style={{ "padding-left": `${p.depth * 12 + 8}px` }}
-                      title={path}
-                      draggable={true}
-                      onDragStart={(e) => {
-                        e.dataTransfer!.setData(PATH_DRAG_TYPE, path);
-                        e.dataTransfer!.setData("text/plain", path);
-                        e.dataTransfer!.effectAllowed = "copy";
-                      }}
-                      onClick={() => {
-                        setSelected({ path, parent: p.dir });
-                        if (entry.dir) return toggle(path);
-                        props.onOpenFile(path);
-                        body.focus({ preventScroll: true });
-                      }}
-                      onContextMenu={(e) => fileMenu(e, path, p.dir)}
-                    >
-                      <span class="tree-chev">{entry.dir && <Icon name={open() ? "down" : "right"} size={12} />}</span>
-                      <FileIcon name={entry.name} dir={entry.dir} open={open()} />
-                      <span classList={{ "tree-dir": entry.dir }}>{entry.name}</span>
-                    </div>
-                    <Show when={entry.dir && open()}>
-                      <Folder dir={path} depth={p.depth + 1} />
-                    </Show>
-                  </>
-                );
-              }}
-            </For>
-          )
-        }
-      </Show>
+      <Loaded value={entries()} fallback={<div class="tree-note" style={{ "padding-left": `${p.depth * 12 + 22}px` }}>…</div>}>
+        {(list) => (
+          <For each={list()}>
+            {(entry) => {
+              const path = join(p.dir, entry.name);
+              const open = () => expanded().has(path);
+              return (
+                <>
+                  <div
+                    class="tree-row"
+                    classList={{ selected: selected()?.path === path }}
+                    style={{ "padding-left": `${p.depth * 12 + 8}px` }}
+                    title={path}
+                    draggable={true}
+                    onDragStart={(e) => {
+                      e.dataTransfer!.setData(PATH_DRAG_TYPE, path);
+                      e.dataTransfer!.setData("text/plain", path);
+                      e.dataTransfer!.effectAllowed = "copy";
+                    }}
+                    onClick={() => {
+                      setSelected({ path, parent: p.dir });
+                      if (entry.dir) return toggle(path);
+                      props.onOpenFile(path);
+                      body.focus({ preventScroll: true });
+                    }}
+                    onContextMenu={(e) => fileMenu(e, path, p.dir)}
+                  >
+                    <span class="tree-chev">{entry.dir && <Icon name={open() ? "down" : "right"} size={12} />}</span>
+                    <FileIcon name={entry.name} dir={entry.dir} open={open()} />
+                    <span classList={{ "tree-dir": entry.dir }}>{entry.name}</span>
+                  </div>
+                  <Show when={entry.dir && open()}>
+                    <Folder dir={path} depth={p.depth + 1} />
+                  </Show>
+                </>
+              );
+            }}
+          </For>
+        )}
+      </Loaded>
     );
   }
 
   return (
     <aside class="panel explorer" data-zoom="files" onContextMenu={(e) => e.preventDefault()}>
-      <div class="panel-head">
-        <span class="panel-title" title={props.root}>
-          {props.root ? folderName(props.root) : "Files"}
-        </span>
-        <span class="head-buttons">
-          <button class="icon-btn" title="Refresh" onClick={refresh}>
-            <Icon name="refresh" />
-          </button>
-          <button class="icon-btn" title="Close (Ctrl+Shift+E)" onClick={() => props.onClose()}>
-            <Icon name="close" />
-          </button>
-        </span>
-      </div>
+      <PanelHead
+        title={props.root ? folderName(props.root) : "Files"}
+        tip={props.root}
+        closeTip="Close (Ctrl+Shift+E)"
+        onClose={() => props.onClose()}
+      >
+        <button class="icon-btn" title="Refresh" onClick={refresh}>
+          <Icon name="refresh" />
+        </button>
+      </PanelHead>
       <div
         class="panel-body"
         ref={body}

@@ -4,6 +4,7 @@ import { folderName } from "../tabs/layout";
 import type { Shell } from "../tabs/Shell";
 import type { Tab } from "../tabs/Tab";
 import { Icon } from "../ui/Icon";
+import { PanelHead } from "../ui/Panel";
 import { groupOf, insert, MAIN, remove, show, type Pane, type PanelId, type Target } from "./panes";
 
 /**
@@ -106,25 +107,28 @@ export function createConsoles(o: {
   function render(id: PanelId, title: string) {
     return (
       <aside class="panel terminal" data-zoom="terminal">
-        <div class="panel-head">
-          <span class="panel-title" title={mine(id)?.cwd}>
-            <Show when={mine(id)?.status && mine(id)!.status !== "idle"}>
-              <span class={`badge ${mine(id)!.status}`} title={mine(id)!.status} />
-            </Show>
-            {title}
-            {mine(id)?.cwd ? ` · ${folderName(mine(id)!.cwd!)}` : ""}
-          </span>
-          <span class="head-buttons">
-            <button class="icon-btn" title="New terminal for this tab (Ctrl+Shift+K)" onClick={() => ((last = id), open())}>
-              <Icon name="plus" />
+        {/* No × of the panel's own: this one ends the active tab's shell, and only when it has one. */}
+        <PanelHead
+          title={
+            <>
+              <Show when={mine(id)?.status && mine(id)!.status !== "idle"}>
+                <span class={`badge ${mine(id)!.status}`} title={mine(id)!.status} />
+              </Show>
+              {title}
+              {mine(id)?.cwd ? ` · ${folderName(mine(id)!.cwd!)}` : ""}
+            </>
+          }
+          tip={mine(id)?.cwd}
+        >
+          <button class="icon-btn" title="New terminal for this tab (Ctrl+Shift+K)" onClick={() => ((last = id), open())}>
+            <Icon name="plus" />
+          </button>
+          <Show when={mine(id)}>
+            <button class="icon-btn" title="Close this tab's terminal (ends its shell)" onClick={() => close(id)}>
+              <Icon name="close" />
             </button>
-            <Show when={mine(id)}>
-              <button class="icon-btn" title="Close this tab's terminal (ends its shell)" onClick={() => close(id)}>
-                <Icon name="close" />
-              </button>
-            </Show>
-          </span>
-        </div>
+          </Show>
+        </PanelHead>
         <div class="pane-term" ref={(el) => attach(id, el)}>
           {/* Always here, only its display changes: no <Show>, which would clear the whole element when it hides
               (Solid sets textContent), erasing the terminals added here by hand. */}

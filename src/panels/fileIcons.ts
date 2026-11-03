@@ -1,6 +1,6 @@
 // File-type badges for the explorer: a short label + color per extension. Unknown types get a plain file icon.
 
-export type FileBadge = { label: string; color: string };
+type FileBadge = { label: string; color: string };
 
 const BY_EXT: Record<string, FileBadge> = {};
 const add = (exts: string, label: string, color: string) => {

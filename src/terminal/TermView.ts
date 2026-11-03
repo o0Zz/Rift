@@ -18,9 +18,9 @@ export type TermLook = { theme: ITheme; fontSize: number; fontFamily: string };
 export const PATH_DRAG_TYPE = "application/x-rift-path";
 export const PROMPT_DRAG_TYPE = "application/x-rift-prompt";
 
-export type TermEvents = {
+type TermEvents = {
   onTitle(title: string): void;
-  /** From the shell's prompt (OSC 9;9, emitted by Rift's PowerShell init). */
+  /** The folder, at every prompt (OSC 9;9 from PowerShell and cmd, OSC 7 from bash/zsh). */
   onCwd(cwd: string): void;
   /** Whether an agent (Claude...) runs in this tab: Shift+Enter then inserts a new line. */
   isAgent(): boolean;

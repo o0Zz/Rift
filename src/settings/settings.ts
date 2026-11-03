@@ -26,7 +26,7 @@ export const ACTIONS = {
 } as const;
 
 export type Action = keyof typeof ACTIONS;
-export type Keymap = Record<Action, string[]>;
+type Keymap = Record<Action, string[]>;
 
 export type Settings = {
   theme: ThemeChoice;
@@ -45,18 +45,19 @@ export type Settings = {
 
 /** What Ctrl+wheel or Ctrl+= / - / 0 resizes: the area under the cursor (wheel) or with the focus (keys). */
 export type ZoomArea = "terminal" | ScaledArea;
-export type ScaledArea = "sidebar" | "files" | "git" | "prompts" | "docs";
+type ScaledArea = "sidebar" | "files" | "git" | "prompts" | "docs";
 const SCALED: ScaledArea[] = ["sidebar", "files", "git", "prompts", "docs"];
 const SCALE_MIN = 0.6;
 const SCALE_MAX = 2;
-const FONT_MIN = 8;
-const FONT_MAX = 32;
+export const FONT_MIN = 8;
+export const FONT_MAX = 32;
 
 export type TabSize = "compact" | "comfortable" | "large";
 /** Tab row height in px per size (compact = the original 36 px). */
 export const TAB_ROW_HEIGHT: Record<TabSize, number> = { compact: 36, comfortable: 44, large: 52 };
 
 export const IS_MAC = typeof navigator !== "undefined" && /Mac/i.test(navigator.platform);
+export const IS_WINDOWS = typeof navigator !== "undefined" && /Win/i.test(navigator.platform);
 
 /**
  * Default shortcuts. Windows/Linux: Ctrl+T/W/F belong to the shell (Ctrl+W deletes a word), hence the
@@ -216,13 +217,15 @@ export function isReloadKey(e: KeyLike, mac = IS_MAC): boolean {
 export function bind(keys: Keymap, action: Action, combo: string): { keys: Keymap; takenFrom?: Action } {
   let takenFrom: Action | undefined;
   const next = { ...keys };
+  const lower = combo.toLowerCase();
+  const same = (c: string) => c.toLowerCase() === lower;
   for (const a of Object.keys(next) as Action[]) {
-    if (a !== action && next[a].some((c) => c.toLowerCase() === combo.toLowerCase())) {
-      next[a] = next[a].filter((c) => c.toLowerCase() !== combo.toLowerCase());
+    if (a !== action && next[a].some(same)) {
+      next[a] = next[a].filter((c) => !same(c));
       takenFrom = a;
     }
   }
-  if (!next[action].some((c) => c.toLowerCase() === combo.toLowerCase())) next[action] = [...next[action], combo];
+  if (!next[action].some(same)) next[action] = [...next[action], combo];
   return { keys: next, takenFrom };
 }
 

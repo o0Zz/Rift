@@ -1,11 +1,12 @@
 import { createSignal } from "solid-js";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import type { Editor } from "./editor";
+import { dirOf } from "./place";
+import { folderName } from "../tabs/layout";
 
 type Text = { text: string; mtime: number };
 
 const isMarkdown = (path: string) => /\.(md|markdown|mdx)$/i.test(path);
-const fileName = (path: string) => path.split(/[\\/]/).pop() ?? path;
 
 /**
  * One open file in a tab, shown instead of the terminal. Like `TermView` it stays mounted and switching only
@@ -28,7 +29,7 @@ export class DocView {
     readonly path: string,
     private events: { onNotText(): void; onOpenFile(path: string): void },
   ) {
-    this.name = fileName(path);
+    this.name = folderName(path);
     this.markdown = isMarkdown(path);
     this.editingSig[1](!this.markdown);
     this.el.className = "doc";
@@ -76,7 +77,7 @@ export class DocView {
     this.focus();
   }
 
-  async save() {
+  private async save() {
     this.takeText();
     this.mtime = await invoke<number>("fs_write_text", { path: this.path, text: this.text });
     this.dirtySig[1](false);
@@ -160,8 +161,7 @@ export class DocView {
     } else if (href.startsWith("#")) {
       this.el.querySelector(`[id="${CSS.escape(decodeURIComponent(href.slice(1)))}"]`)?.scrollIntoView();
     } else if (href && !/^[a-z][a-z0-9+.-]*:/i.test(href)) {
-      const dir = this.path.slice(0, Math.max(this.path.lastIndexOf("/"), this.path.lastIndexOf("\\")) + 1);
-      this.events.onOpenFile(dir + decodeURIComponent(href.split("#")[0]));
+      this.events.onOpenFile(dirOf(this.path) + decodeURIComponent(href.split("#")[0]));
     }
   }
 }

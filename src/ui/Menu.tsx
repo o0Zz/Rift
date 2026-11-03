@@ -3,9 +3,8 @@ import { Portal } from "solid-js/web";
 import { COLORS } from "../tabs/layout";
 import { Icon } from "./Icon";
 
-export type MenuItem = { label: string; run(): void } | { colors(color: string | undefined): void } | "separator";
-
 type Action = { label: string; run(): void };
+export type MenuItem = Action | { colors(color: string | undefined): void } | "separator";
 const isAction = (item: MenuItem): item is Action => typeof item === "object" && "label" in item;
 
 /**

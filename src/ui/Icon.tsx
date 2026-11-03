@@ -18,7 +18,7 @@ const PATHS = {
   up: "M4 10l4-4 4 4",
 } as const;
 
-export type IconName = keyof typeof PATHS;
+type IconName = keyof typeof PATHS;
 
 export function Icon(props: { name: IconName; size?: number }) {
   const size = () => props.size ?? 16;

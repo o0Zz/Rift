@@ -1,13 +1,13 @@
-import { createEffect, createSignal, For, Show, onMount, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, For, Show, onMount, type JSX } from "solid-js";
 import { displayTitle, matchesFilter, ownRowColor, visualOrder, type Agent, type Drop, type Group, type TabFilter } from "./layout";
-import { createMenu, type MenuItem } from "../ui/Menu";
+import { createMenu } from "../ui/Menu";
 import type { Tab } from "./Tab";
 import { TabIcon } from "./icons";
 import { Icon } from "../ui/Icon";
 import { GitStatsView } from "./GitStats";
 import { CONTEXT_WARN } from "./usage";
 
-export type SidebarProps = {
+type SidebarProps = {
   tabs: Tab[];
   groups: Group[];
   active?: Tab;
@@ -42,16 +42,17 @@ type Dragged = { tab: Tab } | { group: string };
 export function Sidebar(props: SidebarProps) {
   // After a keyboard choice in a menu, the keyboard goes back to the terminal.
   const menu = createMenu(() => requestAnimationFrame(() => props.onFocusTerminal()));
+  const [editing, setEditing] = createSignal<Tab | Group>();
+  const [dragged, setDragged] = createSignal<Dragged>();
+  const [dropTarget, setDropTarget] = createSignal<unknown>();
   createEffect(() => {
     const r = props.rename;
     if (r) setEditing(r.tab);
   });
-  const [editing, setEditing] = createSignal<Tab | Group>();
-  const [dragged, setDragged] = createSignal<Dragged>();
-  const [dropTarget, setDropTarget] = createSignal<unknown>();
 
   const groupOf = (tab: Tab) => props.groups.find((g) => g.id === tab.group);
-  const shown = () => visualOrder(props.tabs, props.groups).filter((t) => matchesFilter(t, props.filter));
+  // Read once per group and once more for ungrouped tabs: ordered once per change.
+  const shown = createMemo(() => visualOrder(props.tabs, props.groups).filter((t) => matchesFilter(t, props.filter)));
   const inGroup = (g: Group) => shown().filter((t) => t.group === g.id);
   const ungrouped = () => shown().filter((t) => !groupOf(t));
   const count = (f: TabFilter) => props.tabs.filter((t) => matchesFilter(t, f)).length;
@@ -61,10 +62,8 @@ export function Sidebar(props: SidebarProps) {
     ["working", "Working"],
   ];
 
-  const openMenu = (e: MouseEvent, items: MenuItem[]) => menu.open(e, items);
-
   function tabMenu(e: MouseEvent, tab: Tab) {
-    openMenu(e, [
+    menu.open(e, [
       { label: "Rename", run: () => setEditing(tab) },
       { colors: (c) => (tab.color = c) },
       "separator",
@@ -85,7 +84,7 @@ export function Sidebar(props: SidebarProps) {
   }
 
   function groupMenu(e: MouseEvent, g: Group) {
-    openMenu(e, [
+    menu.open(e, [
       { label: "Rename group", run: () => setEditing(g) },
       { colors: (c) => props.onUpdateGroup(g.id, { color: c }) },
       "separator",
@@ -227,7 +226,7 @@ export function Sidebar(props: SidebarProps) {
             class="icon-btn"
             onClick={() => props.onNewTab()}
             onContextMenu={(e) =>
-              openMenu(
+              menu.open(
                 e,
                 props.shells.map((s) => ({ label: `New tab: ${s.name}`, run: () => props.onNewTab(s.id) })),
               )

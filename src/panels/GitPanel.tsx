@@ -1,4 +1,4 @@
-import { createEffect, createSignal, For, on, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, on, Show } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import {
   commitFiles as files,
@@ -14,11 +14,13 @@ import {
 import { TRASH_NAME } from "./fileOps";
 import { Icon } from "../ui/Icon";
 import { createMenu } from "../ui/Menu";
+import { Loaded, PanelHead } from "../ui/Panel";
 import { PromptDialog } from "../ui/PromptDialog";
 import { Resizer } from "../ui/Resizer";
 
 type Commit = { hash: string; short: string; author: string; date: string; subject: string };
 type Branch = { name: string; current: boolean };
+type Busy = "commit" | "generate" | "push" | "pull" | "branch" | "discard";
 
 /** Last background fetch per repo, for the whole app (the panel may be closed and reopened). */
 const fetched = new Map<string, number>();
@@ -56,7 +58,7 @@ export function GitPanel(props: {
   const [selected, setSelected] = createSignal<Change>();
   const [diff, setDiff] = createSignal<string>();
   const [message, setMessage] = createSignal("");
-  const [busy, setBusy] = createSignal<"commit" | "generate" | "push" | "pull" | "branch" | "discard">();
+  const [busy, setBusy] = createSignal<Busy>();
   const [note, setNote] = createSignal<{ text: string; error?: boolean }>();
   const [commits, setCommits] = createSignal<Commit[] | string>();
   const [picks, setPicks] = createSignal<string[]>([]);
@@ -68,12 +70,17 @@ export function GitPanel(props: {
 
   const list = () => (Array.isArray(changes()) ? (changes() as Change[]) : []);
   const picked = () => list().filter((c) => checked().has(c.path));
-  const order = () => {
+  // Read by every commit row (its highlight): mapped once per log, not once per row.
+  const order = createMemo(() => {
     const log = commits();
     return Array.isArray(log) ? log.map((c) => c.hash) : [];
-  };
+  });
   const range = () => commitRange(order(), picks());
   const short = (hash?: string) => hash?.slice(0, 7);
+  const clearDiff = () => {
+    setSelected(undefined);
+    setDiff(undefined);
+  };
 
   /** `keep`: same repo, newer state. The list, checks and open diff stay put instead of starting over. */
   async function load(root: string, keep = false) {
@@ -82,15 +89,9 @@ export function GitPanel(props: {
     const open = selected();
     if (!keep) {
       setChanges(undefined);
-      setSelected(undefined);
-      setDiff(undefined);
+      clearDiff();
     }
-    let result: Change[] | string;
-    try {
-      result = await invoke<Change[]>("git_status", { root });
-    } catch (e) {
-      result = String(e);
-    }
+    const result = await invoke<Change[]>("git_status", { root }).catch((e) => String(e));
     if (id !== request) return;
     setChanges(result);
     const now = Array.isArray(result) ? result : [];
@@ -98,10 +99,7 @@ export function GitPanel(props: {
     if (!keep || view() !== "changes") return;
     const still = now.find((c) => c.path === open?.path);
     if (still) show(still);
-    else {
-      setSelected(undefined);
-      setDiff(undefined);
-    }
+    else clearDiff();
   }
 
   async function loadLog(root: string) {
@@ -113,10 +111,11 @@ export function GitPanel(props: {
     if (id === logRequest) setCommits(result);
   }
 
-  function reload() {
+  /** `keep`: a reload in place (see `load`). */
+  function reload(keep = false) {
     const root = props.root;
     if (!root) return;
-    load(root);
+    load(root, keep);
     if (view() === "history") loadLog(root);
   }
 
@@ -125,6 +124,12 @@ export function GitPanel(props: {
     if (!fetchDue(fetched, root, Date.now(), force)) return;
     const ok = await invoke("git_fetch", { root }).then(() => true, () => false);
     if (ok && root === props.root) props.onHeadChanged?.();
+  }
+
+  /** After a commit, pull, discard or branch change: this panel and the repo's tabs show the new state. */
+  function headMoved() {
+    reload();
+    props.onHeadChanged?.();
   }
 
   /** The diff of a changed file, or of a file of the picked commit(s). */
@@ -142,8 +147,7 @@ export function GitPanel(props: {
 
   async function pick(hash: string, shift: boolean) {
     setPicks(pickCommits(picks(), hash, shift));
-    setSelected(undefined);
-    setDiff(undefined);
+    clearDiff();
     const r = range();
     setCommitChanges(undefined);
     if (!r) return;
@@ -157,8 +161,7 @@ export function GitPanel(props: {
   function setMode(next: "changes" | "history") {
     if (view() === next) return;
     setView(next);
-    setSelected(undefined);
-    setDiff(undefined);
+    clearDiff();
     if (next === "history" && props.root) loadLog(props.root);
   }
 
@@ -172,10 +175,7 @@ export function GitPanel(props: {
   const toggleAll = () => setChecked(new Set(allChecked() ? [] : list().map((c) => c.path)));
 
   /** Runs one git action with its busy state; its answer (or error) shows under the header. */
-  async function act(
-    kind: "commit" | "generate" | "push" | "pull" | "branch" | "discard",
-    run: () => Promise<string | void>,
-  ) {
+  async function act(kind: Busy, run: () => Promise<string | void>) {
     setBusy(kind);
     setNote(undefined);
     try {
@@ -203,8 +203,7 @@ export function GitPanel(props: {
       return summary;
     });
     if (!done) return;
-    reload();
-    props.onHeadChanged?.();
+    headMoved();
     if (andPush) push();
   }
 
@@ -215,8 +214,7 @@ export function GitPanel(props: {
   async function pull() {
     // Even a failed pull changes the repo: a conflict leaves a merge in progress and files to resolve.
     await act("pull", () => invoke<string>("git_pull", { root: props.root }));
-    reload();
-    props.onHeadChanged?.();
+    headMoved();
   }
 
   /** Back to HEAD: the checked files, or the one right-clicked. Asks first (tracked changes cannot be undone). */
@@ -224,12 +222,10 @@ export function GitPanel(props: {
     if (busy() || !changes.length || !confirm(discardQuestion(changes, TRASH_NAME))) return;
     await act("discard", () => invoke<void>("git_discard", { root: props.root, files: files(changes) }));
     // Even a partial failure changed some files.
-    reload();
-    props.onHeadChanged?.();
+    headMoved();
   }
 
   function fileMenu(e: MouseEvent, change: Change) {
-    e.preventDefault();
     menu.open(e, [{ label: "Discard changes…", run: () => discard([change]) }]);
   }
 
@@ -237,18 +233,17 @@ export function GitPanel(props: {
     setNaming(false);
     if (!(await act("branch", () => invoke<void>(command, { root: props.root, branch })))) return;
     setNote({ text: `On branch ${branch}` });
-    reload();
-    props.onHeadChanged?.();
+    headMoved();
   }
 
   async function branchMenu(e: MouseEvent) {
     if (props.root) fetchRemote(props.root);
-    const at = { clientX: e.clientX, clientY: e.clientY, preventDefault() {}, stopPropagation() {} } as MouseEvent;
     const branches = await invoke<Branch[]>("git_branches", { root: props.root }).catch((err) => {
       setNote({ text: String(err), error: true });
       return [] as Branch[];
     });
-    menu.open(at, [
+    // The click's position is still readable after the await.
+    menu.open(e, [
       { label: "New branch…", run: () => setNaming(true) },
       "separator",
       // Most recent first; a long list would not fit on screen.
@@ -267,25 +262,12 @@ export function GitPanel(props: {
       () => props.root,
       (root) => {
         setNote(undefined);
-        if (!root) return;
-        load(root);
-        if (view() === "history") loadLog(root);
-        fetchRemote(root);
+        reload();
+        if (root) fetchRemote(root);
       },
     ),
   );
-  createEffect(
-    on(
-      () => props.refresh,
-      () => {
-        const root = props.root;
-        if (!root) return;
-        load(root, true);
-        if (view() === "history") loadLog(root);
-      },
-      { defer: true },
-    ),
-  );
+  createEffect(on(() => props.refresh, () => reload(true), { defer: true }));
 
   const FileRow = (p: { change: Change; check?: boolean }) => (
     <div
@@ -309,46 +291,44 @@ export function GitPanel(props: {
 
   return (
     <aside class="panel git" data-zoom="git">
-      <div class="panel-head">
-        <span class="panel-title">
+      <PanelHead
+        title={
           <Show when={props.branch} fallback="Git">
             <button class="branch branch-btn" title="Switch or create a branch" disabled={!!busy()} onClick={branchMenu}>
               <Icon name="branch" size={14} /> {props.branch} <Icon name="down" size={12} />
             </button>
           </Show>
-        </span>
-        <span class="head-buttons">
-          <Show when={props.root}>
-            <button
-              class="icon-btn pull-btn"
-              title={props.behind ? `Pull (${props.behind} commit${props.behind === 1 ? "" : "s"} behind)` : "Pull"}
-              disabled={!!busy()}
-              onClick={pull}
-            >
-              <Icon name="pull" />
-              <Show when={props.behind}>
-                <span class="pull-badge">{props.behind! > 99 ? "99+" : props.behind}</span>
-              </Show>
-            </button>
-            <button class="icon-btn" title="Push" disabled={!!busy()} onClick={push}>
-              <Icon name="push" />
-            </button>
-            <button
-              class="icon-btn"
-              title="Refresh (and fetch)"
-              onClick={() => {
-                reload();
-                if (props.root) fetchRemote(props.root, true);
-              }}
-            >
-              <Icon name="refresh" />
-            </button>
-          </Show>
-          <button class="icon-btn" title="Close (Ctrl+Shift+G)" onClick={() => props.onClose()}>
-            <Icon name="close" />
+        }
+        closeTip="Close (Ctrl+Shift+G)"
+        onClose={() => props.onClose()}
+      >
+        <Show when={props.root}>
+          <button
+            class="icon-btn pull-btn"
+            title={props.behind ? `Pull (${props.behind} commit${props.behind === 1 ? "" : "s"} behind)` : "Pull"}
+            disabled={!!busy()}
+            onClick={pull}
+          >
+            <Icon name="pull" />
+            <Show when={props.behind}>
+              <span class="pull-badge">{props.behind! > 99 ? "99+" : props.behind}</span>
+            </Show>
           </button>
-        </span>
-      </div>
+          <button class="icon-btn" title="Push" disabled={!!busy()} onClick={push}>
+            <Icon name="push" />
+          </button>
+          <button
+            class="icon-btn"
+            title="Refresh (and fetch)"
+            onClick={() => {
+              reload();
+              if (props.root) fetchRemote(props.root, true);
+            }}
+          >
+            <Icon name="refresh" />
+          </button>
+        </Show>
+      </PanelHead>
       <Show when={props.root} fallback={<div class="tree-note">Not a git repository</div>}>
         <div class="git-views">
           <div class="segmented">
@@ -371,50 +351,40 @@ export function GitPanel(props: {
           fallback={
             <>
             <div class="git-files" style={sized(filesHeight())}>
-              <Show when={changes()} fallback={<div class="tree-note">Loading…</div>}>
-                {(c) =>
-                  typeof c() === "string" ? (
-                    <div class="tree-note error">{c() as string}</div>
-                  ) : list().length === 0 ? (
-                    <div class="tree-note">No changes</div>
-                  ) : (
-                    <>
-                      <label class="git-file all">
-                        <input type="checkbox" checked={allChecked()} onChange={toggleAll} />
-                        <span>
-                          {picked().length} of {list().length} files selected
-                        </span>
-                        <button
-                          class="icon-btn git-discard"
-                          title="Discard the changes to the selected files"
-                          disabled={!!busy() || picked().length === 0}
-                          onClick={(e) => {
-                            e.preventDefault(); // inside the label: would also toggle every checkbox
-                            discard(picked());
-                          }}
-                        >
-                          <Icon name="discard" />
-                        </button>
-                      </label>
-                      <For each={list()}>{(change) => <FileRow change={change} check />}</For>
-                    </>
-                  )
-                }
-              </Show>
+              <Loaded value={changes()}>
+                {() => (
+                  <Show when={list().length} fallback={<div class="tree-note">No changes</div>}>
+                    <label class="git-file all">
+                      <input type="checkbox" checked={allChecked()} onChange={toggleAll} />
+                      <span>
+                        {picked().length} of {list().length} files selected
+                      </span>
+                      <button
+                        class="icon-btn git-discard"
+                        title="Discard the changes to the selected files"
+                        disabled={!!busy() || picked().length === 0}
+                        onClick={(e) => {
+                          e.preventDefault(); // inside the label: would also toggle every checkbox
+                          discard(picked());
+                        }}
+                      >
+                        <Icon name="discard" />
+                      </button>
+                    </label>
+                    <For each={list()}>{(change) => <FileRow change={change} check />}</For>
+                  </Show>
+                )}
+              </Loaded>
             </div>
             {handle(filesHeight, setFilesHeight)}
             </>
           }
         >
           <div class="git-files git-log" style={sized(logHeight())}>
-            <Show when={commits()} fallback={<div class="tree-note">Loading…</div>}>
-              {(c) =>
-                typeof c() === "string" ? (
-                  <div class="tree-note error">{c() as string}</div>
-                ) : (c() as Commit[]).length === 0 ? (
-                  <div class="tree-note">No commits yet</div>
-                ) : (
-                  <For each={c() as Commit[]}>
+            <Loaded value={commits()}>
+              {(log) => (
+                <Show when={log().length} fallback={<div class="tree-note">No commits yet</div>}>
+                  <For each={log()}>
                     {(commit) => (
                       <div
                         class="git-commit"
@@ -430,9 +400,9 @@ export function GitPanel(props: {
                       </div>
                     )}
                   </For>
-                )
-              }
-            </Show>
+                </Show>
+              )}
+            </Loaded>
           </div>
           {handle(logHeight, setLogHeight)}
           <Show when={range()}>
@@ -444,15 +414,9 @@ export function GitPanel(props: {
                     ? `${r().count} commits, ${short(r().from)} to ${short(r().to)}`
                     : `Changes in ${short(r().to)}`}
                 </div>
-                <Show when={commitChanges()} fallback={<div class="tree-note">Loading…</div>}>
-                  {(c) =>
-                    typeof c() === "string" ? (
-                      <div class="tree-note error">{c() as string}</div>
-                    ) : (
-                      <For each={c() as Change[]}>{(change) => <FileRow change={change} />}</For>
-                    )
-                  }
-                </Show>
+                <Loaded value={commitChanges()}>
+                  {(c) => <For each={c()}>{(change) => <FileRow change={change} />}</For>}
+                </Loaded>
               </div>
               {handle(filesHeight, setFilesHeight)}
               </>
@@ -464,11 +428,9 @@ export function GitPanel(props: {
             when={selected()}
             fallback={
               <div class="tree-note">
-                {view() === "changes"
-                  ? "Click a file to see its diff"
-                  : picks().length
-                    ? "Click a file to see its diff"
-                    : "Click a commit to see its changes; Shift+click another one for the whole range"}
+                {view() === "history" && !picks().length
+                  ? "Click a commit to see its changes; Shift+click another one for the whole range"
+                  : "Click a file to see its diff"}
               </div>
             }
           >

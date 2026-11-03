@@ -4,7 +4,7 @@
 // Pure: unit-tested in panes.test.ts.
 
 /** Files, git and prompts always exist; terminals (`term:<n>`) only while their shell runs. */
-export const FIXED = ["explorer", "git", "prompts"] as const;
+const FIXED = ["explorer", "git", "prompts"] as const;
 export type PanelId = (typeof FIXED)[number] | `term:${number}` | "main";
 export const isTerminal = (id: PanelId): id is `term:${number}` => id.startsWith("term:");
 /** `shown` undefined = the group is closed (it keeps its place, the others take its room). */
@@ -12,7 +12,7 @@ export type Group = { id: string; panels: PanelId[]; shown?: PanelId };
 /** `sizes`: one flex weight per child. */
 export type Split = { id: string; dir: "row" | "col"; children: Pane[]; sizes: number[] };
 export type Pane = Group | Split;
-export type Edge = "left" | "right" | "top" | "bottom";
+type Edge = "left" | "right" | "top" | "bottom";
 /** Where a dropped panel goes: beside a pane (`at` an edge of it, "root" = the whole window), or a tab of a group. */
 export type Target = { pane: string; at: Edge | "tab" };
 

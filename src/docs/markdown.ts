@@ -1,6 +1,7 @@
 // Markdown reader of a document tab. Loaded on first use.
 import { marked } from "marked";
 import DOMPurify from "dompurify";
+import { dirOf } from "./place";
 
 /**
  * Markdown → HTML, sanitized: the page can call Rift's commands (type into a shell...), so a file must
@@ -17,6 +18,5 @@ export function renderMarkdown(text: string): string {
  */
 export function localImage(src: string, doc: string): string | undefined {
   if (!src || /^([a-z][a-z0-9+.-]*:|\/|#)/i.test(src)) return;
-  const dir = doc.slice(0, Math.max(doc.lastIndexOf("/"), doc.lastIndexOf("\\")) + 1);
-  return dir + decodeURIComponent(src.split(/[?#]/)[0]);
+  return dirOf(doc) + decodeURIComponent(src.split(/[?#]/)[0]);
 }

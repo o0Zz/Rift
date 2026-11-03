@@ -1,12 +1,12 @@
 // Folder reports sent by Rift's shell integration at every prompt.
 
+import { IS_WINDOWS } from "../settings/settings";
+
 /** OSC 9;9 (PowerShell on Windows): `9;"C:\path"`. */
 export function cwdFromOsc9(data: string): string | undefined {
   if (!data.startsWith("9;")) return;
   return data.slice(2).replace(/^"(.*)"$/, "$1");
 }
-
-const IS_WINDOWS = typeof navigator !== "undefined" && /Win/i.test(navigator.platform);
 
 /**
  * OSC 7 (bash/zsh): `file://host/path`, percent-encoded. On Windows, Git Bash reports MSYS paths

@@ -1,3 +1,6 @@
+/** The folder part of a path, with its trailing separator ("" for a bare name). Either separator. */
+export const dirOf = (path: string) => path.slice(0, Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\")) + 1);
+
 /** Same file? Paths compare without case and with either separator (Windows). */
 export function sameFile(a: string, b: string) {
   const norm = (p: string) => p.replace(/\\/g, "/").toLowerCase();

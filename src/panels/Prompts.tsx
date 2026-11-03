@@ -2,10 +2,11 @@ import { createSignal, For, Show } from "solid-js";
 import { folderName } from "../tabs/layout";
 import { PROMPT_DRAG_TYPE } from "../terminal/TermView";
 import { Icon } from "../ui/Icon";
+import { PanelHead } from "../ui/Panel";
 import { isSaveKey } from "./promptLists";
 
 /**
- * Prompts prepared in advance for the shown tab's repo. Click one to edit it; its arrow pastes it into the
+ * Prompts prepared in advance for the shown tab's repo. Click one to edit it; its ✓ (Apply) pastes it into the
  * active terminal (not sent: Enter stays the user's) and it leaves the list.
  */
 export function Prompts(props: {
@@ -34,16 +35,12 @@ export function Prompts(props: {
 
   return (
     <aside class="panel prompts" data-zoom="prompts">
-      <div class="panel-head">
-        <span class="panel-title" title={props.repo}>
-          Prompts{props.repo ? ` · ${folderName(props.repo)}` : ""}
-        </span>
-        <span class="head-buttons">
-          <button class="icon-btn" title="Close (Ctrl+Shift+O)" onClick={() => props.onClose()}>
-            <Icon name="close" />
-          </button>
-        </span>
-      </div>
+      <PanelHead
+        title={`Prompts${props.repo ? ` · ${folderName(props.repo)}` : ""}`}
+        tip={props.repo}
+        closeTip="Close (Ctrl+Shift+O)"
+        onClose={() => props.onClose()}
+      />
       <Show when={props.repo} fallback={<div class="tree-note">No folder</div>}>
         <div class="prompt-list">
           <Show when={props.prompts.length} fallback={<div class="tree-note">No prompts yet: write one below.</div>}>

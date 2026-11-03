@@ -103,13 +103,13 @@ type Props = {
 
 /**
  * The tree of splits. A split lays out its open children with a drag handle between each two; a group shows
- * one panel, with a row of tabs when it holds several. Drag a panel's header or tab to move it (App lights up
+ * one panel, with a row of tabs when it holds several. Drag a panel's header or tab to move it (`Panes` lights up
  * where it would go). Only shown panels are mounted (panels load when shown); terminals keep their shell alive.
  */
 function PaneView(props: Props & { id: string; style?: JSX.CSSProperties }) {
   const pane = () => props.panes().get(props.id)!;
   // A pane's kind never changes for its id: a group split in two gets a new parent, it does not become one.
-  return isGroup(pane()!) ? (
+  return isGroup(pane()) ? (
     <GroupView {...props} group={() => pane() as Group} />
   ) : (
     <SplitView {...props} split={() => pane() as Split} />
@@ -131,8 +131,9 @@ function SplitView(props: Props & { split(): Split; style?: JSX.CSSProperties })
     const b = handle.nextElementSibling as HTMLElement;
     const size = (el: HTMLElement) => (row() ? el.offsetWidth : el.offsetHeight);
     const [pa, pb] = [size(a), size(b)];
-    const ib = props.split().children.findIndex((c) => c.id === id);
-    const ia = props.split().children.findIndex((c) => c.id === open()[open().findIndex((o) => o.id === id) - 1].id);
+    // Indexes in the split's children (the handle sits between two open ones, maybe with closed ones between).
+    const k = open().findIndex((o) => o.id === id);
+    const [ia, ib] = [open()[k - 1].i, open()[k].i];
     const total = props.split().sizes[ia] + props.split().sizes[ib];
     const from = row() ? e.clientX : e.clientY;
     props.onDragging(true);
