@@ -10,7 +10,6 @@ import { neighbour } from "./tabs/nav";
 import {
   actionFor,
   DEFAULTS,
-  displayVersion,
   isReloadKey,
   mergeSettings,
   resolveTheme,
@@ -94,9 +93,9 @@ function App() {
   const [worktreeFrom, setWorktreeFrom] = createSignal<{ tab: Tab; agent: Agent }>();
   let updater: Updater | undefined;
 
-  // Window title: version, plus how many tabs need the user ("Rift 1.2.3.45 — 2 waiting").
+  // Window title: version, plus how many tabs need the user ("Rift 1.2.3+4 — 2 waiting").
   const [version, setVersion] = createSignal("");
-  getVersion().then((v) => setVersion(displayVersion(v)));
+  getVersion().then(setVersion);
   createEffect(() => {
     if (!version()) return;
     const waiting = tabs().filter(needsAttention).length;

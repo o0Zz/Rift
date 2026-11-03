@@ -130,7 +130,7 @@ Frontend ↔ backend: Tauri commands, the PTY `Channel`, events (`pty-exit`, `ag
 ## Releases and CI
 - Repo https://github.com/o0Zz/Rift (public). CI: `lint` on Linux (fmt, clippy, tsc, vitest) + `test` on windows/ubuntu/macos, then on master `installers` per OS. Rust compilation is the time (~150 s cold): never a second full compile per OS. The bench stays local (needs a visible window). Clippy runs on Linux only: check `#[cfg(windows)]` code by hand.
 - Packaging: Windows NSIS; macOS universal `.dmg`, **unsigned**; Linux AppImage (self-updates) + `.deb`.
-- Versioning: repo stays `0.0.0`; CI builds `0.0.0+RUN` or `X.Y.Z+RUN` (tag `vX.Y.Z`), shown `X.Y.Z.RUN`; the updater compares X.Y.Z. First release v1.0.0 (2026-11-01): installers 3.2 MB (Windows), 7.7 MB (dmg), 5.0 MB (deb), 83 MB (AppImage).
+- Versioning: repo stays `0.0.0`; a release (tag `vX.Y.Z`) builds `X.Y.Z`; a master build `X.Y.Z+N` = last tag + N commits since (`git describe`, full-history checkout; `0.0.0+N` before any tag), shown as is; the updater compares X.Y.Z (a `+N` build updates at the next release). First release v1.0.0 (2026-11-01): installers 3.2 MB (Windows), 7.7 MB (dmg), 5.0 MB (deb), 83 MB (AppImage).
 - Release: `git tag vX.Y.Z && git push origin vX.Y.Z` → `release.yml` (tauri-action, every OS, one GitHub Release with `latest.json`).
 - Signing key `~/.tauri/rift.key` + `rift.key.password` (never in the repo), secrets `TAURI_SIGNING_PRIVATE_KEY(_PASSWORD)`, public key in tauri.conf.json. Losing it = installed copies cannot update.
 - Updater (`update.ts`, not in dev/bench): at startup and every 6 h, downloads in the background, "Restart now" or installs on close, after `session_freeze` and saving scrollback.

@@ -1,7 +1,7 @@
 name: Release
 
 # `git tag vX.Y.Z && git push --tags` triggers this workflow. The repo version stays 0.0.0: the build
-# version is the tag plus the run number (X.Y.Z+RUN, shown as X.Y.Z.RUN). Each OS publishes its installers
+# version is the tag (X.Y.Z). Builds of later master commits are X.Y.Z+N (ci.yml). Each OS publishes its installers
 # on the same GitHub Release, plus its entry in latest.json (read by the in-app updater).
 on:
   push:
@@ -54,9 +54,9 @@ jobs:
 
       - run: npm ci
 
-      - name: Version from tag and run number
+      - name: Version from tag
         shell: bash
-        run: npm pkg set version="${GITHUB_REF_NAME#v}+${{ github.run_number }}"
+        run: npm pkg set version="${GITHUB_REF_NAME#v}"
 
       - uses: tauri-apps/tauri-action@v0
         env:

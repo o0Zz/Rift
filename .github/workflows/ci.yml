@@ -89,6 +89,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # tags and history: the version counts commits since the last tag
       - if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y $LINUX_DEPS
       - uses: actions/setup-node@v5
@@ -102,10 +104,19 @@ jobs:
         with:
           workspaces: src-tauri
       - run: npm ci
-      # Dev builds: 0.0.0+RUN (shown as 0.0.0.RUN); tagged releases get X.Y.Z+RUN from release.yml.
-      - name: Version from run number
+      # Master builds: the last release tag plus the commits since it, X.Y.Z+N (the tagged commit itself: X.Y.Z,
+      # like its release). No tag yet: 0.0.0+N, N = all commits.
+      - name: Version from the last tag
         shell: bash
-        run: npm pkg set version="0.0.0+${{ github.run_number }}"
+        run: |
+          if d=$(git describe --tags --long --match 'v[0-9]*.[0-9]*.[0-9]*' 2>/dev/null); then
+            n=${d%-g*}; n=${n##*-}; v=${d%-*-g*}; v=${v#v}
+          else
+            n=$(git rev-list --count HEAD); v=0.0.0
+          fi
+          if [ "$n" = 0 ]; then version=$v; else version=$v+$n; fi
+          echo "version $version"
+          npm pkg set version="$version"
       - name: Build installers
         shell: bash
         run: npx tauri build ${{ matrix.build-args }} --config '{"bundle":{"createUpdaterArtifacts":false}}'

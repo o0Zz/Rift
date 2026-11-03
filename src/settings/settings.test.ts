@@ -6,7 +6,6 @@ import {
   DEFAULT_KEYS,
   DEFAULTS,
   defaultKeys,
-  displayVersion,
   isReloadKey,
   isValidShortcut,
   mergeSettings,
@@ -162,11 +161,6 @@ it("resolves the system theme", () => {
   expect(resolveTheme("light", true)).toBe("light");
 });
 
-it("shows the CI run number as a 4th version number", () => {
-  expect(displayVersion("1.2.3+45")).toBe("1.2.3.45");
-  expect(displayVersion("0.0.0+7")).toBe("0.0.0.7");
-  expect(displayVersion("0.0.0")).toBe("0.0.0");
-});
 
 describe("zoom", () => {
   it("steps the terminal font, or one panel's scale, within limits; 0 goes back to normal", () => {
