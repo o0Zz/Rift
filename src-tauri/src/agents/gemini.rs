@@ -85,14 +85,11 @@ impl AgentHarness for Gemini {
     }
 
     fn hooks_installed(&self, exe: &Path) -> bool {
-        config::read_json(&self.settings)
-            .is_ok_and(|s| config::has_hooks(&s, &EVENTS, &handler(exe)))
+        config::hooks_installed(&self.settings, &EVENTS, &handler(exe))
     }
 
     fn install_hooks(&self, exe: &Path) -> Result<()> {
-        let mut settings = config::read_json(&self.settings)?;
-        config::add_hooks(&mut settings, &EVENTS, &handler(exe), "gemini")?;
-        config::write_json(&self.settings, &settings)
+        config::install_hooks(&self.settings, &EVENTS, &handler(exe), "gemini")
     }
 
     fn setup(&self) -> String {

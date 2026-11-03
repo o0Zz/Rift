@@ -1,8 +1,37 @@
-//! File explorer backend: one directory level at a time, never a recursive walk.
+//! File explorer backend: one directory level at a time, never a recursive walk. Also the file helpers
+//! Rift's own state files share.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
+use serde::de::DeserializeOwned;
+
+/// Writes `bytes` to `path` through `<path>.tmp` + rename: a crash mid-write never leaves a cut file.
+/// Creates the parent folder if needed.
+pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let mut tmp = path.as_os_str().to_owned();
+    tmp.push(".tmp");
+    std::fs::write(&tmp, bytes)?;
+    std::fs::rename(tmp, path)
+}
+
+/// The JSON file at `path`, or the default value if it is missing or unreadable.
+pub fn read_json_or_default<T: DeserializeOwned + Default>(path: &Path) -> T {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_default()
+}
+
+/// The per-user runtime folder when there is one (only this user can use it), else the temp folder.
+pub fn runtime_dir() -> PathBuf {
+    std::env::var_os("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir)
+}
 
 #[derive(Debug, PartialEq, Serialize)]
 pub struct Entry {

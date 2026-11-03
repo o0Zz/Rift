@@ -66,8 +66,8 @@ impl Shell {
     }
 }
 
-/// The shells installed here, the platform default first.
-/// The installed shells, looked up once (PATH and file checks): a new tab with its own shell reads the list.
+/// The installed shells, the platform default first, looked up once (PATH and file checks): a new tab
+/// with its own shell reads the list.
 pub fn profiles() -> &'static [Profile] {
     static PROFILES: std::sync::OnceLock<Vec<Profile>> = std::sync::OnceLock::new();
     PROFILES.get_or_init(|| {
@@ -291,10 +291,8 @@ precmd_functions+=(__rift_cwd)
     fn integration_dir() -> &'static Path {
         static DIR: OnceLock<PathBuf> = OnceLock::new();
         DIR.get_or_init(|| {
-            let base = std::env::var_os("XDG_RUNTIME_DIR")
-                .map(PathBuf::from)
-                .unwrap_or_else(std::env::temp_dir);
-            let dir = base.join(format!("rift-shell-{}", std::process::id()));
+            let dir =
+                crate::files::runtime_dir().join(format!("rift-shell-{}", std::process::id()));
             let zsh = dir.join("zsh");
             let _ = std::fs::create_dir_all(&zsh);
             let _ = std::fs::write(dir.join("rift.bash"), format!("{BASH_RC}{RUN_STARTUP}"));

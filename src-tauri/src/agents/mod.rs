@@ -1,16 +1,25 @@
 //! Everything agent-specific (Claude Code, Codex, Gemini CLI, Copilot CLI) sits behind `AgentHarness`.
 
-pub mod claude;
-pub mod codex;
+mod claude;
+mod codex;
 mod config;
-pub mod copilot;
-pub mod gemini;
+mod copilot;
+mod gemini;
 
 use std::path::Path;
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+/// The user's own convention for commit messages (see their CLAUDE.md), for `AgentHarness::one_shot`.
+pub const COMMIT_PROMPT: &str = "Write a git commit message for the diff on stdin, following Conventional Commits. \
+Subject line: `type(scope): description`, where type is one of feat, fix, docs, style, refactor, perf, test, \
+build, ci, chore; the scope is optional (the main area touched, one short word); the description is in the \
+imperative mood, lower case, no final period; the whole line at most 72 characters. \
+For a breaking change, add `!` before the colon and a `BREAKING CHANGE:` footer. \
+Optionally a blank line and a brief body. No co-author or sign-off lines. \
+Output only the message, without quotes or code fences.";
 
 /// What an agent reported through its hook.
 #[derive(Debug, Clone, PartialEq)]

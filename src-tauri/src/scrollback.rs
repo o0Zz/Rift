@@ -21,12 +21,8 @@ impl Scrollback {
     }
 
     pub fn save(&self, id: &str, data: &str) -> Result<()> {
-        let file = self.file(id)?;
-        std::fs::create_dir_all(&self.0)?;
-        // Temp file + rename: closing mid-write never leaves a cut history.
-        let tmp = file.with_extension("ans.tmp");
-        std::fs::write(&tmp, data)?;
-        std::fs::rename(tmp, file)?;
+        // Closing mid-write never leaves a cut history.
+        crate::files::write_atomic(&self.file(id)?, data.as_bytes())?;
         Ok(())
     }
 

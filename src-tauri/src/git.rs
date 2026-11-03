@@ -78,13 +78,22 @@ fn check(out: std::process::Output) -> Result<std::process::Output> {
     if out.status.success() {
         return Ok(out);
     }
-    let err = String::from_utf8_lossy(&out.stderr);
-    let msg = if err.trim().is_empty() {
-        String::from_utf8_lossy(&out.stdout)
-    } else {
-        err
-    };
-    bail!("{}", msg.trim())
+    bail!("{}", crate::process::failure_text(&out))
+}
+
+/// Runs git `args` on exactly `paths`, NUL-separated on stdin: no command-line length limit, any file name.
+fn git_paths<'a>(
+    root: &Path,
+    args: &[&str],
+    paths: impl IntoIterator<Item = &'a str>,
+) -> Result<std::process::Output> {
+    let mut spec = Vec::new();
+    for path in paths {
+        spec.extend_from_slice(path.as_bytes());
+        spec.push(0);
+    }
+    let args = [args, &["--pathspec-from-file=-", "--pathspec-file-nul"][..]].concat();
+    check(git_with_input(root, &args, Some(&spec))?)
 }
 
 /// Commits exactly the given files (`(path, untracked)`: new, modified, deleted, renamed — both sides of a
@@ -96,31 +105,21 @@ pub fn commit(root: &Path, files: &[(String, bool)], message: &str) -> Result<St
     if files.is_empty() {
         bail!("No file selected");
     }
-    // NUL-separated pathspecs on stdin: no command-line length limit, any file name.
-    let spec = |untracked_only: bool| {
-        let mut spec = Vec::new();
-        for (path, untracked) in files {
-            if *untracked || !untracked_only {
-                spec.extend_from_slice(path.as_bytes());
-                spec.push(0);
-            }
-        }
-        spec
-    };
-    let from_stdin = ["--pathspec-from-file=-", "--pathspec-file-nul"];
     // New files must be added first; `commit --only` takes care of everything git already tracks.
     // --literal-pathspecs: `[id].tsx` is a file name, not a glob.
-    let new_files = spec(true);
+    let new_files: Vec<&str> = files
+        .iter()
+        .filter(|(_, untracked)| *untracked)
+        .map(|(p, _)| p.as_str())
+        .collect();
     if !new_files.is_empty() {
-        let add = [&["--literal-pathspecs", "add"][..], &from_stdin].concat();
-        check(git_with_input(root, &add, Some(&new_files))?)?;
+        git_paths(root, &["--literal-pathspecs", "add"], new_files)?;
     }
-    let args = [
-        &["--literal-pathspecs", "commit", "--only", "-m", message][..],
-        &from_stdin,
-    ]
-    .concat();
-    let out = check(git_with_input(root, &args, Some(&spec(false)))?)?;
+    let out = git_paths(
+        root,
+        &["--literal-pathspecs", "commit", "--only", "-m", message],
+        files.iter().map(|(p, _)| p.as_str()),
+    )?;
     let text = String::from_utf8_lossy(&out.stdout);
     Ok(text.lines().next().unwrap_or_default().to_string())
 }
@@ -147,24 +146,15 @@ pub fn discard(root: &Path, files: &[(String, bool)]) -> Result<()> {
     let text = String::from_utf8_lossy(&out.stdout);
     let added: std::collections::HashSet<&str> =
         text.split('\0').filter(|p| !p.is_empty()).collect();
-    let spec = |paths: &[&String]| {
-        let mut spec = Vec::new();
-        for path in paths {
-            spec.extend_from_slice(path.as_bytes());
-            spec.push(0);
-        }
-        spec
-    };
-    let from_stdin = ["--pathspec-from-file=-", "--pathspec-file-nul"];
-    let staged_new: Vec<_> = files
+    let staged_new: Vec<&str> = files
         .iter()
         .filter(|(p, _)| added.contains(p.as_str()))
-        .map(|(p, _)| p)
+        .map(|(p, _)| p.as_str())
         .collect();
-    let tracked: Vec<_> = files
+    let tracked: Vec<&str> = files
         .iter()
         .filter(|(p, untracked)| !untracked && !added.contains(p.as_str()))
-        .map(|(p, _)| p)
+        .map(|(p, _)| p.as_str())
         .collect();
     let new: Vec<_> = files
         .iter()
@@ -173,26 +163,24 @@ pub fn discard(root: &Path, files: &[(String, bool)]) -> Result<()> {
         .collect();
     if !staged_new.is_empty() {
         // `rm --cached` works before the first commit too; -f: staged and edited again is fine here.
-        let args = [
-            &["--literal-pathspecs", "rm", "--cached", "-f", "-q"][..],
-            &from_stdin,
-        ]
-        .concat();
-        check(git_with_input(root, &args, Some(&spec(&staged_new)))?)?;
+        git_paths(
+            root,
+            &["--literal-pathspecs", "rm", "--cached", "-f", "-q"],
+            staged_new,
+        )?;
     }
     if !tracked.is_empty() {
-        let args = [
+        git_paths(
+            root,
             &[
                 "--literal-pathspecs",
                 "restore",
                 "--source=HEAD",
                 "--staged",
                 "--worktree",
-            ][..],
-            &from_stdin,
-        ]
-        .concat();
-        check(git_with_input(root, &args, Some(&spec(&tracked)))?)?;
+            ],
+            tracked,
+        )?;
     }
     for path in new {
         let file = root.join(path);
@@ -500,8 +488,8 @@ pub fn log(root: &Path, max: usize) -> Result<Vec<Commit>> {
         ],
     )?;
     if !out.status.success() {
-        let none = git(root, &["rev-parse", "--verify", "--quiet", "HEAD"])?;
-        return if none.status.success() {
+        let has_head = git(root, &["rev-parse", "--verify", "--quiet", "HEAD"])?;
+        return if has_head.status.success() {
             check(out).map(|_| Vec::new())
         } else {
             Ok(Vec::new())
@@ -625,15 +613,14 @@ pub fn commit_diff(root: &Path, from: Option<&str>, to: &str, path: &str) -> Res
 
 /// Diff of one file against HEAD (staged + unstaged). Untracked files show as fully added.
 pub fn diff(root: &Path, path: &str, untracked: bool) -> Result<String> {
-    let out = if untracked {
-        // --no-index exits with 1 when the files differ, which is always the case here.
-        git(
-            root,
-            &["diff", "--no-color", "--no-index", "--", "/dev/null", path],
-        )?
-    } else {
+    if !untracked {
         return diff_tracked(root, &[path]);
-    };
+    }
+    // --no-index exits with 1 when the files differ, which is always the case here.
+    let out = git(
+        root,
+        &["diff", "--no-color", "--no-index", "--", "/dev/null", path],
+    )?;
     Ok(capped_diff(&out))
 }
 

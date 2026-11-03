@@ -60,7 +60,7 @@ fn forward(harness: &str, payload: Value) {
     );
 }
 
-pub fn send(pipe: &str, msg: &HookMessage) -> std::io::Result<()> {
+fn send(pipe: &str, msg: &HookMessage) -> std::io::Result<()> {
     let line = serde_json::to_vec(msg)?;
     // The server re-arms its pipe right after each connection; retry briefly if it is busy.
     for _ in 0..20 {
@@ -139,10 +139,7 @@ mod transport {
 
     /// In the per-user runtime dir when there is one (only this user can connect).
     fn path(name: &str) -> PathBuf {
-        let dir = std::env::var_os("XDG_RUNTIME_DIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(std::env::temp_dir);
-        dir.join(format!("{name}.sock"))
+        crate::files::runtime_dir().join(format!("{name}.sock"))
     }
 
     pub fn connect(name: &str) -> std::io::Result<std::os::unix::net::UnixStream> {

@@ -66,6 +66,17 @@ pub fn output(mut cmd: Command, input: &[u8], timeout: Duration, what: &str) -> 
     })
 }
 
+/// What a failed program said: its stderr, else its stdout (some report errors there), trimmed.
+pub fn failure_text(out: &Output) -> String {
+    let err = String::from_utf8_lossy(&out.stderr);
+    let text = if err.trim().is_empty() {
+        String::from_utf8_lossy(&out.stdout)
+    } else {
+        err
+    };
+    text.trim().to_string()
+}
+
 /// Kills `child` and, on Windows, what it started (`taskkill /T`): killing an npm `.cmd` shim alone leaves
 /// its node process running.
 fn kill_tree(child: &mut Child) {

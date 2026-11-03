@@ -85,13 +85,11 @@ impl AgentHarness for Codex {
     }
 
     fn hooks_installed(&self, exe: &Path) -> bool {
-        config::read_json(&self.hooks).is_ok_and(|s| config::has_hooks(&s, &EVENTS, &handler(exe)))
+        config::hooks_installed(&self.hooks, &EVENTS, &handler(exe))
     }
 
     fn install_hooks(&self, exe: &Path) -> Result<()> {
-        let mut hooks = config::read_json(&self.hooks)?;
-        config::add_hooks(&mut hooks, &EVENTS, &handler(exe), "codex")?;
-        config::write_json(&self.hooks, &hooks)
+        config::install_hooks(&self.hooks, &EVENTS, &handler(exe), "codex")
     }
 
     fn setup(&self) -> String {

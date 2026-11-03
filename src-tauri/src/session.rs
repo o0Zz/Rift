@@ -67,10 +67,7 @@ impl SessionStore {
 
     /// The state saved by the previous run (empty if none or unreadable).
     pub fn load(&self) -> Saved {
-        std::fs::read_to_string(&self.path)
-            .ok()
-            .and_then(|text| serde_json::from_str(&text).ok())
-            .unwrap_or_default()
+        crate::files::read_json_or_default(&self.path)
     }
 
     pub fn update_tabs(&self, tabs: Vec<TabInfo>, active: usize, layout: Value) {
@@ -147,12 +144,8 @@ impl SessionStore {
             active: inner.active,
             layout: inner.layout.clone(),
         };
-        // Write-then-rename so a crash mid-write never leaves a truncated file.
-        let tmp = self.path.with_extension("json.tmp");
-        let result = std::fs::create_dir_all(self.path.parent().unwrap())
-            .and_then(|_| std::fs::write(&tmp, serde_json::to_vec_pretty(&saved).unwrap()))
-            .and_then(|_| std::fs::rename(&tmp, &self.path));
-        if let Err(e) = result {
+        let json = serde_json::to_vec_pretty(&saved).unwrap();
+        if let Err(e) = crate::files::write_atomic(&self.path, &json) {
             eprintln!("rift: could not save session: {e}");
         }
     }

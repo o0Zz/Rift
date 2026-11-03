@@ -18,20 +18,26 @@ pub fn read_json(path: &Path) -> Result<Value> {
 /// Writes `value`, the previous file saved next to it as `<name>.bak`. Temp file + rename: a crash never
 /// leaves the agent a half-written config.
 pub fn write_json(path: &Path, value: &Value) -> Result<()> {
-    let sibling = |ext: &str| {
-        let mut p = path.as_os_str().to_owned();
-        p.push(ext);
-        PathBuf::from(p)
-    };
     if path.exists() {
-        std::fs::copy(path, sibling(".bak"))?;
-    } else if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
+        let mut bak = path.as_os_str().to_owned();
+        bak.push(".bak");
+        std::fs::copy(path, bak)?;
     }
-    let tmp = sibling(".tmp");
-    std::fs::write(&tmp, serde_json::to_string_pretty(value)? + "\n")?;
-    std::fs::rename(&tmp, path)?;
+    let text = serde_json::to_string_pretty(value)? + "\n";
+    crate::files::write_atomic(path, text.as_bytes())?;
     Ok(())
+}
+
+/// Whether the Claude-style hooks file at `path` holds `handler` for every event.
+pub fn hooks_installed(path: &Path, events: &[&str], handler: &Value) -> bool {
+    read_json(path).is_ok_and(|s| has_hooks(&s, events, handler))
+}
+
+/// Adds `handler` to every event of the Claude-style hooks file at `path` (see `add_hooks`).
+pub fn install_hooks(path: &Path, events: &[&str], handler: &Value, id: &str) -> Result<()> {
+    let mut settings = read_json(path)?;
+    add_hooks(&mut settings, events, handler, id)?;
+    write_json(path, &settings)
 }
 
 /// Whether every event of `settings["hooks"]` (Claude's shape: event → groups → hooks) holds `wanted`.
@@ -81,7 +87,7 @@ pub fn is_rift(path: &str) -> bool {
 
 /// Whether a hook entry is Rift's for agent `id`: exec form (`command`/`exec` + `args: ["hook", id]`) or a
 /// shell command line from `hook_command`.
-pub fn is_ours(handler: &Value, id: &str) -> bool {
+fn is_ours(handler: &Value, id: &str) -> bool {
     if handler["args"] == json!(["hook", id]) {
         let exe = handler["command"].as_str().or(handler["exec"].as_str());
         return exe.is_some_and(is_rift);
@@ -168,13 +174,7 @@ fn run_for(
     cmd.current_dir(cwd).args(args);
     let out = crate::process::output(cmd, input.as_bytes(), timeout, name)?;
     if !out.status.success() {
-        let err = String::from_utf8_lossy(&out.stderr);
-        let err = if err.trim().is_empty() {
-            String::from_utf8_lossy(&out.stdout)
-        } else {
-            err
-        };
-        bail!("{name} failed: {}", err.trim());
+        bail!("{name} failed: {}", crate::process::failure_text(&out));
     }
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
@@ -341,7 +341,7 @@ mod tests {
         .unwrap();
         let prompt = format!(
             "{} 100% \"quoted\" ^caret %PATH% & | < >",
-            crate::COMMIT_PROMPT
+            super::super::COMMIT_PROMPT
         );
         let out = run(shim.to_str().unwrap(), &["-p", &prompt], dir.path(), "").unwrap();
         let args: Vec<String> = serde_json::from_str(&out).unwrap();

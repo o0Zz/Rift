@@ -309,15 +309,6 @@ async fn git_discard(root: String, files: Vec<(String, bool)>) -> Result<(), Str
     git::discard(root.as_ref(), &files).map_err(err)
 }
 
-/// The user's own convention for commit messages (see their CLAUDE.md).
-const COMMIT_PROMPT: &str = "Write a git commit message for the diff on stdin, following Conventional Commits. \
-Subject line: `type(scope): description`, where type is one of feat, fix, docs, style, refactor, perf, test, \
-build, ci, chore; the scope is optional (the main area touched, one short word); the description is in the \
-imperative mood, lower case, no final period; the whole line at most 72 characters. \
-For a breaking change, add `!` before the colon and a `BREAKING CHANGE:` footer. \
-Optionally a blank line and a brief body. No co-author or sign-off lines. \
-Output only the message, without quotes or code fences.";
-
 /// AI commit message for the selected files, written by the first agent used on this machine.
 #[tauri::command]
 async fn commit_message(
@@ -331,7 +322,7 @@ async fn commit_message(
     }
     let agent = harnesses.for_one_shot().ok_or("no agent configured")?;
     agent
-        .one_shot(root.as_ref(), COMMIT_PROMPT, &diff)
+        .one_shot(root.as_ref(), agents::COMMIT_PROMPT, &diff)
         .map_err(err)
 }
 
@@ -502,6 +493,43 @@ fn bench_done(app: AppHandle, report: String, ok: bool) {
     app.exit(if ok { 0 } else { 1 });
 }
 
+/// A message from `rift hook|status <harness>`: the agent's status line, or a hook (status, session).
+fn on_hook(handle: &AppHandle, msg: hook::HookMessage) {
+    // Status line: live numbers only, no status or session change.
+    if let Some(usage) = agents::parse_usage(&msg.harness, &msg.payload) {
+        let _ = handle.emit(
+            "agent-usage",
+            AgentUsage {
+                pty: msg.tab,
+                usage,
+            },
+        );
+        return;
+    }
+    let harnesses = handle.state::<Harnesses>();
+    let Some(event) = harnesses
+        .get(&msg.harness)
+        .and_then(|h| h.parse_hook(&msg.payload))
+    else {
+        return;
+    };
+    handle
+        .state::<SessionStore>()
+        .agent_event(msg.tab, &msg.harness, &event);
+    let status = event.status();
+    let message = match event {
+        AgentEvent::NeedsInput { message } => Some(message),
+        _ => None,
+    };
+    let status = AgentStatus {
+        pty: msg.tab,
+        harness: msg.harness,
+        status,
+        message,
+    };
+    let _ = handle.emit("agent-status", status);
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     pty::lock_dll_search();
@@ -548,38 +576,7 @@ pub fn run() {
 
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(hook::serve(pipe.clone(), move |msg| {
-                // Status line: live numbers only, no status or session change.
-                if let Some(usage) = agents::parse_usage(&msg.harness, &msg.payload) {
-                    let _ = handle.emit(
-                        "agent-usage",
-                        AgentUsage {
-                            pty: msg.tab,
-                            usage,
-                        },
-                    );
-                    return;
-                }
-                let harnesses = handle.state::<Harnesses>();
-                let Some(event) = harnesses
-                    .get(&msg.harness)
-                    .and_then(|h| h.parse_hook(&msg.payload))
-                else {
-                    return;
-                };
-                handle
-                    .state::<SessionStore>()
-                    .agent_event(msg.tab, &msg.harness, &event);
-                let message = match &event {
-                    AgentEvent::NeedsInput { message } => Some(message.clone()),
-                    _ => None,
-                };
-                let status = AgentStatus {
-                    pty: msg.tab,
-                    harness: msg.harness.clone(),
-                    status: event.status(),
-                    message,
-                };
-                let _ = handle.emit("agent-status", status);
+                on_hook(&handle, msg)
             }));
 
             // Title shows the version: "Rift 1.2.3" (a release), "Rift 1.2.3+4" (4 master commits later),
