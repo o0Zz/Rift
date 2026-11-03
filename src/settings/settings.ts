@@ -38,15 +38,15 @@ export type Settings = {
   docs: "single" | "tabs";
   /** Height of a sidebar tab row. */
   tabSize: TabSize;
-  /** Text scale of the panels and documents (1 = normal); terminals use `fontSize`. Ctrl+wheel over one. */
+  /** Text scale of the sidebar, panels and documents (1 = normal); terminals use `fontSize`. Ctrl+wheel over one. */
   scale: Record<ScaledArea, number>;
   keys: Keymap;
 };
 
 /** What Ctrl+wheel or Ctrl+= / - / 0 resizes: the area under the cursor (wheel) or with the focus (keys). */
 export type ZoomArea = "terminal" | ScaledArea;
-export type ScaledArea = "files" | "git" | "prompts" | "docs";
-const SCALED: ScaledArea[] = ["files", "git", "prompts", "docs"];
+export type ScaledArea = "sidebar" | "files" | "git" | "prompts" | "docs";
+const SCALED: ScaledArea[] = ["sidebar", "files", "git", "prompts", "docs"];
 const SCALE_MIN = 0.6;
 const SCALE_MAX = 2;
 const FONT_MIN = 8;
@@ -122,7 +122,7 @@ export const DEFAULTS: Settings = {
   shell: "",
   docs: "single",
   tabSize: "comfortable",
-  scale: { files: 1, git: 1, prompts: 1, docs: 1 },
+  scale: { sidebar: 1, files: 1, git: 1, prompts: 1, docs: 1 },
   keys: DEFAULT_KEYS,
 };
 

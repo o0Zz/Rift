@@ -199,6 +199,7 @@ export function Sidebar(props: SidebarProps) {
   return (
     <aside
       class="sidebar"
+      data-zoom="sidebar"
       onContextMenu={(e) => e.preventDefault()}
       // The browser moves focus to the clicked row after mousedown activated the tab: once the click is
       // over, the keyboard goes back to the terminal, unless the click opened an input (rename).

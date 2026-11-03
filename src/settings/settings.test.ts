@@ -170,8 +170,9 @@ describe("zoom", () => {
     expect(zoomed({ ...s, fontSize: 32 }, "terminal", 1).fontSize).toBe(32);
     expect(zoomed({ ...s, fontSize: 20 }, "terminal", 0).fontSize).toBe(12);
     const git = zoomed(zoomed(s, "git", 1), "git", 1);
-    expect(git.scale).toEqual({ files: 1, git: 1.2, prompts: 1, docs: 1 });
+    expect(git.scale).toEqual({ sidebar: 1, files: 1, git: 1.2, prompts: 1, docs: 1 });
     expect(zoomed(git, "git", 0).scale.git).toBe(1);
+    expect(zoomed(s, "sidebar", 1).scale).toEqual({ sidebar: 1.1, files: 1, git: 1, prompts: 1, docs: 1 });
     let small = s;
     for (let i = 0; i < 10; i++) small = zoomed(small, "docs", -1);
     expect(small.scale.docs).toBe(0.6);
@@ -180,7 +181,7 @@ describe("zoom", () => {
 
   it("keeps a valid saved scale, drops a bad one", () => {
     const s = mergeSettings({ scale: { files: 1.5, git: 9, prompts: "big" } });
-    expect(s.scale).toEqual({ files: 1.5, git: 1, prompts: 1, docs: 1 });
+    expect(s.scale).toEqual({ sidebar: 1, files: 1.5, git: 1, prompts: 1, docs: 1 });
   });
 
   it("turns wheel distance into whole steps, up = bigger, the rest kept for the next event", () => {

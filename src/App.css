@@ -220,6 +220,9 @@ body,
   flex-direction: column;
   background: var(--side);
   border-right: 1px solid var(--line);
+  /* Text scale (Ctrl+wheel over it, settings `scale`); sizes inside are in em of this. The header keeps
+     its own size, aligned with the panel headers. */
+  font-size: calc(13px * var(--scale-sidebar, 1));
   user-select: none;
 }
 
@@ -304,10 +307,10 @@ body,
   display: flex;
   align-items: center;
   gap: 6px;
-  height: 26px;
+  height: 2em;
   padding: 0 8px;
   color: var(--fg-soft);
-  font-size: 12px;
+  font-size: 0.923em; /* 12px at the normal scale */
   font-weight: 600;
 }
 
@@ -361,7 +364,7 @@ body,
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: var(--tab-row, 44px);
+  min-height: calc(var(--tab-row, 44px) * var(--scale-sidebar, 1));
   padding: 4px 6px 4px 10px;
   border-left: 3px solid transparent;
 }
@@ -396,8 +399,8 @@ body,
   position: relative;
   display: flex;
   flex: none;
-  width: 26px;
-  height: 26px;
+  width: 2em;
+  height: 2em;
   box-sizing: border-box;
   align-items: center;
   justify-content: center;
@@ -472,7 +475,18 @@ body,
   display: flex;
   gap: 6px;
   color: var(--fg-dim);
-  font-size: 11px;
+  font-size: 0.846em; /* 11px at the normal scale */
+}
+
+/* The tab's icons follow the sidebar scale (16px and 11px at the normal one). */
+.tab-icon svg {
+  width: 1.23em;
+  height: 1.23em;
+}
+
+.tab-sub .icon {
+  width: 1em;
+  height: 1em;
 }
 
 .tab-branch {
@@ -1378,7 +1392,7 @@ body,
   background: none;
   color: var(--fg-muted);
   font: inherit;
-  font-size: 11px;
+  font-size: 0.846em;
 }
 
 .filter:hover {
