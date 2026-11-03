@@ -15,3 +15,9 @@ it("finds the files a deletion takes with it", () => {
   expect(isUnder("C:\\repo\\src\\a.ts", "C:/repo/src/")).toBe(true);
   expect(isUnder("/home/me/a.md", "/home/me/a.md")).toBe(true);
 });
+
+it("ignores case where the file system does (Windows, macOS), not on Linux", () => {
+  expect(isUnder("c:\\repo\\SRC\\a.ts", "C:\\Repo\\src", true)).toBe(true);
+  expect(isUnder("/home/me/Docs/a.md", "/home/me/docs", false)).toBe(false);
+  expect(isUnder("/home/me/docs/a.md", "/home/me/docs", false)).toBe(true);
+});

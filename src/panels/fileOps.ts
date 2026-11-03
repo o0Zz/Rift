@@ -10,9 +10,15 @@ export function isDeleteKey(e: { key: string; metaKey: boolean }, mac = IS_MAC):
   return e.key === "Delete" || (mac && e.metaKey && e.key === "Backspace");
 }
 
-/** `path` is `target` or inside it (a deleted folder takes its files with it). */
-export function isUnder(path: string, target: string): boolean {
-  const norm = (p: string) => p.replace(/\\/g, "/").replace(/\/+$/, "");
+/**
+ * `path` is `target` or inside it (a deleted folder takes its files with it). Windows and macOS file systems
+ * ignore case: `C:\Repo\src` holds `c:\repo\SRC\a.ts`.
+ */
+export function isUnder(path: string, target: string, ignoreCase = IS_WINDOWS || IS_MAC): boolean {
+  const norm = (p: string) => {
+    const s = p.replace(/\\/g, "/").replace(/\/+$/, "");
+    return ignoreCase ? s.toLowerCase() : s;
+  };
   const p = norm(path);
   const t = norm(target);
   return p === t || p.startsWith(t + "/");

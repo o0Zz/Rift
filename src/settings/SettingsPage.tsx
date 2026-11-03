@@ -2,7 +2,7 @@ import { createSignal, For, Show, onCleanup, onMount } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 import { Icon } from "../ui/Icon";
-import { ACTIONS, bind, comboOf, DEFAULT_KEYS, FONT_MAX, FONT_MIN, isValidShortcut, type Action, type Settings, type TabSize, type ThemeChoice } from "./settings";
+import { ACTIONS, bind, comboOf, DEFAULT_KEYS, FONT_MAX, FONT_MIN, IS_MAC, isValidShortcut, type Action, type Settings, type TabSize, type ThemeChoice } from "./settings";
 
 /** Settings overlay. While open, Rift's own shortcuts are off (App), so keys can be recorded. */
 export function SettingsPage(props: {
@@ -62,7 +62,7 @@ export function SettingsPage(props: {
       const combo = comboOf(e);
       if (!combo) return; // a lone modifier: keep waiting
       setRecording(undefined);
-      if (!isValidShortcut(combo)) return setNote(`${combo}: a shortcut must use Ctrl or Alt, so normal typing still reaches the terminal.`);
+      if (!isValidShortcut(combo)) return setNote(`${combo}: a shortcut must use ${IS_MAC ? "Cmd, Ctrl or Alt" : "Ctrl or Alt"} (or be F1-F12), so normal typing still reaches the terminal.`);
       const r = bind(props.settings.keys, action, combo);
       set({ keys: r.keys });
       setNote(r.takenFrom ? `${combo} was removed from “${ACTIONS[r.takenFrom]}”.` : undefined);
