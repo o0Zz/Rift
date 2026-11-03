@@ -983,6 +983,7 @@ function App() {
           settings={settings()}
           onChange={changeSettings}
           onClose={() => (setSettingsOpen(false), active()?.shown.show())}
+          onCheckUpdate={updater && updater.checkNow}
         />
       </Show>
       <Panes root={panes()} onChange={setPanes} name={panelName} render={renderPanel} onDragging={onDragging} ref={(el) => (panesEl = el)} />

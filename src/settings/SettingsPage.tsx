@@ -5,7 +5,13 @@ import { Icon } from "../ui/Icon";
 import { ACTIONS, bind, comboOf, DEFAULT_KEYS, isValidShortcut, type Action, type Settings, type TabSize, type ThemeChoice } from "./settings";
 
 /** Settings overlay. While open, Rift's own shortcuts are off (App), so keys can be recorded. */
-export function SettingsPage(props: { settings: Settings; onChange(s: Settings): void; onClose(): void }) {
+export function SettingsPage(props: {
+  settings: Settings;
+  onChange(s: Settings): void;
+  onClose(): void;
+  /** Checks for an update now: the new version (downloaded, banner shown) or undefined. None in dev/bench. */
+  onCheckUpdate?(): Promise<string | undefined>;
+}) {
   const [recording, setRecording] = createSignal<Action>();
   const [note, setNote] = createSignal<string>();
   // `null`: no Explorer menu on this OS, the Windows section is hidden.
@@ -27,6 +33,21 @@ export function SettingsPage(props: { settings: Settings; onChange(s: Settings):
     }
   }
   const set = (patch: Partial<Settings>) => props.onChange({ ...props.settings, ...patch });
+
+  const [updateNote, setUpdateNote] = createSignal<string>();
+  const [checking, setChecking] = createSignal(false);
+  async function checkUpdate() {
+    setChecking(true);
+    setUpdateNote("Checking…");
+    try {
+      const found = await props.onCheckUpdate!();
+      setUpdateNote(found ? `Rift ${found} is downloaded: restart from the banner, or it installs when you close Rift.` : "Up to date.");
+    } catch (e) {
+      setUpdateNote(`Could not check: ${e}`);
+    } finally {
+      setChecking(false);
+    }
+  }
 
   onMount(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -146,6 +167,24 @@ export function SettingsPage(props: { settings: Settings; onChange(s: Settings):
             />
           </div>
 
+          <h3>Updates</h3>
+          <div class="setting">
+            <label>
+              Rift {version()}
+              <span class="setting-sub">
+                {updateNote() ??
+                  (props.onCheckUpdate
+                    ? "Checked at startup and every 6 hours; new versions download in the background."
+                    : "Updates are off in development builds.")}
+              </span>
+            </label>
+            <Show when={props.onCheckUpdate}>
+              <button class="setting-btn" disabled={checking()} onClick={checkUpdate}>
+                Check for updates
+              </button>
+            </Show>
+          </div>
+
           <Show when={menuInstalled() !== null}>
             <h3>Windows</h3>
             <div class="setting">
@@ -203,10 +242,6 @@ export function SettingsPage(props: { settings: Settings; onChange(s: Settings):
           </For>
           <p class="settings-hint">
             Saved in settings.json next to session.json, so it can also be edited by hand.
-            <Show when={version()}>
-              <br />
-              Rift {version()}
-            </Show>
           </p>
         </div>
       </div>
