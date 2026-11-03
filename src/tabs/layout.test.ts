@@ -5,6 +5,7 @@ import {
   matchesFilter,
   moveGroup,
   moveTab,
+  lead,
   needsAttention,
   nextNeedingAttention,
   ownRowColor,
@@ -134,5 +135,24 @@ describe("attention", () => {
     expect(nextNeedingAttention(order, c)?.name).toBe("b"); // wraps around
     expect(nextNeedingAttention(order, b)).toBeUndefined(); // only itself
     expect(nextNeedingAttention([], undefined)).toBeUndefined();
+  });
+});
+
+describe("lead", () => {
+  const s = (name: string, status?: Status) => ({ name, status });
+
+  it("is the first shell when none runs an agent", () => {
+    expect(lead([s("main"), s("term:1")]).name).toBe("main");
+  });
+
+  it("is the most urgent shell: blocked, then done, then working", () => {
+    expect(lead([s("main", "working"), s("a", "done"), s("b", "blocked")]).name).toBe("b");
+    expect(lead([s("main", "working"), s("a", "done")]).name).toBe("a");
+    expect(lead([s("main"), s("a", "working")]).name).toBe("a");
+    expect(lead([s("main", "idle"), s("a")]).name).toBe("main");
+  });
+
+  it("keeps the first of equally urgent shells", () => {
+    expect(lead([s("main", "working"), s("a", "working")]).name).toBe("main");
   });
 });

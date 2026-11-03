@@ -436,6 +436,18 @@ body,
   border-radius: 2px;
 }
 
+/* The same badge before a terminal panel's title (its shell's agent). */
+.panel-title .badge {
+  position: static;
+  display: inline-block;
+  margin-right: 6px;
+  vertical-align: -1px;
+}
+
+.panel-title .badge:not(.working) {
+  border-color: transparent;
+}
+
 @keyframes spin {
   to {
     transform: rotate(360deg);

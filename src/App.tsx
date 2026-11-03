@@ -37,6 +37,7 @@ import {
   type TabFilter,
 } from "./tabs/layout";
 import { Tab, type GitStats } from "./tabs/Tab";
+import { Shell } from "./tabs/Shell";
 import { createDocs } from "./docs/docs";
 import { Sidebar } from "./tabs/Sidebar";
 import { GitStatsView } from "./tabs/GitStats";
@@ -82,6 +83,8 @@ function App() {
   const [settings, setSettings] = createSignal<Settings>(DEFAULTS);
   const [settingsOpen, setSettingsOpen] = createSignal(false);
   const [finding, setFinding] = createSignal(false);
+  // The last shell the user typed in: Find searches it (a terminal panel's shell, or the tab's own).
+  let focusedShell: Shell | undefined;
   const [filter, setFilter] = createSignal<TabFilter>("all");
   const [renameRequest, setRenameRequest] = createSignal<{ tab: Tab }>();
   // The top bar follows the active tab one frame later: the switch frame only shows the new terminal.
@@ -265,17 +268,19 @@ function App() {
   function saveHistories() {
     return Promise.all(
       tabs()
-        .filter((t) => !t.agent)
+        .filter((t) => !t.main.agent)
         .map((t) => invoke("scrollback_save", { id: t.snap, data: t.view.snapshot() }).catch(() => {})),
     );
   }
 
   /** A finished agent the user has now seen goes back to the plain agent icon after a moment. */
   function fadeDoneWhenSeen(tab: Tab) {
-    if (tab.status !== "done") return;
-    setTimeout(() => {
-      if (tab.status === "done" && active() === tab && windowFocused()) tab.status = "idle";
-    }, 3000);
+    for (const shell of tab.shells) {
+      if (shell.status !== "done") continue;
+      setTimeout(() => {
+        if (shell.status === "done" && active() === tab && windowFocused()) shell.status = "idle";
+      }, 3000);
+    }
   }
 
   function activate(tab: Tab) {
@@ -292,6 +297,49 @@ function App() {
     }
   }
 
+  /** A shell's folder, from its prompt: also catches `git checkout` (same cwd, new branch). */
+  function onShellCwd(tab: Tab, shell: Shell, cwd: string) {
+    shell.cwd = cwd;
+    invoke<{ root: string; branch: string } | null>("git_head", { cwd }).then((head) =>
+      batch(() => {
+        // The tab's repo is its main shell's.
+        if (shell === tab.main) {
+          tab.root = head?.root;
+          tab.branch = head?.branch;
+        }
+        if (head) {
+          changedRepos.add(head.root);
+          refreshGitPanel(head.root);
+        }
+        refreshStats(tab);
+      }),
+    );
+  }
+
+  /** Every shell of a tab (its own or in a terminal panel) gets the same terminal: agent keys, folder, title. */
+  function buildShell(tab: Tab, shell: Shell, el: HTMLElement): Shell {
+    shell.view = new TermView(
+      el,
+      {
+        onTitle: (v) => (shell.title = v),
+        onCwd: (cwd) => onShellCwd(tab, shell, cwd),
+        isAgent: () => !!shell.agent,
+        onEscape: () => (shell.status = statusAfterEscape(shell.status)),
+      },
+      look(),
+    );
+    shell.view.el.addEventListener("focusin", () => (focusedShell = shell));
+    return shell;
+  }
+
+  /** The tab and shell running pty `pty`. */
+  function shellOf(pty: unknown): { tab: Tab; shell: Shell } | undefined {
+    for (const tab of tabs()) {
+      const shell = tab.shells.find((s) => s.view.ptyId === pty);
+      if (shell) return { tab, shell };
+    }
+  }
+
   /** New tabs open right after the active one, in its group and its folder. */
   function newTab(
     saved?: SavedTab,
@@ -299,8 +347,7 @@ function App() {
   ): Promise<void> {
     const tab = new Tab();
     const cwd = saved ? saved.cwd : (opts.cwd ?? active()?.cwd);
-    tab.title = saved?.title ?? "shell";
-    tab.cwd = cwd;
+    tab.main.title = saved?.title ?? "shell";
     tab.name = saved?.ui?.name ?? opts.name;
     tab.color = saved?.ui?.color;
     tab.group = saved ? saved.ui?.group : (opts.group ?? active()?.group);
@@ -312,32 +359,8 @@ function App() {
       tab.docs = saved.ui.docs.map((path) => docs.make(tab, path));
       tab.current = Math.min(saved.ui.doc ?? -1, tab.docs.length - 1);
     }
-    const onCwd = (cwd: string) => {
-      tab.cwd = cwd;
-      // At every prompt: also catches `git checkout` (same cwd, new branch).
-      invoke<{ root: string; branch: string } | null>("git_head", { cwd }).then((head) =>
-        batch(() => {
-          tab.root = head?.root;
-          tab.branch = head?.branch;
-          if (head) {
-            changedRepos.add(head.root);
-            refreshGitPanel(head.root);
-          }
-          refreshStats(tab);
-        }),
-      );
-    };
-    if (cwd) onCwd(cwd);
-    tab.view = new TermView(
-      host,
-      {
-        onTitle: (v) => (tab.title = v),
-        onCwd,
-        isAgent: () => !!tab.agent,
-        onEscape: () => (tab.status = statusAfterEscape(tab.status)),
-      },
-      look(),
-    );
+    buildShell(tab, tab.main, host);
+    if (cwd) onShellCwd(tab, tab.main, cwd);
     if (tab.current >= 0) tab.view.hide(); // a restored document is shown instead
 
     const list = [...tabs()];
@@ -355,7 +378,7 @@ function App() {
       .then((h) => h && tab.view.restoreSnapshot(h))
       .then(() => tab.view.start(cwd, saved?.agent, opts.startAgent, tab.shell))
       .then(save) // the pty id is not reactive
-      .catch((e) => void (tab.title = `error: ${e}`));
+      .catch((e) => void (tab.main.title = `error: ${e}`));
   }
 
   async function restore() {
@@ -459,49 +482,62 @@ function App() {
   }
 
   let sizes: ResizeObserver | undefined; // refits the terminals when their area changes size
-  const consoles = createConsoles({ panes, setPanes, active, look, sizes: () => sizes });
+  const consoles = createConsoles({
+    panes,
+    setPanes,
+    tabs,
+    active,
+    create: (tab, place, el) => buildShell(tab, new Shell(place), el),
+    look,
+    sizes: () => sizes,
+  });
   const refitConsoles = () => consoles.views().forEach((v) => v.refit());
   const panelName = (id: PanelId) =>
     isTerminal(id) ? `Terminal ${id.slice(5)}` : ({ explorer: "Files", git: "Git", prompts: "Prompts", main: "Terminal" } as const)[id];
 
   function onAgentStatus({ pty, harness, status, message }: AgentStatus) {
-    const tab = tabs().find((t) => t.view.ptyId === pty);
-    if (!tab) return;
+    const hit = shellOf(pty);
+    if (!hit) return;
+    const { tab, shell } = hit;
     batch(() => {
-      tab.status = status ?? undefined;
-      tab.agent = status ? harness : undefined;
-      if (!status) tab.context = undefined;
+      shell.status = status ?? undefined;
+      shell.agent = status ? harness : undefined;
+      if (!status) shell.context = undefined;
     });
     refreshStats(tab); // an agent at work changes files
     if (tab.root) changedRepos.add(tab.root);
     // Finished in the repo the git panel shows (any tab): reload it now to show the agent's changes.
-    if (tab.status === "done" && tab.root && shown("git") && panelTab()?.root === tab.root) {
+    if (shell.status === "done" && tab.root && shown("git") && panelTab()?.root === tab.root) {
       changedRepos.delete(tab.root);
       setGitRefresh(gitRefresh() + 1);
     }
-    const visible = active() === tab && windowFocused();
+    // A terminal panel's shell is in front only while its panel is shown.
+    const visible = active() === tab && windowFocused() && (shell.place === "main" || shown(shell.place));
     if (visible) fadeDoneWhenSeen(tab);
-    if (!shouldNotify(tab.status, visible)) return;
+    if (!shouldNotify(shell.status, visible)) return;
     tab.unread = true;
     if (!windowFocused()) getCurrentWindow().requestUserAttention(UserAttentionType.Informational);
+    const title = displayTitle({ name: tab.name, title: shell.title, cwd: shell.cwd, status: shell.status });
     sendNotification({
       id: ++notificationId,
-      title: `${tab.status === "done" ? "✓" : "■"} ${displayTitle(tab)}`,
-      body: tab.status === "done" ? "Agent finished" : message || "Agent needs your input",
-      extra: { pty }, // brought back by a click (onAction) to open this tab
+      title: `${shell.status === "done" ? "✓" : "■"} ${title}`,
+      body: shell.status === "done" ? "Agent finished" : message || "Agent needs your input",
+      extra: { pty }, // brought back by a click (onAction) to open this shell
     });
   }
 
   let notificationId = 0;
 
-  /** A click on a notification: bring Rift to the front on the tab it was about. */
+  /** A click on a notification: bring Rift to the front on the shell it was about. */
   async function openNotifiedTab(pty: unknown) {
     const win = getCurrentWindow();
     await win.unminimize();
     await win.show();
     await win.setFocus();
-    const tab = tabs().find((t) => t.view.ptyId === pty);
-    if (tab) activate(tab);
+    const hit = shellOf(pty);
+    if (!hit) return;
+    activate(hit.tab);
+    if (hit.shell.place !== "main") consoles.reveal(hit.shell.place);
   }
 
   async function checkIntegrations() {
@@ -613,15 +649,16 @@ function App() {
         }
       }),
       listen<number>("pty-exit", (e) => {
-        const term = consoles.byPty(e.payload);
-        if (term) return consoles.close(term.id, term.tab);
-        const tab = tabs().find((t) => t.view.ptyId === e.payload);
-        if (tab) closeTab(tab, true);
+        const hit = shellOf(e.payload);
+        if (!hit) return;
+        // The tab's own shell ends the tab; a terminal panel's shell only leaves its panel.
+        if (hit.shell.place === "main") closeTab(hit.tab, true);
+        else consoles.close(hit.shell.place, hit.tab);
       }),
       listen<AgentStatus>("agent-status", (e) => onAgentStatus(e.payload)),
       listen<AgentUsage>("agent-usage", ({ payload: u }) => {
-        const tab = tabs().find((t) => t.view.ptyId === u.pty);
-        if (tab) tab.context = u.context ?? undefined;
+        const hit = shellOf(u.pty);
+        if (hit) hit.shell.context = u.context ?? undefined;
         // API-key sessions have no plan limits: keep what a subscription session last reported.
         if (u.fiveHour || u.sevenDay) setLimits({ fiveHour: u.fiveHour ?? undefined, sevenDay: u.sevenDay ?? undefined });
       }),
@@ -630,7 +667,9 @@ function App() {
     ];
     // Closing while agents work or wait would kill them: ask first. Then install a downloaded update.
     const closeRequests = win.onCloseRequested(async (event) => {
-      const busy = tabs().filter((t) => t.status === "working" || t.status === "blocked").length;
+      const busy = tabs()
+        .flatMap((t) => t.shells)
+        .filter((s) => s.status === "working" || s.status === "blocked").length;
       const s = busy === 1 ? "" : "s";
       if (busy && !confirm(`${busy} agent${s} still working or waiting for you. Close Rift anyway?`)) {
         event.preventDefault();
@@ -767,6 +806,12 @@ function App() {
     return consoles.render(id, panelName(id));
   }
 
+  /** What Find searches: the active tab's shell the user last typed in, else its own terminal. */
+  function findTarget(): TermView {
+    const tab = active()!;
+    return focusedShell && tab.shells.includes(focusedShell) ? focusedShell.view : tab.view;
+  }
+
   /** Alt+arrow: focus the pane beside the focused one (the tab's terminal, a panel, a terminal panel). */
   function focusPane(dir: "left" | "right" | "up" | "down") {
     const to = paneBeside(panesEl, dir);
@@ -883,8 +928,8 @@ function App() {
         <div class="contents">
           <Show when={finding() && active()}>
             <FindBar
-              find={(text, backwards) => active()!.view.find(text, backwards)}
-              onClose={() => (setFinding(false), active()?.view.endFind())}
+              find={(text, backwards) => findTarget().find(text, backwards)}
+              onClose={() => (findTarget().endFind(), setFinding(false))}
             />
           </Show>
         </div>

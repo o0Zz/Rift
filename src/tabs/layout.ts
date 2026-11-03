@@ -81,6 +81,17 @@ export function statusAfterEscape(status: Status | undefined): Status | undefine
   return status === "working" || status === "blocked" ? "idle" : status;
 }
 
+const URGENCY: Record<Status, number> = { idle: 1, working: 2, done: 3, blocked: 4 };
+
+/**
+ * The shell a tab shows in the sidebar (status, agent icon, title): the most urgent of its shells
+ * (blocked, then done, then working), else the first.
+ */
+export function lead<T extends { status?: Status }>(shells: T[]): T {
+  const rank = (s: T) => (s.status ? URGENCY[s.status] : 0);
+  return shells.reduce((best, s) => (rank(s) > rank(best) ? s : best));
+}
+
 /** A tab needs the user: its agent waits for an answer, or finished and the user has not looked yet. */
 export function needsAttention(t: { status?: Status; unread: boolean }): boolean {
   return t.status === "blocked" || (t.status === "done" && t.unread);
