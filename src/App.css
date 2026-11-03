@@ -703,6 +703,11 @@ body,
   color: var(--fg-bright);
 }
 
+/* Holds a <Show> next to elements added by hand, without a box of its own. */
+.contents {
+  display: contents;
+}
+
 /* A terminal panel's shell (shared by every tab). */
 .pane-term {
   position: relative;

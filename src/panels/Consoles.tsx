@@ -138,14 +138,14 @@ export function createConsoles(o: {
           </span>
         </div>
         <div class="pane-term" ref={(el) => attach(id, el)}>
-          <Show when={!mine(id)}>
-            <div class="pane-empty">
-              <span>No terminal for this tab here</span>
-              <button class="pane-start" onClick={() => start(id)}>
-                <Icon name="terminal" /> Start a terminal here
-              </button>
-            </div>
-          </Show>
+          {/* Always here, only its display changes: no <Show>, which would clear the whole element when it hides
+              (Solid sets textContent), erasing the terminals added here by hand. */}
+          <div class="pane-empty" style={{ display: mine(id) ? "none" : undefined }}>
+            <span>No terminal for this tab here</span>
+            <button class="pane-start" onClick={() => start(id)}>
+              <Icon name="terminal" /> Start a terminal here
+            </button>
+          </div>
         </div>
       </aside>
     );

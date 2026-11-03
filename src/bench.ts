@@ -10,8 +10,8 @@ export type BenchApi = {
   /** Opens a file of the bench repo (relative path) in tab `index`; it shows instead of the terminal. */
   openDoc(index: number, file: string): void;
   showsDoc(index: number): boolean;
-  /** Gives every tab its own shell in a terminal panel (each tab then displays two terminals). */
-  openConsoles(): Promise<void>;
+  /** Gives the first `count` tabs their own shell in a terminal panel (each then displays two terminals). */
+  openConsoles(count: number): Promise<void>;
   /** Tab `index`'s terminal panel, if it has one. */
   consoleOf(index: number): TermView | undefined;
 };
@@ -175,12 +175,16 @@ export async function run(api: BenchApi) {
   api.setPanels(true);
   await sleep(5000);
   results.push(summarize("cycle with files + git panels open", await scenario(api, cycle.slice(0, 40), 250)));
-  // Every tab with its own shell in a terminal panel: each switch displays two terminals (worst case).
+  // Every tab but the last with its own shell in a terminal panel: each switch displays two terminals (worst
+  // case), and the last tab shows the panel's "Start a terminal here" in between.
   api.setPanels(false);
-  await api.openConsoles();
-  for (let i = 0; i < TABS; i++) await fill(api.consoleOf(i)!);
+  await api.openConsoles(TABS - 1);
+  for (let i = 0; i < TABS - 1; i++) await fill(api.consoleOf(i)!);
   await sleep(5000);
-  results.push(summarize("cycle, every tab with a terminal panel", await scenario(api, cycle)));
+  results.push(summarize("cycle, tabs with a terminal panel", await scenario(api, cycle)));
+  // Showing and hiding that button once erased the panel's terminals (a lone <Show> clears its parent).
+  const lost = [...api.views(), ...Array.from({ length: TABS - 1 }, (_, i) => api.consoleOf(i)!)].filter((v) => !v.el.isConnected);
+  if (lost.length) results.push({ ok: false, text: `FAIL ${lost.length} terminal(s) no longer in the page after the cycle` });
   const output = await invoke<[string, number] | null>("bench_output_file");
   if (output) {
     // A fresh tab: the others hold lines written straight into xterm, which ConPTY's own screen model does

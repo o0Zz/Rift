@@ -684,8 +684,8 @@ function App() {
         },
         openDoc: (i, file) => docs.open(`${dirs[0]}/${file}`, tabs()[i]),
         showsDoc: (i) => tabs()[i].current >= 0,
-        openConsoles: async () => {
-          for (const tab of tabs()) {
+        openConsoles: async (count) => {
+          for (const tab of tabs().slice(0, count)) {
             activate(tab);
             consoles.open();
             await new Promise((r) => setTimeout(r, 300)); // its shell starts
@@ -878,12 +878,16 @@ function App() {
         )}
       </For>
       <div class="terms" ref={host} data-zoom="terminal">
-        <Show when={finding() && active()}>
-          <FindBar
-            find={(text, backwards) => active()!.view.find(text, backwards)}
-            onClose={() => (setFinding(false), active()?.view.endFind())}
-          />
-        </Show>
+        {/* Own wrapper: a <Show> alone in an element clears all of it when it hides (Solid sets textContent),
+            which would erase every tab's terminal. */}
+        <div class="contents">
+          <Show when={finding() && active()}>
+            <FindBar
+              find={(text, backwards) => active()!.view.find(text, backwards)}
+              onClose={() => (setFinding(false), active()?.view.endFind())}
+            />
+          </Show>
+        </div>
       </div>
     </main>
   ) as HTMLElement;
