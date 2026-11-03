@@ -748,6 +748,7 @@ function App() {
         <GitPanel
           root={panelTab()?.root}
           branch={panelTab()?.branch}
+          behind={panelTab()?.stats?.behind}
           agent={agents()[0]?.name}
           refresh={gitRefresh()}
           onClose={() => togglePanel("git")}

@@ -5,6 +5,7 @@ import {
   commitRange,
   diffLineClass,
   discardQuestion,
+  fetchDue,
   inRange,
   keepChecked,
   pickCommits,
@@ -19,15 +20,22 @@ import { Resizer } from "../ui/Resizer";
 type Commit = { hash: string; short: string; author: string; date: string; subject: string };
 type Branch = { name: string; current: boolean };
 
+/** Last background fetch per repo, for the whole app (the panel may be closed and reopened). */
+const fetched = new Map<string, number>();
+
 /**
  * Branch (switch / create), pull and push, changed files with their diff and commit of the checked files;
  * History: the last commits; a click shows one commit's changes, Shift+click those of a range of commits.
  * Not live: loads when shown, when the shown repo changes, after an action, on ⟳, or when `refresh` changes
  * (an agent in its repo finished, or a command did in a terminal there). Never on a timer or a watcher.
+ * Showing a repo, ⟳ and the branch menu also fetch in the background (at most every 5 min per repo, ⟳ always),
+ * so Pull shows how many commits the remote has.
  */
 export function GitPanel(props: {
   root?: string;
   branch?: string;
+  /** Commits the upstream has that we do not (badge on Pull). */
+  behind?: number;
   refresh?: number;
   /** The agent ✨ Generate sends the diff to (the first one used on this machine). */
   agent?: string;
@@ -110,6 +118,13 @@ export function GitPanel(props: {
     if (!root) return;
     load(root);
     if (view() === "history") loadLog(root);
+  }
+
+  /** Updates the remote-tracking branches; then this repo's tabs re-read their stats (behind). Errors stay quiet. */
+  async function fetchRemote(root: string, force = false) {
+    if (!fetchDue(fetched, root, Date.now(), force)) return;
+    const ok = await invoke("git_fetch", { root }).then(() => true, () => false);
+    if (ok && root === props.root) props.onHeadChanged?.();
   }
 
   /** The diff of a changed file, or of a file of the picked commit(s). */
@@ -227,6 +242,7 @@ export function GitPanel(props: {
   }
 
   async function branchMenu(e: MouseEvent) {
+    if (props.root) fetchRemote(props.root);
     const at = { clientX: e.clientX, clientY: e.clientY, preventDefault() {}, stopPropagation() {} } as MouseEvent;
     const branches = await invoke<Branch[]>("git_branches", { root: props.root }).catch((err) => {
       setNote({ text: String(err), error: true });
@@ -254,6 +270,7 @@ export function GitPanel(props: {
         if (!root) return;
         load(root);
         if (view() === "history") loadLog(root);
+        fetchRemote(root);
       },
     ),
   );
@@ -302,13 +319,28 @@ export function GitPanel(props: {
         </span>
         <span class="head-buttons">
           <Show when={props.root}>
-            <button class="icon-btn" title="Pull" disabled={!!busy()} onClick={pull}>
+            <button
+              class="icon-btn pull-btn"
+              title={props.behind ? `Pull (${props.behind} commit${props.behind === 1 ? "" : "s"} behind)` : "Pull"}
+              disabled={!!busy()}
+              onClick={pull}
+            >
               <Icon name="pull" />
+              <Show when={props.behind}>
+                <span class="pull-badge">{props.behind! > 99 ? "99+" : props.behind}</span>
+              </Show>
             </button>
             <button class="icon-btn" title="Push" disabled={!!busy()} onClick={push}>
               <Icon name="push" />
             </button>
-            <button class="icon-btn" title="Refresh" onClick={reload}>
+            <button
+              class="icon-btn"
+              title="Refresh (and fetch)"
+              onClick={() => {
+                reload();
+                if (props.root) fetchRemote(props.root, true);
+              }}
+            >
               <Icon name="refresh" />
             </button>
           </Show>

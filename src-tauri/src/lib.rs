@@ -360,6 +360,12 @@ async fn git_push(root: String) -> Result<String, String> {
     git::push(root.as_ref()).map_err(err)
 }
 
+/// Background fetch while the git panel is shown (throttled by the frontend): keeps "behind" true.
+#[tauri::command]
+async fn git_fetch(root: String) -> Result<(), String> {
+    git::fetch(root.as_ref()).map_err(err)
+}
+
 #[tauri::command]
 async fn git_pull(root: String) -> Result<String, String> {
     git::pull(root.as_ref()).map_err(err)
@@ -628,6 +634,7 @@ pub fn run() {
             git_switch,
             git_create_branch,
             git_push,
+            git_fetch,
             git_pull,
             git_log,
             git_commit_files,

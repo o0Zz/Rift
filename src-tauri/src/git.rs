@@ -461,6 +461,24 @@ pub fn pull(root: &Path) -> Result<String> {
     Ok(summary(&check(git(root, &["pull"])?)?, "Pulled"))
 }
 
+/// `git fetch` in the background, so "behind" counts what the remote has now. Must never ask anything:
+/// no terminal or credential-manager prompt, ssh in batch mode (unless the user set their own ssh command).
+pub fn fetch(root: &Path) -> Result<()> {
+    let mut cmd = crate::process::command("git");
+    cmd.current_dir(root)
+        .args(["fetch", "--quiet"])
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GCM_INTERACTIVE", "never");
+    let own_ssh = std::env::var_os("GIT_SSH_COMMAND").is_some()
+        || std::env::var_os("GIT_SSH").is_some()
+        || git(root, &["config", "core.sshCommand"])?.status.success();
+    if !own_ssh {
+        cmd.env("GIT_SSH_COMMAND", "ssh -o BatchMode=yes");
+    }
+    check(crate::process::output(cmd, &[], GIT_TIMEOUT, "git")?)?;
+    Ok(())
+}
+
 #[derive(Debug, PartialEq, Serialize)]
 pub struct Commit {
     pub hash: String,
@@ -1012,8 +1030,22 @@ three
         run(&other, &["commit", "-q", "-am", "third"]);
         push(&other).unwrap();
 
+        assert_eq!(stats(r).unwrap().behind, 0); // not fetched yet
+        fetch(r).unwrap();
+        assert_eq!(stats(r).unwrap().behind, 1);
+
         pull(r).unwrap();
         assert_eq!(log(r, 1).unwrap()[0].subject, "third");
+        assert_eq!(stats(r).unwrap().behind, 0);
+    }
+
+    #[test]
+    fn fetch_without_remote_succeeds_and_with_a_bad_one_fails() {
+        let dir = repo();
+        let r = dir.path();
+        fetch(r).unwrap(); // nothing to fetch
+        run(r, &["remote", "add", "origin", "/nowhere/remote.git"]);
+        assert!(fetch(r).is_err());
     }
 
     #[test]

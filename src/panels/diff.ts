@@ -63,3 +63,14 @@ export function commitFiles(changes: Change[]): [string, boolean][] {
     ...(c.orig ? [[c.orig, false] as [string, boolean]] : []),
   ]);
 }
+
+/** At most one background fetch per repo in this window. */
+export const FETCH_EVERY = 5 * 60_000;
+
+/** Whether `root` is due a fetch (`force`: an explicit ⟳); marks it fetched when it is. */
+export function fetchDue(last: Map<string, number>, root: string, now: number, force = false): boolean {
+  const at = last.get(root);
+  if (!force && at !== undefined && now - at < FETCH_EVERY) return false;
+  last.set(root, now);
+  return true;
+}

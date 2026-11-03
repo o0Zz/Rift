@@ -256,6 +256,28 @@ body,
   color: var(--branch);
 }
 
+/* Commits to pull: a small count on the Pull button's corner. */
+.pull-btn {
+  position: relative;
+}
+
+.pull-badge {
+  position: absolute;
+  top: -3px;
+  right: -4px;
+  min-width: 13px;
+  height: 13px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 13px;
+  text-align: center;
+  pointer-events: none;
+}
+
 .head-buttons {
   display: flex;
   gap: 2px;

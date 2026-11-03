@@ -1,5 +1,15 @@
 import { expect, it } from "vitest";
-import { commitFiles, commitRange, diffLineClass, discardQuestion, inRange, keepChecked, pickCommits } from "./diff";
+import { commitFiles, commitRange, diffLineClass, discardQuestion, FETCH_EVERY, fetchDue, inRange, keepChecked, pickCommits } from "./diff";
+
+it("fetches a repo at most once per window unless forced", () => {
+  const last = new Map<string, number>();
+  expect(fetchDue(last, "a", 0)).toBe(true);
+  expect(fetchDue(last, "a", FETCH_EVERY - 1)).toBe(false);
+  expect(fetchDue(last, "b", 1)).toBe(true); // per repo
+  expect(fetchDue(last, "a", 2, true)).toBe(true); // ⟳
+  expect(fetchDue(last, "a", 3)).toBe(false); // the forced one counts
+  expect(fetchDue(last, "a", 2 + FETCH_EVERY)).toBe(true);
+});
 
 it("keeps the user's unchecks across a reload and checks new files", () => {
   const before = [{ path: "a", status: "M" }, { path: "b", status: "M" }, { path: "gone", status: "M" }];
