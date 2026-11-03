@@ -4,7 +4,7 @@ import { getCurrentWindow, UserAttentionType } from "@tauri-apps/api/window";
 import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
 import { onAction, sendNotification } from "@tauri-apps/plugin-notification";
-import { TermView, type AgentSession, type TermLook } from "./terminal/TermView";
+import { TermView, type TermLook } from "./terminal/TermView";
 import { TERMINAL_THEMES } from "./terminal/themes";
 import { neighbour } from "./tabs/nav";
 import {
@@ -37,13 +37,14 @@ import {
   type Status,
   type TabFilter,
 } from "./tabs/layout";
-import { Tab, type GitStats } from "./tabs/Tab";
+import { Tab } from "./tabs/Tab";
 import { Shell } from "./tabs/Shell";
+import { createSessionSave, saveHistories, type Saved, type SavedTab } from "./tabs/session";
+import { createGitWatch } from "./tabs/gitWatch";
+import { TopBar } from "./tabs/TopBar";
 import { createDocs } from "./docs/docs";
 import { Sidebar } from "./tabs/Sidebar";
-import { GitStatsView } from "./tabs/GitStats";
-import { limitsLabel, limitsTitle, type Limit, type Limits } from "./tabs/usage";
-import { Icon } from "./ui/Icon";
+import type { Limit, Limits } from "./tabs/usage";
 import { Explorer } from "./panels/Explorer";
 import { isUnder } from "./panels/fileOps";
 import { GitPanel } from "./panels/GitPanel";
@@ -57,9 +58,6 @@ import { FindBar } from "./ui/FindBar";
 import { PromptDialog } from "./ui/PromptDialog";
 import "./App.css";
 
-type TabUi = { name?: string; color?: string; group?: string; shell?: string; snap?: string; docs?: string[]; doc?: number };
-type SavedTab = { cwd?: string; title: string; agent?: AgentSession; ui?: TabUi };
-type Saved = { tabs: SavedTab[]; active: number; layout?: { groups?: Group[]; panes?: unknown; widths?: { tabs?: number } } };
 type Integration = { id: string; name: string; detected: boolean; installed: boolean; setup: string };
 type AgentStatus = { pty: number; harness: string; status: Status | null; message: string | null };
 type AgentUsage = { pty: number; context: number | null } & { [K in keyof Limits]: Limit | null };
@@ -178,15 +176,10 @@ function App() {
       const root = tab?.root;
       const same = root === panelTab()?.root;
       setPanelTab(tab);
-      // Another repo loads anyway; the same one reloads only if something may have changed it.
-      if (root && changedRepos.delete(root) && same && shown("git")) reloadGit();
+      git.panelTabChanged(root, same);
     }, 150);
   });
-  // Repos where files may have changed since the git panel loaded them: a prompt came back or an agent
-  // moved. Switching tabs reloads the panel only for those, so a switch where nothing happened costs nothing.
-  const changedRepos = new Set<string>();
-  const [gitRefresh, setGitRefresh] = createSignal(0); // bumped to reload the git panel in place
-  const reloadGit = () => setGitRefresh(gitRefresh() + 1);
+  const git = createGitWatch({ panelShows: (root) => shown("git") && panelTab()?.root === root });
   const [filesRefresh, setFilesRefresh] = createSignal(0); // bumped to reload the files panel (F5)
   // Keep the spare shell in the active tab's folder, so a new tab there (which opens in the same
   // folder) is instant. Only once the tab and its folder stay put: each move costs a shell start.
@@ -196,78 +189,7 @@ function App() {
     clearTimeout(prewarmTimer);
     prewarmTimer = setTimeout(() => invoke("pty_prewarm", { cwd: cwd ?? null }), 1000);
   });
-  // Saving starts once restored tabs have their shells, so a half-restored state is never written.
-  const [restored, setRestored] = createSignal(false);
-
-  // Written 300 ms after the last change, never during it: a tab switch changes `active`, and the write
-  // (a JSON file, on the backend's main thread) would land in the switch's frame.
-  let pendingSave: Record<string, unknown> | undefined;
-  let saveTimer = 0;
-  function save() {
-    if (!restored()) return;
-    const list = tabs();
-    pendingSave = {
-      tabs: list.map((t) => ({
-        pty: t.view.ptyId >= 0 ? t.view.ptyId : null,
-        cwd: t.cwd ?? null,
-        title: t.title,
-        ui: {
-          name: t.name,
-          color: t.color,
-          group: t.group,
-          shell: t.shell,
-          snap: t.snap,
-          docs: t.docs.map((d) => d.path),
-          doc: t.current,
-        } satisfies TabUi,
-      })),
-      active: Math.max(0, list.indexOf(active()!)),
-      layout: { groups: groups(), panes: panes(), widths: { tabs: tabsWidth() } },
-    };
-    clearTimeout(saveTimer);
-    saveTimer = setTimeout(flushSave, 300);
-  }
-  createEffect(save);
-
-  /** Writes a pending save now: before Rift closes or updates. */
-  async function flushSave() {
-    clearTimeout(saveTimer);
-    const args = pendingSave;
-    pendingSave = undefined;
-    if (args) await invoke("session_update", args);
-  }
-
-  // Git stats per tab (~80 ms of git in the background, never on a tab switch): after a prompt or an agent
-  // status change, coalesced so that a burst of prompts costs one refresh per tab and 1.5 s.
-  const statsPending = new WeakSet<Tab>();
-  function refreshStats(tab: Tab) {
-    if (statsPending.has(tab)) return;
-    statsPending.add(tab);
-    setTimeout(async () => {
-      statsPending.delete(tab);
-      const root = tab.root;
-      tab.stats = root ? await invoke<GitStats>("git_stats", { root }).catch(() => undefined) : undefined;
-    }, 1500);
-  }
-
-  // A command finished in a terminal of the repo the git panel shows (`git pull`, a build, an edit):
-  // reload it in place. Once per burst of prompts, and only while the panel is open on that repo.
-  let gitPanelTimer = 0;
-  function refreshGitPanel(root: string) {
-    clearTimeout(gitPanelTimer);
-    gitPanelTimer = setTimeout(() => {
-      if (shown("git") && panelTab()?.root === root && changedRepos.delete(root)) reloadGit();
-    }, 300);
-  }
-
-  /** Saves every shell tab's history (agent tabs are redisplayed by resuming). Before closing or updating. */
-  function saveHistories() {
-    return Promise.all(
-      tabs()
-        .filter((t) => !t.main.agent)
-        .map((t) => invoke("scrollback_save", { id: t.snap, data: t.view.snapshot() }).catch(() => {})),
-    );
-  }
+  const session = createSessionSave({ tabs, active, groups, panes, tabsWidth });
 
   /** A finished agent the user has now seen goes back to the plain agent icon after a moment. */
   function fadeDoneWhenSeen(tab: Tab) {
@@ -303,11 +225,8 @@ function App() {
           tab.root = head?.root;
           tab.branch = head?.branch;
         }
-        if (head) {
-          changedRepos.add(head.root);
-          refreshGitPanel(head.root);
-        }
-        refreshStats(tab);
+        if (head) git.promptCameBack(head.root);
+        git.stats(tab);
       }),
     );
   }
@@ -373,7 +292,7 @@ function App() {
     return history
       .then((h) => h && tab.view.restoreSnapshot(h))
       .then(() => tab.view.start(cwd, saved?.agent, opts.startAgent, tab.shell))
-      .then(save) // the pty id is not reactive
+      .then(session.save) // the pty id is not reactive
       .catch((e) => void (tab.main.title = `error: ${e}`));
   }
 
@@ -386,7 +305,7 @@ function App() {
     const list = tabs();
     activate(list[Math.min(saved.active, list.length - 1)]);
     await Promise.all(starts);
-    setRestored(true);
+    session.restored();
     invoke("scrollback_prune", { keep: tabs().map((t) => t.snap) });
     // Launched from Explorer's "Open in Rift": that folder opens as a new tab, after the restored ones.
     const dir = await invoke<string | null>("startup_dir");
@@ -506,13 +425,9 @@ function App() {
       shell.agent = status ? harness : undefined;
       if (!status) shell.context = undefined;
     });
-    refreshStats(tab); // an agent at work changes files
-    if (tab.root) changedRepos.add(tab.root);
-    // Finished in the repo the git panel shows (any tab): reload it now to show the agent's changes.
-    if (shell.status === "done" && tab.root && shown("git") && panelTab()?.root === tab.root) {
-      changedRepos.delete(tab.root);
-      reloadGit();
-    }
+    git.stats(tab); // an agent at work changes files
+    // Finished in the repo the git panel shows (any tab): it reloads now to show the agent's changes.
+    git.agentMoved(tab.root, shell.status === "done");
     // A terminal panel's shell is in front only while its panel is shown.
     const visible = active() === tab && windowFocused() && (shell.place === "main" || shown(shell.place));
     if (visible) fadeDoneWhenSeen(tab);
@@ -623,9 +538,7 @@ function App() {
     zoomOut: () => zoomFocused(-1),
     zoomReset: () => zoomFocused(0),
     refreshPanels: () => {
-      const root = panelTab()?.root;
-      if (root) changedRepos.delete(root);
-      reloadGit();
+      git.reloadNow(panelTab()?.root);
       setFilesRefresh(filesRefresh() + 1);
     },
     nextAttention: () => {
@@ -690,8 +603,8 @@ function App() {
         event.preventDefault();
         return;
       }
-      await flushSave();
-      await saveHistories();
+      await session.flush();
+      await saveHistories(tabs());
       await updater?.installIfReady();
     });
     // Registered at startup: notifications shown before a listener exists report no click.
@@ -714,7 +627,7 @@ function App() {
     invoke<string[] | null>("bench_dirs").then(async (dirs) => {
       if (!dirs) {
         // Not in dev (would offer the latest release over local work) nor in the bench.
-        if (!import.meta.env.DEV) updater = startUpdates((version, restart) => setUpdate({ version, restart: () => flushSave().then(saveHistories).then(restart) }));
+        if (!import.meta.env.DEV) updater = startUpdates((version, restart) => setUpdate({ version, restart: () => session.flush().then(() => saveHistories(tabs())).then(restart) }));
         return;
       }
       const bench = await import("./bench");
@@ -761,7 +674,7 @@ function App() {
             for (const tab of tabs()) {
               for (let i = tab.docs.length - 1; i >= 0; i--) if (isUnder(tab.docs[i].path, path)) docs.close(tab, i);
             }
-            if (shown("git")) reloadGit();
+            if (shown("git")) git.reload();
           }}
           onClose={() => togglePanel("explorer")}
         />
@@ -795,7 +708,7 @@ function App() {
           branch={panelTab()?.branch}
           behind={panelTab()?.stats?.behind}
           agent={agents()[0]?.name}
-          refresh={gitRefresh()}
+          refresh={git.refresh()}
           onClose={() => togglePanel("git")}
           onHeadChanged={() => {
             // A switch, commit, pull or push: every tab of this repo shows the new branch and stats.
@@ -803,7 +716,7 @@ function App() {
             for (const tab of tabs()) {
               if (!root || tab.root !== root || !tab.cwd) continue;
               invoke<{ branch: string } | null>("git_head", { cwd: tab.cwd }).then((head) => (tab.branch = head?.branch));
-              refreshStats(tab);
+              git.stats(tab);
             }
           }}
         />
@@ -833,79 +746,17 @@ function App() {
   // placed in the group that holds "main".
   const mainEl = (
     <main class="main">
-      {/* Like Warp: the active tab's branch and changes on the right, opening the git panel. */}
-      <div class="topbar">
-        <Show
-          when={barTab()?.docs.length ? barTab() : undefined}
-          fallback={<span class="topbar-title">{barTab() ? displayTitle(barTab()!) : ""}</span>}
-        >
-          {(tab) => (
-            <div class="doc-tabs">
-              <button class="doc-tab" classList={{ on: tab().current < 0 }} onClick={() => docs.show(tab(), -1)}>
-                Terminal
-              </button>
-              <For each={tab().docs}>
-                {(doc, i) => (
-                  <div
-                    class="doc-tab"
-                    classList={{ on: tab().current === i() }}
-                    title={doc.path}
-                    onClick={() => docs.show(tab(), i())}
-                    onAuxClick={(e) => e.button === 1 && docs.close(tab(), i())}
-                  >
-                    <span class="doc-name">{doc.name}</span>
-                    <Show when={doc.dirty}>
-                      <span class="doc-dirty" title="Unsaved (Ctrl+S)" />
-                    </Show>
-                    <button
-                      class="doc-close"
-                      title="Close"
-                      onClick={(e) => (e.stopPropagation(), docs.close(tab(), i()))}
-                    >
-                      <Icon name="close" size={10} />
-                    </button>
-                  </div>
-                )}
-              </For>
-            </div>
-          )}
-        </Show>
-        <Show when={barTab()?.docs[barTab()!.current]?.markdown && barTab()!.docs[barTab()!.current]}>
-          {(doc) => (
-            <button class="doc-mode" onClick={() => doc().toggleEdit()}>
-              {doc().editing ? "Read" : "Edit"}
-            </button>
-          )}
-        </Show>
-        <Show when={limitsLabel(limits())}>
-          {(label) => (
-            <span class="usage" title={limitsTitle(limits())}>
-              {label()}
-            </span>
-          )}
-        </Show>
-        <button class="icon-btn" onClick={() => consoles.open()} title="New terminal (Ctrl+Shift+K)">
-          <Icon name="plus" />
-        </button>
-        <button
-          class="icon-btn"
-          classList={{ on: shown("prompts") }}
-          onClick={() => togglePanel("prompts")}
-          title="Prompts (Ctrl+Shift+O)"
-        >
-          <Icon name="list" />
-        </button>
-        <button
-          class="git-button"
-          classList={{ on: shown("git") }}
-          onClick={() => togglePanel("git")}
-          title="Git changes (Ctrl+Shift+G)"
-        >
-          <Icon name="branch" size={14} />
-          <span>{barTab()?.branch ?? "Git"}</span>
-          <GitStatsView stats={barTab()?.stats} />
-        </button>
-      </div>
+      <TopBar
+        tab={barTab()}
+        limits={limits()}
+        promptsShown={shown("prompts")}
+        gitShown={shown("git")}
+        onShowDoc={docs.show}
+        onCloseDoc={docs.close}
+        onNewTerminal={() => consoles.open()}
+        onTogglePrompts={() => togglePanel("prompts")}
+        onToggleGit={() => togglePanel("git")}
+      />
       <Show when={update()}>
         {(u) => (
           <div class="banner">
