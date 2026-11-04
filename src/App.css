@@ -18,7 +18,6 @@
   --hover: rgba(255, 255, 255, 0.05);
   --active: rgba(255, 255, 255, 0.09);
   --active-solid: #2a2d2e;
-  --active-edge: rgba(255, 255, 255, 0.75);
   --accent: #539bf5;
   --primary: #2f6fb8;
   --on-bg: #2f3a4a;
@@ -85,7 +84,6 @@
   --hover: rgba(0, 0, 0, 0.05);
   --active: rgba(0, 0, 0, 0.08);
   --active-solid: #e2e8f0;
-  --active-edge: rgba(0, 0, 0, 0.6);
   --accent: #0969da;
   --primary: #0969da;
   --on-bg: #dbe8f7;
@@ -381,10 +379,16 @@ body,
   background: color-mix(in srgb, var(--tab-color) 32%, transparent);
 }
 
+/* The active tab: accent bar + outline, so it stands out even next to colored tabs. */
 .tab-row.active {
-  border-left-color: var(--active-edge);
-  background: var(--active);
+  border-left-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  box-shadow: inset 0 0 0 2px var(--accent);
   color: var(--fg-strong);
+}
+
+.tab-row.active .tab-title {
+  font-weight: 600;
 }
 
 .tab-row.colored.active {
