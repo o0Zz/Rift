@@ -1595,6 +1595,15 @@ body,
   color: var(--fg-muted);
 }
 
+/* Lines added/deleted in front of a changed file; a minimum width keeps most paths aligned. */
+.git-lines {
+  flex: none;
+  min-width: 7.5ch;
+  font-size: 0.923em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .tab-sub .stat-add,
 .tab-sub .stat-del,
 .tab-sub .stat-ab,

@@ -284,6 +284,15 @@ export function GitPanel(props: {
       <span class={`git-status s-${p.change.status === "?" ? "u" : p.change.status}`}>
         {p.change.status === "?" ? "U" : p.change.status}
       </span>
+      <span class="git-lines">
+        <Show when={p.change.lines}>
+          {(l) => (
+            <>
+              <span class="stat-add">+{l().added}</span> <span class="stat-del">−{l().deleted}</span>
+            </>
+          )}
+        </Show>
+      </span>
       <span class="git-path" onClick={() => show(p.change)}>
         <bdo dir="ltr">{p.change.path}</bdo>
       </span>
@@ -462,10 +471,10 @@ export function GitPanel(props: {
               >
                 {busy() === "generate" ? "Generating…" : "✨ Generate"}
               </button>
-              <button disabled={!canCommit()} onClick={() => commit(true)} title="Commit, then push">
+              <button class="primary" disabled={!canCommit()} onClick={() => commit(true)} title="Commit, then push">
                 Commit & Push
               </button>
-              <button class="primary" disabled={!canCommit()} onClick={() => commit()}>
+              <button disabled={!canCommit()} onClick={() => commit()}>
                 {busy() === "commit" ? "Committing…" : `Commit ${picked().length} file${picked().length === 1 ? "" : "s"}`}
               </button>
             </div>

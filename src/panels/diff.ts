@@ -7,7 +7,7 @@ export function diffLineClass(line: string): string {
   return "";
 }
 
-export type Change = { path: string; status: string; orig?: string };
+export type Change = { path: string; status: string; orig?: string; lines?: { added: number; deleted: number } };
 
 /** Checked files after a reload: unchecked ones stay unchecked, new ones come checked. */
 export function keepChecked(checked: Set<string>, before: Change[], after: Change[]): Set<string> {

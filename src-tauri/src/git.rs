@@ -50,6 +50,57 @@ pub struct Change {
     /// Old path of a rename: committing the rename must include it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub orig: Option<String>,
+    /// Lines added and deleted; None for a binary file (or an untracked one too big to count).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lines: Option<Lines>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct Lines {
+    pub added: u32,
+    pub deleted: u32,
+}
+
+/// `git diff --numstat -z` -> lines per path ("12\t3\tpath\0", a rename "12\t3\t\0old\0new\0"); binary files
+/// ("-\t-") left out.
+fn parse_numstat(text: &str) -> std::collections::HashMap<String, Lines> {
+    let mut lines = std::collections::HashMap::new();
+    let mut fields = text.split('\0');
+    while let Some(field) = fields.next() {
+        let mut parts = field.splitn(3, '\t');
+        let (Some(added), Some(deleted), Some(path)) = (parts.next(), parts.next(), parts.next())
+        else {
+            continue;
+        };
+        let path = if path.is_empty() {
+            fields.next(); // the old path of a rename
+            fields.next().unwrap_or_default()
+        } else {
+            path
+        };
+        if let (Ok(added), Ok(deleted)) = (added.parse(), deleted.parse()) {
+            lines.insert(path.to_string(), Lines { added, deleted });
+        }
+    }
+    lines
+}
+
+/// Lines of a new file, counted here (git has no numstat for untracked files). None for a binary file or one
+/// over 1 MB.
+fn count_lines(path: &Path) -> Option<Lines> {
+    if std::fs::metadata(path).ok()?.len() > 1024 * 1024 {
+        return None;
+    }
+    let bytes = std::fs::read(path).ok()?;
+    if bytes.contains(&0) {
+        return None;
+    }
+    let breaks = bytes.iter().filter(|&&b| b == b'\n').count();
+    let added = breaks + usize::from(bytes.last().is_some_and(|&b| b != b'\n'));
+    Some(Lines {
+        added: added as u32,
+        deleted: 0,
+    })
 }
 
 fn git(root: &Path, args: &[&str]) -> Result<std::process::Output> {
@@ -329,7 +380,25 @@ fn truncated(mut text: String, max: usize) -> String {
     text
 }
 
+/// Changed files with their line counts. The numstat runs in parallel with the status: no extra wait.
 pub fn status(root: &Path) -> Result<Vec<Change>> {
+    let numstat_root = root.to_path_buf();
+    let numstat = std::thread::spawn(move || {
+        let args = |base: &[&'static str]| {
+            [
+                &["--no-optional-locks", "diff", "--numstat", "-z", "-M"][..],
+                base,
+            ]
+            .concat()
+        };
+        let out = git(&numstat_root, &args(&["HEAD"])).ok()?;
+        let out = if out.status.success() {
+            out
+        } else {
+            git(&numstat_root, &args(&["--cached"])).ok()? // no commit yet
+        };
+        Some(parse_numstat(&String::from_utf8_lossy(&out.stdout)))
+    });
     let out = check(git(
         root,
         &["status", "--porcelain=v1", "-z", "--untracked-files=all"],
@@ -358,7 +427,21 @@ pub fn status(root: &Path) -> Result<Vec<Change>> {
             path: path.to_string(),
             status: status.to_string(),
             orig,
+            lines: None,
         });
+    }
+    let counts = numstat.join().ok().flatten().unwrap_or_default();
+    // Many new files (an unignored build folder) would mean reading them all: only the first ones are counted.
+    let mut untracked = 0;
+    for change in &mut changes {
+        change.lines = if change.status == "?" {
+            untracked += 1;
+            (untracked <= 200)
+                .then(|| count_lines(&root.join(&change.path)))
+                .flatten()
+        } else {
+            counts.get(&change.path).copied()
+        };
     }
     Ok(changes)
 }
@@ -586,6 +669,7 @@ fn parse_name_status(text: &str) -> Vec<Change> {
             path: path.to_string(),
             status: letter.to_string(),
             orig,
+            lines: None,
         });
     }
     changes
@@ -609,31 +693,49 @@ fn before(root: &Path, oldest: &str) -> Result<String> {
 /// Files changed by commit `to` (`from` None), or by the commits `from` (oldest) to `to`, both included.
 pub fn commit_files(root: &Path, from: Option<&str>, to: &str) -> Result<Vec<Change>> {
     valid_rev(to)?;
-    let out = match from {
-        Some(from) => {
-            let base = before(root, from)?;
-            check(git(
-                root,
-                &["diff", "--name-status", "-z", "-M", &base, to],
-            )?)?
-        }
-        // `show` also works for the first commit, which has no parent to diff against. A merge is compared
-        // with its first parent (what the merge brought in, like GitHub): the default combined diff lists
-        // cleanly merged files but shows no line of them.
-        None => check(git(
-            root,
-            &[
-                "show",
-                "--format=",
-                "--diff-merges=first-parent",
-                "--name-status",
-                "-z",
-                "-M",
-                to,
-            ],
-        )?)?,
+    let base = from.map(|from| before(root, from)).transpose()?;
+    // Names and line counts: one git command each, in parallel.
+    let run = |format: &'static str| {
+        let root = root.to_path_buf();
+        let to = to.to_string();
+        let base = base.clone();
+        std::thread::spawn(move || {
+            let out = match &base {
+                Some(base) => git(&root, &["diff", format, "-z", "-M", base, &to])?,
+                // `show` also works for the first commit, which has no parent to diff against. A merge is
+                // compared with its first parent (what the merge brought in, like GitHub): the default
+                // combined diff lists cleanly merged files but shows no line of them.
+                None => git(
+                    &root,
+                    &[
+                        "show",
+                        "--format=",
+                        "--diff-merges=first-parent",
+                        format,
+                        "-z",
+                        "-M",
+                        &to,
+                    ],
+                )?,
+            };
+            check(out)
+        })
     };
-    Ok(parse_name_status(&String::from_utf8_lossy(&out.stdout)))
+    let numstat = run("--numstat");
+    let names = run("--name-status")
+        .join()
+        .map_err(|_| anyhow::anyhow!("git panicked"))??;
+    let counts = numstat
+        .join()
+        .ok()
+        .and_then(|out| out.ok())
+        .map(|out| parse_numstat(&String::from_utf8_lossy(&out.stdout)))
+        .unwrap_or_default();
+    let mut changes = parse_name_status(&String::from_utf8_lossy(&names.stdout));
+    for change in &mut changes {
+        change.lines = counts.get(&change.path).copied();
+    }
+    Ok(changes)
 }
 
 /// Diff of one file in commit `to`, or over the commits `from` (oldest) to `to`, both included.
@@ -752,6 +854,73 @@ mod tests {
         assert!(d.contains("-two") && d.contains("+TWO"), "{d}");
         let d = diff(r, "new dir/é.txt", true).unwrap();
         assert!(d.contains("+hello"), "{d}");
+    }
+
+    fn line_counts(changes: &[Change]) -> Vec<(&str, Option<(u32, u32)>)> {
+        let mut counts: Vec<_> = changes
+            .iter()
+            .map(|c| (c.path.as_str(), c.lines.map(|l| (l.added, l.deleted))))
+            .collect();
+        counts.sort();
+        counts
+    }
+
+    #[test]
+    fn status_counts_lines_per_file() {
+        let dir = repo();
+        let r = dir.path();
+        std::fs::write(r.join("kept.txt"), "one\nTWO\nthree\n").unwrap();
+        std::fs::remove_file(r.join("gone.txt")).unwrap();
+        std::fs::write(r.join("new.txt"), "a\nb\nno newline at the end").unwrap();
+        std::fs::write(r.join("blob.bin"), [0u8, 1, 2]).unwrap();
+        assert_eq!(
+            line_counts(&status(r).unwrap()),
+            [
+                ("blob.bin", None),
+                ("gone.txt", Some((0, 1))),
+                ("kept.txt", Some((2, 1))),
+                ("new.txt", Some((3, 0))),
+            ]
+        );
+    }
+
+    #[test]
+    fn status_counts_lines_of_a_rename_and_before_the_first_commit() {
+        let dir = repo();
+        let r = dir.path();
+        run(r, &["mv", "kept.txt", "moved.txt"]);
+        std::fs::write(r.join("moved.txt"), "one\ntwo\nthree\n").unwrap();
+        run(r, &["add", "moved.txt"]);
+        assert_eq!(
+            line_counts(&status(r).unwrap()),
+            [("moved.txt", Some((1, 0)))]
+        );
+
+        let fresh = tempfile::tempdir().unwrap();
+        run(fresh.path(), &["init", "-q"]);
+        std::fs::write(fresh.path().join("a.txt"), "x\ny\n").unwrap();
+        run(fresh.path(), &["add", "a.txt"]);
+        assert_eq!(
+            line_counts(&status(fresh.path()).unwrap()),
+            [("a.txt", Some((2, 0)))]
+        );
+    }
+
+    #[test]
+    fn commit_files_count_lines() {
+        let dir = repo();
+        let r = dir.path();
+        std::fs::write(r.join("kept.txt"), "one\n").unwrap();
+        std::fs::write(r.join("new.txt"), "a\nb\n").unwrap();
+        run(r, &["add", "."]);
+        run(r, &["commit", "-q", "-m", "second"]);
+        let head = String::from_utf8_lossy(&git(r, &["rev-parse", "HEAD"]).unwrap().stdout)
+            .trim()
+            .to_string();
+        assert_eq!(
+            line_counts(&commit_files(r, None, &head).unwrap()),
+            [("kept.txt", Some((0, 1))), ("new.txt", Some((2, 0)))]
+        );
     }
 
     fn committed_files(root: &Path) -> String {
