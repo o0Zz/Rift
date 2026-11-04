@@ -6,7 +6,7 @@ import { fileBadge } from "./fileIcons";
 import { Icon } from "../ui/Icon";
 import { Loaded, PanelHead } from "../ui/Panel";
 import { PATH_DRAG_TYPE } from "../terminal/TermView";
-import { isDeleteKey, isUnder, TRASH_NAME } from "./fileOps";
+import { FILE_MANAGER, isDeleteKey, isUnder, TRASH_NAME } from "./fileOps";
 
 type Entry = { name: string; dir: boolean };
 
@@ -94,12 +94,19 @@ export function Explorer(props: {
     props.onDeleted(path);
   }
 
-  function fileMenu(e: MouseEvent, path: string, parent: string) {
+  /** Opening a folder (`fs_open`) shows it in the OS's file manager. */
+  const openInFileManager = (dir: string) => ({ label: `Open in ${FILE_MANAGER}`, run: () => invoke("fs_open", { path: dir }) });
+
+  function fileMenu(e: MouseEvent, path: string, parent: string, dir: boolean) {
     setSelected({ path, parent });
     menu.open(e, [
-      { label: "Open", run: () => props.onOpenFile(path) },
-      { label: "Open with default app", run: () => invoke("fs_open", { path }) },
-      { label: "Reveal in File Explorer", run: () => invoke("fs_reveal", { path }) },
+      ...(dir
+        ? [openInFileManager(path)]
+        : [
+            { label: "Open", run: () => props.onOpenFile(path) },
+            { label: "Open with default app", run: () => invoke("fs_open", { path }) },
+          ]),
+      { label: `Reveal in ${FILE_MANAGER}`, run: () => invoke("fs_reveal", { path }) },
       { label: "Copy path", run: () => navigator.clipboard.writeText(path) },
       "separator",
       { label: `Delete (move to ${TRASH_NAME})`, run: () => remove(path, parent) },
@@ -134,7 +141,7 @@ export function Explorer(props: {
                       props.onOpenFile(path);
                       body.focus({ preventScroll: true });
                     }}
-                    onContextMenu={(e) => fileMenu(e, path, p.dir)}
+                    onContextMenu={(e) => fileMenu(e, path, p.dir, entry.dir)}
                   >
                     <span class="tree-chev">{entry.dir && <Icon name={open() ? "down" : "right"} size={12} />}</span>
                     <FileIcon name={entry.name} dir={entry.dir} open={open()} />
@@ -168,6 +175,10 @@ export function Explorer(props: {
         class="panel-body"
         ref={body}
         tabIndex={-1}
+        onContextMenu={(e) => {
+          const root = props.root;
+          if (root && !(e.target as Element).closest(".tree-row")) menu.open(e, [openInFileManager(root)]);
+        }}
         onKeyDown={(e) => {
           const sel = selected();
           if (sel && isDeleteKey(e)) {

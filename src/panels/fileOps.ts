@@ -5,6 +5,12 @@ import { IS_MAC, IS_WINDOWS } from "../settings/settings";
 /** Where a deleted file goes (it is never deleted for good). */
 export const TRASH_NAME = IS_WINDOWS ? "Recycle Bin" : "Trash";
 
+/** The OS's file manager, as its users call it. */
+export function fileManagerName(windows = IS_WINDOWS, mac = IS_MAC): string {
+  return windows ? "File Explorer" : mac ? "Finder" : "file manager";
+}
+export const FILE_MANAGER = fileManagerName();
+
 /** Delete (Suppr) deletes the selected file; Cmd+Backspace too on macOS, as in Finder. */
 export function isDeleteKey(e: { key: string; metaKey: boolean }, mac = IS_MAC): boolean {
   return e.key === "Delete" || (mac && e.metaKey && e.key === "Backspace");

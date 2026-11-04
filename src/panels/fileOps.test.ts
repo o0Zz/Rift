@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { isDeleteKey, isUnder } from "./fileOps";
+import { fileManagerName, isDeleteKey, isUnder } from "./fileOps";
 
 it("deletes on Delete, and on Cmd+Backspace on macOS only", () => {
   expect(isDeleteKey({ key: "Delete", metaKey: false }, false)).toBe(true);
@@ -20,4 +20,10 @@ it("ignores case where the file system does (Windows, macOS), not on Linux", () 
   expect(isUnder("c:\\repo\\SRC\\a.ts", "C:\\Repo\\src", true)).toBe(true);
   expect(isUnder("/home/me/Docs/a.md", "/home/me/docs", false)).toBe(false);
   expect(isUnder("/home/me/docs/a.md", "/home/me/docs", false)).toBe(true);
+});
+
+it("names the file manager of each OS", () => {
+  expect(fileManagerName(true, false)).toBe("File Explorer");
+  expect(fileManagerName(false, true)).toBe("Finder");
+  expect(fileManagerName(false, false)).toBe("file manager");
 });
