@@ -1150,6 +1150,23 @@ body,
   font-size: 0.923em;
 }
 
+.git-ref {
+  flex: none;
+  max-width: 40%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  padding: 0 5px;
+  border: 1px solid currentColor;
+  border-radius: 8px;
+  font-size: 0.846em;
+  color: var(--branch);
+}
+
+.git-ref.head { color: var(--accent); font-weight: 600; }
+.git-ref.remote { color: var(--fg-dim); }
+.git-ref.tag { color: var(--s-a); }
+
 .git-subject {
   flex: 1;
   min-width: 0;

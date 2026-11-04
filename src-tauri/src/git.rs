@@ -475,6 +475,57 @@ pub struct Commit {
     /// Relative, e.g. "3 hours ago".
     pub date: String,
     pub subject: String,
+    /// Branches and tags pointing at this commit.
+    pub refs: Vec<Ref>,
+}
+
+#[derive(Debug, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RefKind {
+    /// The checked out branch, or "HEAD" when detached.
+    Head,
+    Branch,
+    Remote,
+    Tag,
+}
+
+#[derive(Debug, PartialEq, Serialize)]
+pub struct Ref {
+    pub name: String,
+    pub kind: RefKind,
+}
+
+/// `%D` with `--decorate=full`: "HEAD -> refs/heads/main, refs/remotes/origin/main, tag: refs/tags/v1".
+/// Only branches, remote branches and tags (no `origin/HEAD`, stash or notes).
+fn parse_refs(text: &str) -> Vec<Ref> {
+    text.split(", ")
+        .filter_map(|item| {
+            if item == "HEAD" {
+                return Some(Ref {
+                    name: "HEAD".into(),
+                    kind: RefKind::Head,
+                });
+            }
+            let (head, full) = match item.strip_prefix("HEAD -> ") {
+                Some(rest) => (true, rest),
+                None => (false, item.strip_prefix("tag: ").unwrap_or(item)),
+            };
+            let (kind, name) = if let Some(n) = full.strip_prefix("refs/heads/") {
+                (if head { RefKind::Head } else { RefKind::Branch }, n)
+            } else if let Some(n) = full.strip_prefix("refs/remotes/") {
+                if n.ends_with("/HEAD") {
+                    return None;
+                }
+                (RefKind::Remote, n)
+            } else {
+                (RefKind::Tag, full.strip_prefix("refs/tags/")?)
+            };
+            Some(Ref {
+                name: name.into(),
+                kind,
+            })
+        })
+        .collect()
 }
 
 /// The last `max` commits of HEAD; empty for a repository without commits.
@@ -484,7 +535,8 @@ pub fn log(root: &Path, max: usize) -> Result<Vec<Commit>> {
         &[
             "log",
             &format!("-n{max}"),
-            "--format=%H%x1f%h%x1f%an%x1f%ar%x1f%s%x1e",
+            "--decorate=full",
+            "--format=%H%x1f%h%x1f%an%x1f%ar%x1f%s%x1f%D%x1e",
         ],
     )?;
     if !out.status.success() {
@@ -499,12 +551,13 @@ pub fn log(root: &Path, max: usize) -> Result<Vec<Commit>> {
         .split('\x1e')
         .filter_map(|record| {
             let f: Vec<_> = record.trim_start_matches('\n').split('\x1f').collect();
-            (f.len() == 5).then(|| Commit {
+            (f.len() == 6).then(|| Commit {
                 hash: f[0].into(),
                 short: f[1].into(),
                 author: f[2].into(),
                 date: f[3].into(),
                 subject: f[4].into(),
+                refs: parse_refs(f[5]),
             })
         })
         .collect())
@@ -1053,6 +1106,42 @@ three
         assert_eq!(commits[0].hash.len(), 40);
         assert!(commits[0].hash.starts_with(&commits[0].short));
         assert_eq!(log(r, 1).unwrap().len(), 1);
+
+        run(r, &["tag", "v1.0.0", "HEAD~1"]);
+        run(r, &["branch", "feature"]);
+        run(r, &["update-ref", "refs/remotes/origin/main", "HEAD~1"]);
+        run(
+            r,
+            &[
+                "symbolic-ref",
+                "refs/remotes/origin/HEAD",
+                "refs/remotes/origin/main",
+            ],
+        );
+        let at = |name: &str, kind| Ref {
+            name: name.into(),
+            kind,
+        };
+        let commits = log(r, 10).unwrap();
+        assert_eq!(
+            commits[0].refs,
+            [at("main", RefKind::Head), at("feature", RefKind::Branch)]
+        );
+        assert_eq!(
+            commits[1].refs,
+            [
+                at("v1.0.0", RefKind::Tag),
+                at("origin/main", RefKind::Remote)
+            ]
+        );
+        run(r, &["checkout", "-q", "--detach", "HEAD~1"]);
+        assert_eq!(
+            log(r, 1).unwrap()[0].refs[0],
+            Ref {
+                name: "HEAD".into(),
+                kind: RefKind::Head
+            }
+        );
 
         let empty = tempfile::tempdir().unwrap();
         run(empty.path(), &["init", "-q"]);

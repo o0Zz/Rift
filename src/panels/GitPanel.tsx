@@ -18,7 +18,8 @@ import { Loaded, PanelHead } from "../ui/Panel";
 import { PromptDialog } from "../ui/PromptDialog";
 import { Resizer } from "../ui/Resizer";
 
-type Commit = { hash: string; short: string; author: string; date: string; subject: string };
+type Ref = { name: string; kind: "head" | "branch" | "remote" | "tag" };
+type Commit = { hash: string; short: string; author: string; date: string; subject: string; refs: Ref[] };
 type Branch = { name: string; current: boolean };
 type Busy = "commit" | "generate" | "push" | "pull" | "branch" | "discard";
 
@@ -395,6 +396,9 @@ export function GitPanel(props: {
                         onClick={(e) => pick(commit.hash, e.shiftKey)}
                       >
                         <span class="git-hash">{commit.short}</span>
+                        <For each={commit.refs}>
+                          {(ref) => <span class={`git-ref ${ref.kind}`}>{ref.name}</span>}
+                        </For>
                         <span class="git-subject">{commit.subject}</span>
                         <span class="git-when">{commit.date}</span>
                       </div>
