@@ -833,6 +833,31 @@ body,
   background: var(--hover);
 }
 
+/* Where a prompt dragged inside the list lands: a line in the gap above or below. */
+.prompt {
+  position: relative;
+}
+
+.prompt.drop-before::before,
+.prompt.drop-after::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+  pointer-events: none;
+}
+
+.prompt.drop-before::before {
+  top: -5px;
+}
+
+.prompt.drop-after::after {
+  bottom: -5px;
+}
+
 .prompt-text {
   flex: 1;
   min-width: 0;

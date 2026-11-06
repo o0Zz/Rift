@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { addPrompt, editPrompt, isSaveKey, mergePrompts, promptKey, removePrompt } from "./promptLists";
+import { addPrompt, editPrompt, isSaveKey, mergePrompts, movePrompt, promptKey, removePrompt } from "./promptLists";
 
 it("keys a repo the same way whatever the path spelling", () => {
   expect(promptKey("C:\\Dev\\Rift\\")).toBe(promptKey("c:/dev/rift"));
@@ -31,4 +31,17 @@ it("saves on Enter, Shift+Enter is a new line", () => {
 it("reads any saved shape", () => {
   expect(mergePrompts(null)).toEqual({});
   expect(mergePrompts({ a: ["x", 3, "", "y"], b: "nope", c: [] })).toEqual({ a: ["x", "y"] });
+});
+
+it("moves a prompt to a gap of the list", () => {
+  const lists = { a: ["one", "two", "three"] };
+  expect(movePrompt(lists, "a", 0, 3).a).toEqual(["two", "three", "one"]);
+  expect(movePrompt(lists, "a", 2, 0).a).toEqual(["three", "one", "two"]);
+  expect(movePrompt(lists, "a", 0, 2).a).toEqual(["two", "one", "three"]);
+  expect(movePrompt(lists, "a", 2, 1).a).toEqual(["one", "three", "two"]);
+  // Its own place (either side of it) or out of range: unchanged.
+  expect(movePrompt(lists, "a", 1, 1)).toBe(lists);
+  expect(movePrompt(lists, "a", 1, 2)).toBe(lists);
+  expect(movePrompt(lists, "a", 3, 0)).toBe(lists);
+  expect(movePrompt(lists, "a", 0, 4)).toBe(lists);
 });

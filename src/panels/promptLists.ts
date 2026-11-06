@@ -32,6 +32,18 @@ export function removePrompt(lists: PromptLists, key: string, index: number): Pr
   return withList(lists, key, (lists[key] ?? []).filter((_, i) => i !== index));
 }
 
+/**
+ * Moves prompt `from` to the gap `to` (0 = before the first, length = after the last), counted in the list as it
+ * was before the move.
+ */
+export function movePrompt(lists: PromptLists, key: string, from: number, to: number): PromptLists {
+  const list = [...(lists[key] ?? [])];
+  if (from < 0 || from >= list.length || to < 0 || to > list.length || to === from || to === from + 1) return lists;
+  const [text] = list.splice(from, 1);
+  list.splice(to > from ? to - 1 : to, 0, text);
+  return withList(lists, key, list);
+}
+
 /** Enter saves a prompt being written; Shift+Enter is a new line (and nothing fires mid IME composition). */
 export function isSaveKey(e: { key: string; shiftKey: boolean; isComposing?: boolean }): boolean {
   return e.key === "Enter" && !e.shiftKey && !e.isComposing;

@@ -49,7 +49,15 @@ import { Explorer } from "./panels/Explorer";
 import { isUnder } from "./panels/fileOps";
 import { GitPanel } from "./panels/GitPanel";
 import { Prompts } from "./panels/Prompts";
-import { addPrompt, editPrompt, mergePrompts, promptKey, removePrompt, type PromptLists } from "./panels/promptLists";
+import {
+  addPrompt,
+  editPrompt,
+  mergePrompts,
+  movePrompt,
+  promptKey,
+  removePrompt,
+  type PromptLists,
+} from "./panels/promptLists";
 import { Resizer } from "./ui/Resizer";
 import { Panes, paneBeside } from "./panels/PaneTree";
 import { createConsoles } from "./panels/Consoles";
@@ -688,6 +696,7 @@ function App() {
           onAdd={(text) => changePrompts(addPrompt(promptLists(), promptKey(promptRepo()!), text))}
           onEdit={(i, text) => changePrompts(editPrompt(promptLists(), promptKey(promptRepo()!), i, text))}
           onRemove={(i) => changePrompts(removePrompt(promptLists(), promptKey(promptRepo()!), i))}
+          onMove={(from, to) => changePrompts(movePrompt(promptLists(), promptKey(promptRepo()!), from, to))}
           onSend={(i) => {
             const tab = active();
             const key = promptKey(promptRepo()!);
