@@ -101,6 +101,18 @@ fn same_dir(a: &Path, b: &Path) -> bool {
     norm(a) == norm(b)
 }
 
+/// `data` as a cursor position report (`ESC[<row>;<col>R`) with its row at most `rows`; `None` if it
+/// is not one.
+fn cursor_answer_within(data: &[u8], rows: u16) -> Option<Vec<u8>> {
+    let report = std::str::from_utf8(data)
+        .ok()?
+        .strip_prefix("\x1b[")?
+        .strip_suffix('R')?;
+    let (row, col) = report.split_once(';')?;
+    let (row, col): (u16, u16) = (row.parse().ok()?, col.parse().ok()?);
+    Some(format!("\x1b[{};{col}R", row.min(rows)).into_bytes())
+}
+
 impl PtyManager {
     pub fn new(shell: Shell, home: PathBuf, env: Vec<(String, String)>) -> Arc<Self> {
         Arc::new(PtyManager {
@@ -138,7 +150,8 @@ impl PtyManager {
         let me = self.clone();
         thread::spawn(move || {
             let shell = me.shell.lock().unwrap().clone();
-            let Ok(id) = me.spawn(&dir, None, &shell) else {
+            // The tab that takes it is not known yet: a default size, fixed on attach.
+            let Ok(id) = me.spawn(&dir, None, &shell, PtySize::default()) else {
                 return;
             };
             let replaced = me.spare.lock().unwrap().replace((dir, id));
@@ -174,7 +187,7 @@ impl PtyManager {
             Some(id) => id,
             None => {
                 let shell = shell.unwrap_or_else(|| self.shell.lock().unwrap().clone());
-                self.spawn(&dir, startup, &shell)?
+                self.spawn(&dir, startup, &shell, size)?
             }
         };
         self.resize(id, size)?;
@@ -254,13 +267,15 @@ impl PtyManager {
         Ok(())
     }
 
-    fn spawn(&self, cwd: &Path, startup: Option<&str>, shell: &Shell) -> Result<TabId> {
+    fn spawn(
+        &self,
+        cwd: &Path,
+        startup: Option<&str>,
+        shell: &Shell,
+        size: PtySize,
+    ) -> Result<TabId> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        let pair = native_pty_system().openpty(PtySize {
-            rows: 24,
-            cols: 80,
-            ..Default::default()
-        })?;
+        let pair = native_pty_system().openpty(size)?;
 
         let mut cmd = shell.command(startup);
         cmd.cwd(cwd);
@@ -275,9 +290,19 @@ impl PtyManager {
         let mut reader = pair.master.try_clone_reader()?;
         let mut writer = pair.master.take_writer()?;
         let (input, inputs) = std::sync::mpsc::channel::<Vec<u8>>();
+        // ConPTY asks for the cursor position (ESC[6n) once at startup and hangs for good if the answer is
+        // below its first size (a resize sent before then is not applied yet): a restored history or a
+        // spare shell attached to a taller terminal. That first answer is kept within the first size.
+        let mut startup_rows = cfg!(windows).then_some(size.rows);
         // Ends when the session goes (its sender dropped) or the shell stops taking input.
         thread::spawn(move || {
-            for data in inputs {
+            for mut data in inputs {
+                if let Some(rows) = startup_rows
+                    && let Some(answer) = cursor_answer_within(&data, rows)
+                {
+                    data = answer;
+                    startup_rows = None;
+                }
                 if writer
                     .write_all(&data)
                     .and_then(|_| writer.flush())
@@ -373,14 +398,16 @@ mod tests {
         cwd: Option<PathBuf>,
         startup: Option<&str>,
     ) -> (TabId, mpsc::Receiver<Vec<u8>>, mpsc::Receiver<TabId>) {
-        open_with(m, cwd, startup, None)
+        open_with(m, cwd, startup, None, 1)
     }
 
+    /// Like `open`, with `shell` and the cursor on `cursor_row` when the shell starts.
     fn open_with(
         m: &Arc<PtyManager>,
         cwd: Option<PathBuf>,
         startup: Option<&str>,
         shell: Option<Shell>,
+        cursor_row: u16,
     ) -> (TabId, mpsc::Receiver<Vec<u8>>, mpsc::Receiver<TabId>) {
         let (data_tx, data_rx) = mpsc::channel();
         let (exit_tx, exit_rx) = mpsc::channel();
@@ -400,7 +427,10 @@ mod tests {
             .unwrap();
         // ConPTY asks for the cursor position (ESC[6n) on startup and waits; xterm.js answers it in the app.
         #[cfg(windows)]
-        m.write(id, b"\x1b[1;1R").unwrap();
+        m.write(id, format!("\x1b[{cursor_row};1R").as_bytes())
+            .unwrap();
+        #[cfg(not(windows))]
+        let _ = cursor_row;
         (id, data_rx, exit_rx)
     }
 
@@ -430,6 +460,45 @@ mod tests {
             thread::sleep(Duration::from_millis(20));
         }
         panic!("spare shell never started");
+    }
+
+    #[test]
+    fn cursor_answer_is_kept_within_rows() {
+        assert_eq!(
+            cursor_answer_within(b"\x1b[40;7R", 24).unwrap(),
+            b"\x1b[24;7R"
+        );
+        assert_eq!(
+            cursor_answer_within(b"\x1b[3;1R", 24).unwrap(),
+            b"\x1b[3;1R"
+        );
+        assert_eq!(cursor_answer_within(b"\x1b[O", 24), None);
+        assert_eq!(cursor_answer_within(b"ls\r", 24), None);
+    }
+
+    /// A restored history leaves the cursor at the bottom when the shell starts: it still starts.
+    #[cfg(windows)]
+    #[test]
+    fn shell_starts_with_the_cursor_on_the_last_row() {
+        let m = test_manager();
+        let (id, out, _) = open_with(&m, Some(std::env::temp_dir()), None, None, size().rows);
+        wait_for_output(&out, os::PROMPT);
+        m.close(id);
+    }
+
+    /// The spare shell starts at a default size; a taller terminal takes it with the cursor below that.
+    #[cfg(windows)]
+    #[test]
+    fn spare_shell_starts_with_the_cursor_below_its_first_size() {
+        let m = test_manager();
+        m.prewarm(None);
+        let spare = wait_for_spare(&m);
+        let rows = size().rows;
+        assert!(rows > PtySize::default().rows);
+        let (id, out, _) = open_with(&m, None, None, None, rows);
+        assert_eq!(id, spare);
+        wait_for_output(&out, os::PROMPT);
+        m.close(id);
     }
 
     #[test]
@@ -592,7 +661,7 @@ mod tests {
             .map(|p| p.shell.clone())
             .next()
             .unwrap();
-        let (id, out, _) = open_with(&m, None, None, Some(other));
+        let (id, out, _) = open_with(&m, None, None, Some(other), 1);
         assert_ne!(
             id, spare,
             "another shell than the default never takes the spare"
