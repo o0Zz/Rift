@@ -62,7 +62,8 @@ impl AgentHarness for Copilot {
         match payload["hook_event_name"].as_str()? {
             "SessionStart" => Some(AgentEvent::SessionStarted { session_id }),
             "SessionEnd" => Some(AgentEvent::SessionEnded { session_id }),
-            "UserPromptSubmit" | "PostToolUse" => Some(AgentEvent::Working),
+            "UserPromptSubmit" => Some(AgentEvent::Working),
+            "PostToolUse" => Some(AgentEvent::ToolDone),
             "Stop" => Some(AgentEvent::Done),
             "Notification"
                 if payload["notification_type"]
@@ -145,7 +146,7 @@ mod tests {
         );
         assert_eq!(
             ev("PostToolUse", json!({ "tool_name": "bash" })),
-            Some(AgentEvent::Working)
+            Some(AgentEvent::ToolDone)
         );
         assert_eq!(
             ev("Stop", json!({ "stop_reason": "end_turn" })),

@@ -93,7 +93,8 @@ impl AgentHarness for Claude {
         match payload["hook_event_name"].as_str()? {
             "SessionStart" => Some(AgentEvent::SessionStarted { session_id }),
             "SessionEnd" => Some(AgentEvent::SessionEnded { session_id }),
-            "UserPromptSubmit" | "PostToolUse" => Some(AgentEvent::Working),
+            "UserPromptSubmit" => Some(AgentEvent::Working),
+            "PostToolUse" => Some(AgentEvent::ToolDone),
             "Stop" => Some(AgentEvent::Done),
             // idle_prompt is the "still waiting for you" reminder after a finished turn: not a block.
             "Notification" if payload["notification_type"] != "idle_prompt" => {
@@ -212,7 +213,7 @@ mod tests {
         );
         assert_eq!(
             ev("PostToolUse", json!({ "tool_name": "Bash" })),
-            Some(AgentEvent::Working)
+            Some(AgentEvent::ToolDone)
         );
         assert_eq!(ev("Stop", json!({})), Some(AgentEvent::Done));
         assert_eq!(

@@ -8,6 +8,7 @@ import "@xterm/xterm/css/xterm.css";
 import { cwdFromOsc7, cwdFromOsc9 } from "./osc";
 import { quotePath } from "./paths";
 import { IS_MAC } from "../settings/settings";
+import { isInterruptKey } from "../tabs/layout";
 
 export type AgentSession = { harness: string; session_id: string };
 
@@ -24,8 +25,8 @@ type TermEvents = {
   onCwd(cwd: string): void;
   /** Whether an agent (Claude...) runs in this tab: Shift+Enter then inserts a new line. */
   isAgent(): boolean;
-  /** Esc pressed: an agent is interrupted (no hook reports it). */
-  onEscape(): void;
+  /** Esc or Ctrl+C pressed: an agent is interrupted (no hook reports it). */
+  onInterrupt(): void;
 };
 
 /**
@@ -74,7 +75,7 @@ export class TermView {
     this.term.onResize(({ cols, rows }) => this.pty.then((id) => invoke("pty_resize", { id, cols, rows })));
     this.term.attachCustomKeyEventHandler((e) => {
       if (e.type !== "keydown") return true;
-      if (e.key === "Escape" && !e.ctrlKey && !e.altKey && !e.shiftKey) events.onEscape();
+      if (isInterruptKey(e, this.term.hasSelection())) events.onInterrupt();
       // Agents (Claude Code) take Esc+Enter as "new line"; a plain Enter would send the prompt.
       if (e.key === "Enter" && e.shiftKey && !e.ctrlKey && !e.altKey && events.isAgent()) {
         this.write("\x1b\r");

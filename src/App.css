@@ -443,6 +443,14 @@ body,
   border-radius: 2px;
 }
 
+/* Interrupted by the user: a "!" (bar + dot) drawn on a red disc, no glyph. */
+.badge.interrupted {
+  background:
+    linear-gradient(#fff, #fff) center 1px / 1.5px 4px no-repeat,
+    linear-gradient(#fff, #fff) center 6px / 1.5px 1.5px no-repeat,
+    #e5534b;
+}
+
 /* The same badge before a terminal panel's title (its shell's agent). */
 .panel-title .badge {
   position: static;

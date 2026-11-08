@@ -29,7 +29,8 @@ import {
   needsAttention,
   nextNeedingAttention,
   shouldNotify,
-  statusAfterEscape,
+  statusAfterInterrupt,
+  statusFromHook,
   visualOrder,
   type Agent,
   type Drop,
@@ -67,7 +68,7 @@ import { PromptDialog } from "./ui/PromptDialog";
 import "./App.css";
 
 type Integration = { id: string; name: string; detected: boolean; installed: boolean; setup: string };
-type AgentStatus = { pty: number; harness: string; status: Status | null; message: string | null };
+type AgentStatus = { pty: number; harness: string; status: Status | null; message: string | null; continued: boolean };
 type AgentUsage = { pty: number; context: number | null } & { [K in keyof Limits]: Limit | null };
 
 function App() {
@@ -247,7 +248,7 @@ function App() {
         onTitle: (v) => (shell.title = v),
         onCwd: (cwd) => onShellCwd(tab, shell, cwd),
         isAgent: () => !!shell.agent,
-        onEscape: () => (shell.status = statusAfterEscape(shell.status)),
+        onInterrupt: () => (shell.status = statusAfterInterrupt(shell.status)),
       },
       look(),
     );
@@ -424,12 +425,12 @@ function App() {
   const panelName = (id: PanelId) =>
     isTerminal(id) ? `Terminal ${id.slice(5)}` : ({ explorer: "Files", git: "Git", prompts: "Prompts", main: "Terminal" } as const)[id];
 
-  function onAgentStatus({ pty, harness, status, message }: AgentStatus) {
+  function onAgentStatus({ pty, harness, status, message, continued }: AgentStatus) {
     const hit = shellOf(pty);
     if (!hit) return;
     const { tab, shell } = hit;
     batch(() => {
-      shell.status = status ?? undefined;
+      shell.status = statusFromHook(shell.status, status ?? undefined, continued);
       shell.agent = status ? harness : undefined;
       if (!status) shell.context = undefined;
     });

@@ -51,7 +51,8 @@ impl AgentHarness for Gemini {
         match payload["hook_event_name"].as_str()? {
             "SessionStart" => Some(AgentEvent::SessionStarted { session_id }),
             "SessionEnd" => Some(AgentEvent::SessionEnded { session_id }),
-            "BeforeAgent" | "AfterTool" => Some(AgentEvent::Working),
+            "BeforeAgent" => Some(AgentEvent::Working),
+            "AfterTool" => Some(AgentEvent::ToolDone),
             "AfterAgent" => Some(AgentEvent::Done),
             // ToolPermission is the only notification Gemini sends today.
             "Notification" => Some(AgentEvent::NeedsInput {
@@ -135,7 +136,7 @@ mod tests {
         );
         assert_eq!(
             ev("AfterTool", json!({ "tool_name": "run_shell_command" })),
-            Some(AgentEvent::Working)
+            Some(AgentEvent::ToolDone)
         );
         assert_eq!(
             ev("AfterAgent", json!({ "prompt_response": "ok" })),

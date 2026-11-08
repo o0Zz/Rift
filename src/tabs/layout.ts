@@ -5,7 +5,8 @@ export type Group = { id: string; name: string; color?: string; collapsed: boole
 /** A coding agent Rift knows (harness id + display name). */
 export type Agent = { id: string; name: string };
 
-export type Status = "idle" | "working" | "done" | "blocked";
+/** `interrupted`: the user stopped the agent (Esc, Ctrl+C); shown until the agent moves on. */
+export type Status = "idle" | "working" | "done" | "blocked" | "interrupted";
 
 export const COLORS = ["#e5534b", "#f0883e", "#d4a72c", "#57ab5a", "#39c5cf", "#539bf5", "#b083f0", "#e275ad"];
 
@@ -76,12 +77,33 @@ export function shouldNotify(status: Status | undefined, tabVisible: boolean): b
   return (status === "done" || status === "blocked") && !tabVisible;
 }
 
-/** Esc interrupts the agent (or dismisses its prompt), and agents report no hook for that: back to idle. */
-export function statusAfterEscape(status: Status | undefined): Status | undefined {
-  return status === "working" || status === "blocked" ? "idle" : status;
+/**
+ * Esc or Ctrl+C (without a selection to copy) interrupts a working agent or dismisses its question. Agents
+ * report no hook for that: the terminal watches the keys.
+ */
+export function isInterruptKey(
+  e: { key: string; ctrlKey: boolean; altKey: boolean; shiftKey: boolean; metaKey: boolean },
+  hasSelection: boolean,
+): boolean {
+  if (e.altKey || e.shiftKey || e.metaKey) return false;
+  if (e.key === "Escape") return !e.ctrlKey;
+  return e.ctrlKey && e.key.toLowerCase() === "c" && !hasSelection;
 }
 
-const URGENCY: Record<Status, number> = { idle: 1, working: 2, done: 3, blocked: 4 };
+export function statusAfterInterrupt(status: Status | undefined): Status | undefined {
+  return status === "working" || status === "blocked" ? "interrupted" : status;
+}
+
+/**
+ * The status an agent's hook brings. A tool that finished (`continued`) only continues a turn: after an
+ * interrupt it is a late report (the tool ran before the key) and the agent stays interrupted. A new prompt,
+ * the end of a turn or a question move on.
+ */
+export function statusFromHook(current: Status | undefined, next: Status | undefined, continued: boolean): Status | undefined {
+  return continued && current === "interrupted" ? current : next;
+}
+
+const URGENCY: Record<Status, number> = { idle: 1, interrupted: 2, working: 3, done: 4, blocked: 5 };
 
 /**
  * The shell a tab shows in the sidebar (status, agent icon, title): the most urgent of its shells

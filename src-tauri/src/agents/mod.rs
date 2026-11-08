@@ -30,7 +30,10 @@ pub enum AgentEvent {
     SessionEnded {
         session_id: String,
     },
+    /// A turn started (the user sent a prompt).
     Working,
+    /// A tool finished mid-turn: still working. Arrives late after an interrupt, which it must not undo.
+    ToolDone,
     /// Finished its turn, waiting for the next prompt.
     Done,
     /// Blocked on the user (e.g. a permission prompt).
@@ -45,7 +48,7 @@ impl AgentEvent {
         match self {
             AgentEvent::SessionStarted { .. } => Some("idle"),
             AgentEvent::SessionEnded { .. } => None,
-            AgentEvent::Working => Some("working"),
+            AgentEvent::Working | AgentEvent::ToolDone => Some("working"),
             AgentEvent::Done => Some("done"),
             AgentEvent::NeedsInput { .. } => Some("blocked"),
         }

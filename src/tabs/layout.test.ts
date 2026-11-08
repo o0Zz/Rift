@@ -10,7 +10,9 @@ import {
   nextNeedingAttention,
   ownRowColor,
   shouldNotify,
-  statusAfterEscape,
+  isInterruptKey,
+  statusAfterInterrupt,
+  statusFromHook,
   visualOrder,
   type Group,
   type Status,
@@ -101,12 +103,51 @@ describe("ownRowColor", () => {
   });
 });
 
-describe("statusAfterEscape", () => {
-  it("returns a working or blocked agent to idle, leaves the rest", () => {
-    expect(statusAfterEscape("working")).toBe("idle");
-    expect(statusAfterEscape("blocked")).toBe("idle");
-    expect(statusAfterEscape("done")).toBe("done");
-    expect(statusAfterEscape(undefined)).toBeUndefined();
+describe("interrupts", () => {
+  const key = (key: string, mods: Partial<Record<"ctrlKey" | "altKey" | "shiftKey" | "metaKey", boolean>> = {}) => ({
+    key,
+    ctrlKey: false,
+    altKey: false,
+    shiftKey: false,
+    metaKey: false,
+    ...mods,
+  });
+
+  it("takes Esc and Ctrl+C as an interrupt, not a copy or another key", () => {
+    expect(isInterruptKey(key("Escape"), false)).toBe(true);
+    expect(isInterruptKey(key("Escape"), true)).toBe(true);
+    expect(isInterruptKey(key("c", { ctrlKey: true }), false)).toBe(true);
+    expect(isInterruptKey(key("C", { ctrlKey: true }), false)).toBe(true); // Caps Lock
+    expect(isInterruptKey(key("c", { ctrlKey: true }), true)).toBe(false); // copies the selection
+    expect(isInterruptKey(key("c", { ctrlKey: true, shiftKey: true }), false)).toBe(false);
+    expect(isInterruptKey(key("c", { metaKey: true }), false)).toBe(false); // Cmd+C copies on macOS
+    expect(isInterruptKey(key("c"), false)).toBe(false);
+    expect(isInterruptKey(key("Escape", { shiftKey: true }), false)).toBe(false);
+    expect(isInterruptKey(key("Escape", { ctrlKey: true }), false)).toBe(false);
+  });
+
+  it("marks a working or blocked agent interrupted, leaves the rest", () => {
+    expect(statusAfterInterrupt("working")).toBe("interrupted");
+    expect(statusAfterInterrupt("blocked")).toBe("interrupted");
+    expect(statusAfterInterrupt("done")).toBe("done");
+    expect(statusAfterInterrupt("idle")).toBe("idle");
+    expect(statusAfterInterrupt(undefined)).toBeUndefined();
+  });
+
+  it("keeps an interrupted agent interrupted until a new prompt, the end of a turn or a question", () => {
+    expect(statusFromHook("interrupted", "working", true)).toBe("interrupted"); // late tool report
+    expect(statusFromHook("interrupted", "working", false)).toBe("working"); // a new prompt
+    expect(statusFromHook("interrupted", "done", false)).toBe("done");
+    expect(statusFromHook("interrupted", "blocked", false)).toBe("blocked");
+    expect(statusFromHook("interrupted", undefined, false)).toBeUndefined(); // the agent exited
+    expect(statusFromHook("blocked", "working", true)).toBe("working"); // a permission granted
+    expect(statusFromHook("working", "working", true)).toBe("working");
+  });
+
+  it("ranks an interrupted shell below a working one in the sidebar", () => {
+    const s = (name: string, status?: Status) => ({ name, status });
+    expect(lead([s("main", "interrupted"), s("a", "working")]).name).toBe("a");
+    expect(lead([s("main"), s("a", "interrupted")]).name).toBe("a");
   });
 });
 

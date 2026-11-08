@@ -200,6 +200,8 @@ struct AgentStatus {
     harness: String,
     status: Option<&'static str>,
     message: Option<String>,
+    /// Only a tool finishing mid-turn: the UI keeps an interrupted agent interrupted.
+    continued: bool,
 }
 
 /// Payload of the `agent-usage` event (the agent's status line).
@@ -517,6 +519,7 @@ fn on_hook(handle: &AppHandle, msg: hook::HookMessage) {
         .state::<SessionStore>()
         .agent_event(msg.tab, &msg.harness, &event);
     let status = event.status();
+    let continued = matches!(event, AgentEvent::ToolDone);
     let message = match event {
         AgentEvent::NeedsInput { message } => Some(message),
         _ => None,
@@ -526,6 +529,7 @@ fn on_hook(handle: &AppHandle, msg: hook::HookMessage) {
         harness: msg.harness,
         status,
         message,
+        continued,
     };
     let _ = handle.emit("agent-status", status);
 }

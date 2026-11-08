@@ -51,7 +51,8 @@ impl AgentHarness for Codex {
         match payload["hook_event_name"].as_str()? {
             "SessionStart" => Some(AgentEvent::SessionStarted { session_id }),
             "SessionEnd" => Some(AgentEvent::SessionEnded { session_id }),
-            "UserPromptSubmit" | "PostToolUse" => Some(AgentEvent::Working),
+            "UserPromptSubmit" => Some(AgentEvent::Working),
+            "PostToolUse" => Some(AgentEvent::ToolDone),
             "Stop" => Some(AgentEvent::Done),
             "PermissionRequest" => Some(AgentEvent::NeedsInput {
                 message: match payload["tool_name"].as_str() {
@@ -141,7 +142,7 @@ mod tests {
         );
         assert_eq!(
             ev("PostToolUse", json!({ "tool_name": "shell" })),
-            Some(AgentEvent::Working)
+            Some(AgentEvent::ToolDone)
         );
         assert_eq!(
             ev(
