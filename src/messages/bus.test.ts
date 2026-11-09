@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addEntry, agentList, canReceive, MAX_ENTRIES, messageArgs, nextFor, promptFor, startArgs, startRefusal, waitingFor, type Entry } from "./bus";
+import { addEntry, agentList, canReceive, MAX_ENTRIES, messageArgs, nextFor, promptFor, startArgs, startRefusal, tally, type Entry } from "./bus";
 
 const entry = (id: number, to: number, state: Entry["state"] = "queued"): Entry => ({
   id,
@@ -24,8 +24,20 @@ describe("delivery", () => {
     const list = [entry(1, 5, "delivered"), entry(2, 6), entry(3, 5), entry(4, 5)];
     expect(nextFor(list, 5)?.id).toBe(3);
     expect(nextFor(list, 7)).toBeUndefined();
-    expect(waitingFor(list, [5, 6])).toBe(3);
-    expect(waitingFor(list, [6])).toBe(1);
+  });
+
+  it("counts a tab's messages since it was last left; waiting ones whenever sent", () => {
+    const at = (e: Entry, time: number, from = e.from) => ({ ...e, time, from });
+    const list = [
+      at(entry(1, 5, "delivered"), 10), // received before: not counted
+      at(entry(2, 5), 10), // still waiting: counted as waiting only
+      at(entry(3, 7, "delivered"), 30, 5), // sent by 5
+      at(entry(4, 5, "delivered"), 40), // received
+      at(entry(5, 5, "failed"), 50),
+    ];
+    expect(tally(list, [5], 20)).toEqual({ sent: 1, received: 1, waiting: 1 });
+    expect(tally(list, [5, 7], 0)).toEqual({ sent: 1, received: 4, waiting: 1 });
+    expect(tally(list, [9], 0)).toEqual({ sent: 0, received: 0, waiting: 0 });
   });
 
   it("names the sender and how to answer", () => {

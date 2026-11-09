@@ -1716,14 +1716,24 @@ body,
   color: var(--s-m);
 }
 
-/* Agent messaging: messages waiting for this tab's agent, and the agent that started the tab. */
-.tab-inbox {
+/* Agent messaging: messages this tab's agent sent and received since the user left it, and who started it. */
+.tab-messages {
   display: flex;
   flex: none;
-  align-items: center;
-  gap: 2px;
-  color: var(--accent);
+  gap: 5px;
+  color: var(--fg-soft);
   font-size: 11px;
+}
+
+.msg-count {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.msg-count.waiting {
+  color: var(--accent);
+  font-weight: 600;
 }
 
 .tab-from {

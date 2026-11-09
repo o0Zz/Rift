@@ -4,9 +4,9 @@
 import { createSignal } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import type { Tab } from "../tabs/Tab";
-import type { Shell } from "../tabs/Shell";
+import { field, type Shell } from "../tabs/Shell";
 import { displayTitle, type Agent } from "../tabs/layout";
-import { addEntry, agentList, canReceive, messageArgs, nextFor, promptFor, startArgs, startRefusal, waitingFor, type Entry } from "./bus";
+import { addEntry, agentList, canReceive, messageArgs, nextFor, promptFor, startArgs, startRefusal, tally, type Entry } from "./bus";
 
 /** A tool call from an agent, as Rust forwards it. */
 export type McpCall = { id: number; tab: number; tool: string; args: unknown };
@@ -31,6 +31,9 @@ export function createMessaging(d: {
 }) {
   const [entries, setEntries] = createSignal<Entry[]>([]);
   let nextId = 0;
+  /** When the user last left each tab: its badge counts the messages since. */
+  const leftAt = new Map<Tab, ReturnType<typeof field<number>>>();
+  const leftOf = (tab: Tab) => leftAt.get(tab) ?? leftAt.set(tab, field(0)).get(tab)!;
   /** Agents each tab started (MAX_STARTS). */
   const started = new Map<Tab, number>();
 
@@ -125,7 +128,10 @@ export function createMessaging(d: {
     entries,
     clear: () => setEntries(entries().filter((e) => e.state === "queued")),
     /** Messages waiting for one of the tab's shells. */
-    waiting: (tab: Tab) => waitingFor(entries(), tab.shells.map((s) => s.view.ptyId)),
+    /** The tab's messages sent and received since the user last left it, and those waiting for it. */
+    counts: (tab: Tab) => tally(entries(), tab.shells.map((s) => s.view.ptyId), leftOf(tab).get()),
+    /** The user left `tab`: its counts start again from zero. */
+    leave: (tab: Tab) => leftOf(tab).set(Date.now()),
     /** An MCP call: answered with `mcp_reply`, an error as a tool error the agent reads. */
     async call(c: McpCall) {
       let ok = true;

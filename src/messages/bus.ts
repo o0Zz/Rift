@@ -36,9 +36,22 @@ export function promptFor(e: Pick<Entry, "kind" | "from" | "fromName" | "text">)
 /** The next message waiting for `to`, oldest first. */
 export const nextFor = (entries: Entry[], to: number) => entries.find((e) => e.to === to && e.state === "queued");
 
-/** How many messages wait for any of `ptys`. */
-export const waitingFor = (entries: Entry[], ptys: number[]) =>
-  entries.filter((e) => e.state === "queued" && ptys.includes(e.to)).length;
+export type Tally = { sent: number; received: number; waiting: number };
+
+/**
+ * A tab's messages (its shells are `ptys`) logged after `since`: sent by it, received by it (a started agent's
+ * task counts), and still waiting for it to be idle (whenever they were sent). A failed one counts nowhere.
+ */
+export function tally(entries: Entry[], ptys: number[], since: number): Tally {
+  const t = { sent: 0, received: 0, waiting: 0 };
+  for (const e of entries) {
+    if (e.state === "queued" && ptys.includes(e.to)) t.waiting++;
+    if (e.state === "failed" || e.time <= since) continue;
+    if (ptys.includes(e.from)) t.sent++;
+    if (ptys.includes(e.to)) t.received++;
+  }
+  return t;
+}
 
 /** Adds `e`; past MAX_ENTRIES the oldest finished entries go (never a queued one). */
 export function addEntry(entries: Entry[], e: Entry): Entry[] {

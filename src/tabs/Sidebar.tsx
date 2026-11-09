@@ -5,6 +5,7 @@ import { Tab } from "./Tab";
 import { TabIcon } from "./icons";
 import { Icon } from "../ui/Icon";
 import { GitStatsView } from "./GitStats";
+import type { Tally } from "../messages/bus";
 import { CONTEXT_WARN } from "./usage";
 
 type SidebarProps = {
@@ -33,8 +34,8 @@ type SidebarProps = {
   onNewWorktree(tab: Tab, agent: Agent): void;
   /** Gives the keyboard back to the active terminal. */
   onFocusTerminal(): void;
-  /** Agent messages waiting for one of the tab's agents to be idle. */
-  waiting(tab: Tab): number;
+  /** Agent messages the tab sent and received since the user last left it, and those waiting for it. */
+  messages(tab: Tab): Tally;
   /** Set to start renaming a tab (F2); a new object each time. */
   rename?: { tab: Tab };
 };
@@ -227,12 +228,27 @@ export function Sidebar(props: SidebarProps) {
             </span>
           </Show>
         </span>
-        <Show when={props.waiting(tab)}>
-          {(n) => (
-            <span class="tab-inbox" title={`${n()} agent message${n() === 1 ? "" : "s"} waiting for this agent to be idle`}>
-              <Icon name="mail" size={12} />
-              {n()}
-            </span>
+        <Show when={props.messages(tab)} keyed>
+          {(m) => (
+            <Show when={m.sent || m.received || m.waiting}>
+              <span
+                class="tab-messages"
+                title={`Agent messages since you last left this tab: ${m.sent} sent, ${m.received} received${m.waiting ? ` (${m.waiting} waiting for this agent to be idle)` : ""}`}
+              >
+                <Show when={m.sent}>
+                  <span class="msg-count">
+                    <Icon name="sent" size={11} />
+                    {m.sent}
+                  </span>
+                </Show>
+                <Show when={m.received || m.waiting}>
+                  <span class="msg-count" classList={{ waiting: m.waiting > 0 }}>
+                    <Icon name="received" size={11} />
+                    {m.received}
+                  </span>
+                </Show>
+              </span>
+            </Show>
           )}
         </Show>
         <Show when={tab.unread}>

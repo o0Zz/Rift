@@ -214,7 +214,12 @@ function App() {
 
   function activate(tab: Tab) {
     const t0 = performance.now();
-    if (active() !== tab) active()?.shown.hide();
+    const left = active();
+    if (left && left !== tab) {
+      left.shown.hide();
+      // Its message counts restart from zero, after the switch (nothing but showing the tab runs on it).
+      setTimeout(() => messaging.leave(left));
+    }
     tab.shown.show();
     setActive(tab);
     tab.unread = false;
@@ -890,7 +895,7 @@ function App() {
           onFilter={setFilter}
           agents={agents()}
           onNewWorktree={(tab, agent) => setWorktreeFrom({ tab, agent })}
-          waiting={messaging.waiting}
+          messages={messaging.counts}
           rename={renameRequest()}
           onFocusTerminal={() => active()?.shown.focus()}
         />

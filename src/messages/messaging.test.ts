@@ -83,7 +83,8 @@ describe("agent messaging", () => {
     const r = await call(m, 1, "send_message", { to: 2, message: "Run the tests" });
     expect(r.ok).toBe(true);
     expect(r.text).toMatch(/when its turn ends/);
-    expect(m.waiting(b.tab)).toBe(1);
+    expect(m.counts(b.tab)).toEqual({ sent: 0, received: 1, waiting: 1 });
+    expect(m.counts(a.tab)).toEqual({ sent: 1, received: 0, waiting: 0 });
 
     vi.advanceTimersByTime(5000);
     expect(b.typed).toEqual([]); // still working
@@ -94,8 +95,16 @@ describe("agent messaging", () => {
     expect(b.typed).toHaveLength(1);
     expect(b.typed[0]).toMatch(/^── Message from Butler \(agent 1\) via Rift ──\nRun the tests\n/);
     expect(b.tab.main.status).toBe("working");
-    expect(m.waiting(b.tab)).toBe(0);
+    expect(m.counts(b.tab)).toEqual({ sent: 0, received: 1, waiting: 0 });
     expect(m.entries()[0]).toMatchObject({ fromName: "Butler", toName: "Rift", state: "delivered" });
+
+    // Leaving a tab clears its counts; the next message counts again.
+    m.leave(b.tab);
+    expect(m.counts(b.tab)).toEqual({ sent: 0, received: 0, waiting: 0 });
+    expect(m.counts(a.tab).sent).toBe(1); // not left: still counted
+    vi.advanceTimersByTime(10);
+    await call(m, 1, "send_message", { to: 2, message: "And lint?" });
+    expect(m.counts(b.tab)).toMatchObject({ received: 1 });
   });
 
   it("refuses when off, to itself, or to a tab without an agent", async () => {
