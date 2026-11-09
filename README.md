@@ -35,7 +35,11 @@ freezing the window) and fails when a change goes over budget.
 ## Features
 
 ### Made for coding agents
-- **Status on every tab**: the agent's icon with a badge: working, done, or waiting for your permission.
+- **Status on every tab**: the agent's icon with a badge: working, done, waiting for your permission, or
+  interrupted (`Esc` / `Ctrl+C`).
+- **Agents talk to each other**: turn on Rift's MCP server in Settings → Agents, and your agents can list the
+  others, send one a message (typed as its next prompt once it is idle, never mid-turn) or start a new agent in a
+  background tab. Every message shows in the Messages panel (`Ctrl+Shift+M`) and as counts on the tabs.
 - **Usage at a glance** (Claude Code): each Claude tab shows how full its context window is, and the top bar your 5-hour and
   weekly plan usage (Pro/Max), with reset times on hover.
 - **Notifications** when a session finishes or needs you while you are elsewhere. Click one to jump to its tab;
@@ -53,7 +57,8 @@ freezing the window) and fails when a change goes over budget.
   and screenshot paste are Claude Code features.
 
 ### Tabs that stay out of your way
-- **Vertical tabs** with **named groups**: color them, collapse them, drag tabs between them.
+- **Vertical tabs** with **named groups**: color them, tint their background, collapse them, drag tabs between
+  and around them.
 - The tab shows what matters: the agent's conversation title, the **git branch** with its changes
   (`+12 −3`, commits ahead/behind), the folder.
 - New tabs open **in the current tab's folder**, in its group.
@@ -64,15 +69,16 @@ freezing the window) and fails when a change goes over budget.
 
 ### Everything around the terminal
 - **Files panel** with file-type icons, opened only when you want it. Delete a file or folder with the Delete key
-  or its right-click menu: it goes to the Recycle Bin / Trash.
+  or its right-click menu: it goes to the Recycle Bin / Trash. Right-click a folder to open it in your file manager.
 - **Open files right in the tab**: a click shows the file above your terminal, as a sub-tab. Edit code with syntax
   highlighting, save with `Ctrl+S`. Markdown opens in a reader made for reading: large text, clear headings,
   striped tables. One document at a time, or a new sub-tab per file (Settings).
-- **Git panel**, one click away on the top right: changed files, colored diff, commit or discard exactly the files you check
-  (or commit and push), pull, push, switch or create a branch, and a history: click a commit to see its changes,
+- **Git panel**, one click away on the top right: changed files with their `+added −deleted` lines, colored diff,
+  commit or discard exactly the files you check (or commit and push), pull (it shows how many commits are waiting),
+  push, switch or create a branch, and a history with branches and tags: click a commit to see its changes,
   Shift+click another one to see the changes of the whole range. Drag the lists' bottom edge to resize them.
 - **Prompts panel**: write your next prompts ahead of time, one list per repo. Click one to edit it (Enter saves,
-  Shift+Enter for a new line); its ✓ Apply button, or dragging it onto the terminal, pastes it there (you press Enter) and it leaves the list.
+  Shift+Enter for a new line); its ✓ Apply button, or dragging it onto the terminal, pastes it there (you press Enter) and it leaves the list. Drag prompts up or down to reorder them.
 - **Terminals panel**: extra shells for the current tab (a dev server, logs), as many as you want. `+` in the top bar
   opens one in the tab's folder; other tabs show a \"Start a terminal here\" button in the same panel.
 - Arrange the panels and the terminal like in VS Code, the same for every tab: drag a panel by its header or tab, and
@@ -80,7 +86,8 @@ freezing the window) and fails when a change goes over budget.
   or on the window's edge for a full side. Drag the lines between them to resize; Alt+arrows move the focus.
 - **Settings**: dark, light or system theme, terminal font, tab size, and every shortcut can be rebound.
 - **Open in Rift** from the Windows File Explorer right-click menu.
-- **Auto-update** from GitHub Releases: downloads in the background, installs when you close Rift.
+- **Auto-update** from GitHub Releases: downloads in the background, installs when you close Rift (or check now
+  from Settings).
 - **Your shells**: PowerShell, Command Prompt, Git Bash or WSL on Windows; your `$SHELL` and the others
   installed on macOS and Linux. Pick the default in Settings, or right-click `+` for a one-off. Your config
   stays untouched.
@@ -119,6 +126,7 @@ terminal.
 | Files panel | `Ctrl+Shift+E` | `Cmd+Shift+E` |
 | Git panel | `Ctrl+Shift+G` | `Cmd+Shift+G` |
 | Prompts panel | `Ctrl+Shift+O` | `Cmd+Shift+O` |
+| Agent messages panel | `Ctrl+Shift+M` | `Cmd+Shift+M` |
 | New terminal (in the current terminal's folder) | `Ctrl+Shift+K` | `Cmd+Shift+K` |
 | Focus the pane on that side | `Alt+arrows` | `Ctrl+Alt+arrows` |
 | Next tab that needs you | `Ctrl+Shift+U` | `Cmd+Shift+U` |
