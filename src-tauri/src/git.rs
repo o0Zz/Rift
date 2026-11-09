@@ -555,9 +555,14 @@ pub struct Commit {
     pub hash: String,
     pub short: String,
     pub author: String,
+    pub email: String,
     /// Relative, e.g. "3 hours ago".
     pub date: String,
+    /// Exact, e.g. "2026-11-09 14:03".
+    pub when: String,
     pub subject: String,
+    /// The message after the subject line (empty when there is none).
+    pub body: String,
     /// Branches and tags pointing at this commit.
     pub refs: Vec<Ref>,
 }
@@ -611,17 +616,22 @@ fn parse_refs(text: &str) -> Vec<Ref> {
         .collect()
 }
 
-/// The last `max` commits of HEAD; empty for a repository without commits.
-pub fn log(root: &Path, max: usize) -> Result<Vec<Commit>> {
-    let out = git(
-        root,
-        &[
-            "log",
-            &format!("-n{max}"),
-            "--decorate=full",
-            "--format=%H%x1f%h%x1f%an%x1f%ar%x1f%s%x1f%D%x1e",
-        ],
-    )?;
+/// The last `max` commits of HEAD, or only those that changed `file` (renames followed);
+/// empty for a repository without commits.
+pub fn log(root: &Path, max: usize, file: Option<&str>) -> Result<Vec<Commit>> {
+    let max = format!("-n{max}");
+    let mut args = vec![
+        "--literal-pathspecs",
+        "log",
+        &max,
+        "--decorate=full",
+        "--date=format:%Y-%m-%d %H:%M",
+        "--format=%H%x1f%h%x1f%an%x1f%ae%x1f%ar%x1f%ad%x1f%s%x1f%D%x1f%b%x1e",
+    ];
+    if let Some(file) = file {
+        args.extend(["--follow", "--", file]);
+    }
+    let out = git(root, &args)?;
     if !out.status.success() {
         let has_head = git(root, &["rev-parse", "--verify", "--quiet", "HEAD"])?;
         return if has_head.status.success() {
@@ -634,13 +644,16 @@ pub fn log(root: &Path, max: usize) -> Result<Vec<Commit>> {
         .split('\x1e')
         .filter_map(|record| {
             let f: Vec<_> = record.trim_start_matches('\n').split('\x1f').collect();
-            (f.len() == 6).then(|| Commit {
+            (f.len() == 9).then(|| Commit {
                 hash: f[0].into(),
                 short: f[1].into(),
                 author: f[2].into(),
-                date: f[3].into(),
-                subject: f[4].into(),
-                refs: parse_refs(f[5]),
+                email: f[3].into(),
+                date: f[4].into(),
+                when: f[5].into(),
+                subject: f[6].into(),
+                refs: parse_refs(f[7]),
+                body: f[8].trim().into(),
             })
         })
         .collect())
@@ -1244,7 +1257,7 @@ three
         assert_eq!(stats(r).unwrap().behind, 1);
 
         pull(r).unwrap();
-        assert_eq!(log(r, 1).unwrap()[0].subject, "third");
+        assert_eq!(log(r, 1, None).unwrap()[0].subject, "third");
         assert_eq!(stats(r).unwrap().behind, 0);
     }
 
@@ -1264,17 +1277,50 @@ three
     }
 
     #[test]
+    fn log_gives_author_full_message_and_one_file_history() {
+        let dir = repo();
+        let r = dir.path();
+        std::fs::write(r.join("kept.txt"), "changed\n").unwrap();
+        let message = "Edit kept\n\nWhy it changed.\nSecond line.";
+        run(r, &["commit", "-q", "-am", message]);
+        run(r, &["mv", "kept.txt", "renamed file.txt"]);
+        run(r, &["commit", "-q", "-m", "Rename"]);
+        std::fs::write(r.join("gone.txt"), "y\n").unwrap();
+        run(r, &["commit", "-q", "-am", "Other file"]);
+
+        let all = log(r, 10, None).unwrap();
+        assert_eq!(all.len(), 4);
+        let edit = &all[2];
+        assert_eq!((edit.author.as_str(), edit.email.as_str()), ("t", "t@t"));
+        assert_eq!(edit.body, "Why it changed.\nSecond line.");
+        assert_eq!(all[0].body, "");
+        assert_eq!(edit.when.len(), "2026-11-09 14:03".len());
+
+        // Only the commits of that file, through its rename; a path with a space is taken literally.
+        let subjects = |file| -> Vec<String> {
+            let commits = log(r, 10, Some(file)).unwrap();
+            commits.into_iter().map(|c| c.subject).collect()
+        };
+        assert_eq!(
+            subjects("renamed file.txt"),
+            ["Rename", "Edit kept", "init"]
+        );
+        assert_eq!(subjects("gone.txt"), ["Other file", "init"]);
+        assert!(subjects("*.txt").is_empty(), "no glob");
+    }
+
+    #[test]
     fn log_lists_commits_newest_first() {
         let dir = repo();
         let r = dir.path();
         std::fs::write(r.join("kept.txt"), "changed\n").unwrap();
         run(r, &["commit", "-q", "-am", "Second | with a pipe"]);
-        let commits = log(r, 10).unwrap();
+        let commits = log(r, 10, None).unwrap();
         let subjects: Vec<_> = commits.iter().map(|c| c.subject.as_str()).collect();
         assert_eq!(subjects, ["Second | with a pipe", "init"]);
         assert_eq!(commits[0].hash.len(), 40);
         assert!(commits[0].hash.starts_with(&commits[0].short));
-        assert_eq!(log(r, 1).unwrap().len(), 1);
+        assert_eq!(log(r, 1, None).unwrap().len(), 1);
 
         run(r, &["tag", "v1.0.0", "HEAD~1"]);
         run(r, &["branch", "feature"]);
@@ -1291,7 +1337,7 @@ three
             name: name.into(),
             kind,
         };
-        let commits = log(r, 10).unwrap();
+        let commits = log(r, 10, None).unwrap();
         assert_eq!(
             commits[0].refs,
             [at("main", RefKind::Head), at("feature", RefKind::Branch)]
@@ -1305,7 +1351,7 @@ three
         );
         run(r, &["checkout", "-q", "--detach", "HEAD~1"]);
         assert_eq!(
-            log(r, 1).unwrap()[0].refs[0],
+            log(r, 1, None).unwrap()[0].refs[0],
             Ref {
                 name: "HEAD".into(),
                 kind: RefKind::Head
@@ -1314,7 +1360,7 @@ three
 
         let empty = tempfile::tempdir().unwrap();
         run(empty.path(), &["init", "-q"]);
-        assert!(log(empty.path(), 10).unwrap().is_empty());
+        assert!(log(empty.path(), 10, None).unwrap().is_empty());
     }
 
     #[test]
@@ -1327,7 +1373,7 @@ three
         std::fs::write(r.join("new.txt"), "new\n").unwrap();
         run(r, &["add", "."]);
         run(r, &["commit", "-q", "-m", "move and add"]);
-        let commits = log(r, 10).unwrap();
+        let commits = log(r, 10, None).unwrap();
         let (last, edit, first) = (&commits[0].hash, &commits[1].hash, &commits[2].hash);
         let summary = |changes: Vec<Change>| -> Vec<(String, String, Option<String>)> {
             changes

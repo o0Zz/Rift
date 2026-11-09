@@ -1,6 +1,7 @@
 import { createEffect, createMemo, createSignal, For, on, Show } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import {
+  changeOf,
   commitFiles as files,
   commitRange,
   diffLineClass,
@@ -19,7 +20,18 @@ import { PromptDialog } from "../ui/PromptDialog";
 import { Resizer } from "../ui/Resizer";
 
 type Ref = { name: string; kind: "head" | "branch" | "remote" | "tag" };
-type Commit = { hash: string; short: string; author: string; date: string; subject: string; refs: Ref[] };
+type Commit = {
+  hash: string;
+  short: string;
+  author: string;
+  email: string;
+  /** Relative ("3 hours ago"); `when` is the exact date. */
+  date: string;
+  when: string;
+  subject: string;
+  body: string;
+  refs: Ref[];
+};
 type Branch = { name: string; current: boolean };
 type Busy = "commit" | "generate" | "push" | "pull" | "branch" | "discard";
 
@@ -28,7 +40,8 @@ const fetched = new Map<string, number>();
 
 /**
  * Branch (switch / create), pull and push, changed files with their diff and commit of the checked files;
- * History: the last commits; a click shows one commit's changes, Shift+click those of a range of commits.
+ * History: the last commits; a click shows one commit's author, message and changes, Shift+click those of a
+ * range of commits. Right-click a file: its own history (renames followed) until the filter is cleared.
  * Not live: loads when shown, when the shown repo changes, after an action, on ⟳, or when `refresh` changes
  * (an agent in its repo finished, or a command did in a terminal there). Never on a timer or a watcher.
  * Showing a repo, ⟳ and the branch menu also fetch in the background (at most every 5 min per repo, ⟳ always),
@@ -65,6 +78,8 @@ export function GitPanel(props: {
   const [picks, setPicks] = createSignal<string[]>([]);
   const [commitChanges, setCommitChanges] = createSignal<Change[] | string>();
   const [naming, setNaming] = createSignal(false);
+  /** History of this file only (path from the repo root); undefined = the whole repo. */
+  const [historyFile, setHistoryFile] = createSignal<string>();
   const menu = createMenu();
   let request = 0; // drops answers for a repo we already left
   let logRequest = 0;
@@ -78,6 +93,12 @@ export function GitPanel(props: {
   });
   const range = () => commitRange(order(), picks());
   const short = (hash?: string) => hash?.slice(0, 7);
+  /** The commit whose details show: one picked, not a range. */
+  const picked1 = () => {
+    const r = range();
+    const log = commits();
+    return r && !r.from && Array.isArray(log) ? log.find((c) => c.hash === r.to) : undefined;
+  };
   const clearDiff = () => {
     setSelected(undefined);
     setDiff(undefined);
@@ -108,8 +129,16 @@ export function GitPanel(props: {
     setCommits(undefined);
     setPicks([]);
     setCommitChanges(undefined);
-    const result = await invoke<Commit[]>("git_log", { root }).catch((e) => String(e));
+    const result = await invoke<Commit[]>("git_log", { root, file: historyFile() }).catch((e) => String(e));
     if (id === logRequest) setCommits(result);
+  }
+
+  /** History of one file, or of the whole repo again (`undefined`). */
+  function historyOf(file?: string) {
+    setHistoryFile(file);
+    setView("history");
+    clearDiff();
+    if (props.root) loadLog(props.root);
   }
 
   /** `keep`: a reload in place (see `load`). */
@@ -156,7 +185,12 @@ export function GitPanel(props: {
     const result = await invoke<Change[]>("git_commit_files", { root: props.root, from: r.from, to: r.to }).catch(
       (e) => String(e),
     );
-    if (id === logRequest) setCommitChanges(result);
+    if (id !== logRequest) return;
+    setCommitChanges(result);
+    // In a file's history, its diff in that commit is what one came for.
+    const file = historyFile();
+    const own = file && Array.isArray(result) ? changeOf(result, file) : undefined;
+    if (own) show(own);
   }
 
   function setMode(next: "changes" | "history") {
@@ -226,8 +260,12 @@ export function GitPanel(props: {
     headMoved();
   }
 
-  function fileMenu(e: MouseEvent, change: Change) {
-    menu.open(e, [{ label: "Discard changes…", run: () => discard([change]) }]);
+  /** `pending`: a change not committed yet, which can also be discarded. */
+  function fileMenu(e: MouseEvent, change: Change, pending?: boolean) {
+    menu.open(e, [
+      { label: "Show history of this file", run: () => historyOf(change.path) },
+      ...(pending ? [{ label: "Discard changes…", run: () => discard([change]) }] : []),
+    ]);
   }
 
   async function changeBranch(command: "git_switch" | "git_create_branch", branch: string) {
@@ -263,6 +301,7 @@ export function GitPanel(props: {
       () => props.root,
       (root) => {
         setNote(undefined);
+        setHistoryFile(undefined); // a path of the previous repo
         reload();
         if (root) fetchRemote(root);
       },
@@ -275,8 +314,7 @@ export function GitPanel(props: {
       class="git-file"
       classList={{ active: selected()?.path === p.change.path }}
       title={p.change.path}
-      // Only pending changes can be discarded, not those of a past commit.
-      onContextMenu={(e) => p.check && fileMenu(e, p.change)}
+      onContextMenu={(e) => fileMenu(e, p.change, p.check)}
     >
       <Show when={p.check}>
         <input type="checkbox" checked={checked().has(p.change.path)} onChange={() => toggle(p.change.path)} />
@@ -390,6 +428,18 @@ export function GitPanel(props: {
             </>
           }
         >
+          <Show when={historyFile()}>
+            {(file) => (
+              <div class="git-file all git-filter" title={file()}>
+                <span>
+                  History of <bdo dir="ltr">{file()}</bdo>
+                </span>
+                <button class="icon-btn" title="Back to the whole history" onClick={() => historyOf(undefined)}>
+                  <Icon name="close" size={12} />
+                </button>
+              </div>
+            )}
+          </Show>
           <div class="git-files git-log" style={sized(logHeight())}>
             <Loaded value={commits()}>
               {(log) => (
@@ -421,6 +471,19 @@ export function GitPanel(props: {
           <Show when={range()}>
             {(r) => (
               <>
+              <Show when={picked1()}>
+                {(c) => (
+                  <div class="git-commit-info">
+                    <div class="git-commit-meta">
+                      <b>{c().author}</b> &lt;{c().email}&gt; · {c().when} ({c().date})
+                    </div>
+                    <div class="git-commit-msg">
+                      <b>{c().subject}</b>
+                      <Show when={c().body}>{"\n\n" + c().body}</Show>
+                    </div>
+                  </div>
+                )}
+              </Show>
               <div class="git-files" style={sized(filesHeight())}>
                 <div class="git-file all">
                   {r().from

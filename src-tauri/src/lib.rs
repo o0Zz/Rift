@@ -466,10 +466,11 @@ async fn git_pull(root: String) -> Result<String, String> {
     git::pull(root.as_ref()).map_err(err)
 }
 
-/// History panel: the last 200 commits (enough to browse; no paging until someone needs it).
+/// History panel: the last 200 commits (enough to browse; no paging until someone needs it),
+/// or those of one file.
 #[tauri::command]
-async fn git_log(root: String) -> Result<Vec<git::Commit>, String> {
-    git::log(root.as_ref(), 200).map_err(err)
+async fn git_log(root: String, file: Option<String>) -> Result<Vec<git::Commit>, String> {
+    git::log(root.as_ref(), 200, file.as_deref()).map_err(err)
 }
 
 #[tauri::command]

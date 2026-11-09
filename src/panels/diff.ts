@@ -15,6 +15,11 @@ export function keepChecked(checked: Set<string>, before: Change[], after: Chang
   return new Set(after.map((c) => c.path).filter((p) => checked.has(p) || !known.has(p)));
 }
 
+/** A file's own change in a commit of its history, under its name then (`orig` before a rename). */
+export function changeOf(changes: Change[], file: string): Change | undefined {
+  return changes.find((c) => c.path === file) ?? changes.find((c) => c.orig === file);
+}
+
 /** History: a click picks one commit; Shift+click picks the range from that one (the anchor) to here. */
 export function pickCommits(picks: string[], hash: string, shift: boolean): string[] {
   const anchor = picks[0];

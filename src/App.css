@@ -1172,6 +1172,43 @@ body,
   border-bottom: 1px solid var(--line-soft);
 }
 
+.git-filter {
+  flex: none;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.git-filter span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* The picked commit: author, date and its whole message (scrolls when long). */
+.git-commit-info {
+  flex: none;
+  max-height: 30%;
+  overflow: auto;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.git-commit-meta {
+  color: var(--fg-muted);
+  font-size: 0.923em;
+}
+
+.git-commit-meta b {
+  color: var(--fg-strong);
+}
+
+.git-commit-msg {
+  margin-top: 4px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .git-commit {
   display: flex;
   align-items: baseline;

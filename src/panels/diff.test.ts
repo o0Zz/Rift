@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { commitFiles, commitRange, diffLineClass, discardQuestion, FETCH_EVERY, fetchDue, inRange, keepChecked, pickCommits } from "./diff";
+import { changeOf, commitFiles, commitRange, diffLineClass, discardQuestion, FETCH_EVERY, fetchDue, inRange, keepChecked, pickCommits } from "./diff";
 
 it("fetches a repo at most once per window unless forced", () => {
   const last = new Map<string, number>();
@@ -15,6 +15,17 @@ it("keeps the user's unchecks across a reload and checks new files", () => {
   const before = [{ path: "a", status: "M" }, { path: "b", status: "M" }, { path: "gone", status: "M" }];
   const after = [{ path: "a", status: "M" }, { path: "b", status: "M" }, { path: "new", status: "?" }];
   expect([...keepChecked(new Set(["a", "gone"]), before, after)]).toEqual(["a", "new"]);
+});
+
+it("finds a file's change in a commit, also where it was renamed", () => {
+  const changes = [
+    { path: "a.ts", status: "M" },
+    { path: "new.ts", status: "R", orig: "old.ts" },
+  ];
+  expect(changeOf(changes, "a.ts")?.status).toBe("M");
+  expect(changeOf(changes, "new.ts")?.status).toBe("R");
+  expect(changeOf(changes, "old.ts")?.path).toBe("new.ts");
+  expect(changeOf(changes, "other.ts")).toBeUndefined();
 });
 
 it("classifies unified diff lines", () => {
