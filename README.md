@@ -13,7 +13,7 @@ Vertical tabs that switch instantly, the status of every agent on its tab, and e
 
 [**Download**](https://github.com/o0Zz/Rift/releases/latest) · [Features](#features) · [Shortcuts](#keyboard-shortcuts) · [Build from source](#build-from-source)
 
-<img src="docs/screenshots/rift-dark.png" alt="Rift: grouped vertical tabs with Claude Code status, file tree, terminal and git diff" />
+<img src="docs/screenshots/rift-dark.png" alt="Rift: grouped vertical tabs with Claude Code status and context, file tree, terminal and git diff" />
 
 </div>
 
@@ -93,7 +93,7 @@ freezing the window) and fails when a change goes over budget.
   stays untouched.
 
 <div align="center">
-<img src="docs/screenshots/rift-light.png" alt="Rift in light theme" />
+<img src="docs/screenshots/rift-light.png" alt="Rift in light theme: README open in the Markdown reader, prompts panel" />
 </div>
 
 ## Install
