@@ -1,7 +1,7 @@
 import { createEffect, createMemo, createSignal, For, Show, onMount, type JSX } from "solid-js";
-import { displayTitle, matchesFilter, ownRowColor, visualOrder, type Agent, type Drop, type Group, type TabFilter } from "./layout";
+import { displayTitle, matchesFilter, ownRowColor, sidebarItems, type Agent, type Group, type Spot, type TabFilter } from "./layout";
 import { createMenu } from "../ui/Menu";
-import type { Tab } from "./Tab";
+import { Tab } from "./Tab";
 import { TabIcon } from "./icons";
 import { Icon } from "../ui/Icon";
 import { GitStatsView } from "./GitStats";
@@ -16,8 +16,8 @@ type SidebarProps = {
   onNewTab(shell?: string): void;
   /** Installed shells, for "New tab with…" (right-click on +). */
   shells: { id: string; name: string }[];
-  onMoveTab(tab: Tab, drop: Drop<Tab>): void;
-  onMoveGroup(id: string, before?: string): void;
+  onMoveTab(tab: Tab, spot: Spot<Tab>): void;
+  onMoveGroup(id: string, spot: Spot<Tab>): void;
   onNewGroup(tab: Tab): void;
   onUpdateGroup(id: string, patch: Partial<Group>): void;
   onDeleteGroup(id: string): void;
@@ -38,23 +38,34 @@ type SidebarProps = {
 };
 
 type Dragged = { tab: Tab } | { group: string };
+/** Where a drop would land, and the line that shows it: above/below a row or header, or below a whole group. */
+type Hint = { spot: Spot<Tab>; at?: Tab | Group; edge?: "top" | "bottom" | "block" };
 
 export function Sidebar(props: SidebarProps) {
   // After a keyboard choice in a menu, the keyboard goes back to the terminal.
   const menu = createMenu(() => requestAnimationFrame(() => props.onFocusTerminal()));
   const [editing, setEditing] = createSignal<Tab | Group>();
   const [dragged, setDragged] = createSignal<Dragged>();
-  const [dropTarget, setDropTarget] = createSignal<unknown>();
+  const [hint, setHint] = createSignal<Hint>();
   createEffect(() => {
     const r = props.rename;
     if (r) setEditing(r.tab);
   });
 
   const groupOf = (tab: Tab) => props.groups.find((g) => g.id === tab.group);
-  // Read once per group and once more for ungrouped tabs: ordered once per change.
-  const shown = createMemo(() => visualOrder(props.tabs, props.groups).filter((t) => matchesFilter(t, props.filter)));
-  const inGroup = (g: Group) => shown().filter((t) => t.group === g.id);
-  const ungrouped = () => shown().filter((t) => !groupOf(t));
+  // Groups and ungrouped tabs in sidebar order, ordered once per change. While filtering, empty groups hide.
+  const items = createMemo(() =>
+    sidebarItems(
+      props.tabs.filter((t) => matchesFilter(t, props.filter)),
+      props.groups,
+    ).filter((i) => "tab" in i || props.filter === "all" || i.tabs.length > 0),
+  );
+  // Rows keyed by their tab or group object: a move never rebuilds them.
+  const keys = createMemo(() => items().map((i) => ("tab" in i ? i.tab : i.group)));
+  const inGroup = (g: Group): Tab[] => {
+    const item = items().find((i) => "group" in i && i.group === g);
+    return item && "tabs" in item ? item.tabs : [];
+  };
   const count = (f: TabFilter) => props.tabs.filter((t) => matchesFilter(t, f)).length;
   const filters: [TabFilter, string][] = [
     ["all", "All"],
@@ -76,45 +87,58 @@ export function Sidebar(props: SidebarProps) {
       { label: "New group from this tab", run: () => props.onNewGroup(tab) },
       ...props.groups
         .filter((g) => g.id !== tab.group)
-        .map((g) => ({ label: `Move to “${g.name}”`, run: () => props.onMoveTab(tab, { group: g.id }) })),
-      ...(tab.group ? [{ label: "Remove from group", run: () => props.onMoveTab(tab, { group: undefined }) }] : []),
+        .map((g) => ({ label: `Move to “${g.name}”`, run: () => props.onMoveTab(tab, { end: g.id }) })),
+      ...(tab.group ? [{ label: "Remove from group", run: () => props.onMoveTab(tab, { afterGroup: tab.group! }) }] : []),
       "separator",
       { label: "Close tab", run: () => props.onClose(tab) },
     ]);
   }
 
   function groupMenu(e: MouseEvent, g: Group) {
+    const all = props.tabs.filter((t) => t.group === g.id).length;
     menu.open(e, [
       { label: "Rename group", run: () => setEditing(g) },
-      { colors: (c) => props.onUpdateGroup(g.id, { color: c }) },
+      { heading: "Color", colors: (c) => props.onUpdateGroup(g.id, { color: c }) },
+      { heading: "Background", colors: (c) => props.onUpdateGroup(g.id, { background: c }) },
       "separator",
       { label: "Delete group (keep tabs)", run: () => props.onDeleteGroup(g.id) },
-      { label: `Close group and its ${inGroup(g).length} tab${inGroup(g).length === 1 ? "" : "s"}`, run: () => props.onCloseGroup(g.id) },
+      { label: `Close group and its ${all} tab${all === 1 ? "" : "s"}`, run: () => props.onCloseGroup(g.id) },
     ]);
   }
 
-  // Drag and drop: tab → before a tab, into a group (header) or ungrouped (empty area); group → before a group.
+  // Drag and drop. The upper half of a row drops before it, the lower half after it; a tab joins the group of
+  // the tab it lands next to. On a group header: upper half = just above the group (outside it), lower half =
+  // a tab's first place in the group, or a group's place after this one. A group never lands inside another.
   function dragStart(e: DragEvent, what: Dragged) {
     e.stopPropagation();
     e.dataTransfer!.effectAllowed = "move";
     e.dataTransfer!.setData("text/plain", "rift-tab");
     setDragged(what);
   }
-  function dragOver(e: DragEvent, target: unknown) {
-    if (!dragged()) return;
-    e.preventDefault();
+  const upper = (e: DragEvent) => {
+    const r = (e.currentTarget as Element).getBoundingClientRect();
+    return e.clientY < r.top + r.height / 2;
+  };
+  function dragOver(e: DragEvent, where: (d: Dragged) => Hint | undefined) {
+    const d = dragged();
+    if (!d) return;
     e.stopPropagation();
-    setDropTarget(target);
+    const h = where(d);
+    setHint(h);
+    if (h) e.preventDefault(); // no hint: no drop here
   }
-  function drop(e: DragEvent, apply: (d: Dragged) => void) {
+  function drop(e: DragEvent) {
     e.preventDefault();
     e.stopPropagation();
     const d = dragged();
-    setDragged(undefined);
-    setDropTarget(undefined);
-    if (d) apply(d);
+    const h = hint();
+    dragEnd();
+    if (!d || !h) return;
+    if ("tab" in d) props.onMoveTab(d.tab, h.spot);
+    else props.onMoveGroup(d.group, h.spot);
   }
-  const dragEnd = () => (setDragged(undefined), setDropTarget(undefined));
+  const dragEnd = () => (setDragged(undefined), setHint(undefined));
+  const lineAt = (at: Tab | Group, edge: Hint["edge"]) => hint()?.at === at && hint()?.edge === edge;
 
   function Rename(p: { value: string; commit(v: string | undefined): void }): JSX.Element {
     let input!: HTMLInputElement;
@@ -140,17 +164,28 @@ export function Sidebar(props: SidebarProps) {
   function TabRow(p: { tab: Tab }) {
     const tab = p.tab;
     const title = () => displayTitle(tab);
-    const rowColor = () => ownRowColor(tab.color, groupOf(tab)?.color);
+    const rowColor = () => ownRowColor(tab.color, groupOf(tab)?.background);
     return (
       <div
         class="tab-row"
-        classList={{ active: props.active === tab, colored: !!rowColor(), "drop-before": dropTarget() === tab }}
+        classList={{
+          active: props.active === tab,
+          colored: !!rowColor(),
+          "drop-before": lineAt(tab, "top"),
+          "drop-after": lineAt(tab, "bottom"),
+        }}
         style={rowColor() ? { "--tab-color": rowColor() } : {}}
         title={tab.cwd ?? tab.title}
         draggable={editing() !== tab}
         onDragStart={(e) => dragStart(e, { tab })}
-        onDragOver={(e) => "tab" in (dragged() ?? {}) && dragOver(e, tab)}
-        onDrop={(e) => drop(e, (d) => "tab" in d && props.onMoveTab(d.tab, { before: tab }))}
+        onDragOver={(e) =>
+          dragOver(e, (d) => {
+            if ("group" in d && groupOf(tab)) return undefined;
+            const top = upper(e);
+            return { spot: top ? { before: tab } : { after: tab }, at: tab, edge: top ? "top" : "bottom" };
+          })
+        }
+        onDrop={drop}
         onDragEnd={dragEnd}
         onMouseDown={(e) => (e.button === 1 ? props.onClose(tab) : e.button === 0 && props.onActivate(tab))}
         onDblClick={() => setEditing(tab)}
@@ -191,6 +226,52 @@ export function Sidebar(props: SidebarProps) {
         <span class="tab-close" onMouseDown={(e) => (e.stopPropagation(), props.onClose(tab))}>
           <Icon name="close" size={12} />
         </span>
+      </div>
+    );
+  }
+
+  function GroupBlock(p: { g: Group }) {
+    const g = p.g;
+    return (
+      <div
+        class="group"
+        classList={{ colored: !!g.background, "drop-after": lineAt(g, "block") }}
+        style={g.background ? { "--group-color": g.background } : {}}
+      >
+        <div
+          class="group-head"
+          classList={{ labeled: !!g.color, "drop-before": lineAt(g, "top"), "drop-after": lineAt(g, "bottom") }}
+          style={g.color ? { "--label-color": g.color } : {}}
+          draggable={editing() !== g}
+          onDragStart={(e) => dragStart(e, { group: g.id })}
+          onDragOver={(e) =>
+            dragOver(e, (d) => {
+              if ("group" in d && d.group === g.id) return undefined;
+              if (upper(e)) return { spot: { beforeGroup: g.id }, at: g, edge: "top" };
+              return "tab" in d
+                ? { spot: { start: g.id }, at: g, edge: "bottom" }
+                : { spot: { afterGroup: g.id }, at: g, edge: "block" };
+            })
+          }
+          onDrop={drop}
+          onDragEnd={dragEnd}
+          onClick={() => props.onUpdateGroup(g.id, { collapsed: !g.collapsed })}
+          onDblClick={(e) => (e.stopPropagation(), setEditing(g))}
+          onContextMenu={(e) => groupMenu(e, g)}
+        >
+          <span class="chev">
+            <Icon name={g.collapsed ? "right" : "down"} size={12} />
+          </span>
+          <span class="dot" style={{ background: g.color ?? "#777" }} />
+          <Show when={editing() === g} fallback={<span class="group-name">{g.name}</span>}>
+            <Rename value={g.name} commit={(v) => v && props.onUpdateGroup(g.id, { name: v })} />
+          </Show>
+          <span class="count">{inGroup(g).length}</span>
+        </div>
+        {/* While filtering, matching tabs show even in a collapsed group. */}
+        <Show when={!g.collapsed || props.filter !== "all"}>
+          <For each={inGroup(g)}>{(tab) => <TabRow tab={tab} />}</For>
+        </Show>
       </div>
     );
   }
@@ -256,49 +337,13 @@ export function Sidebar(props: SidebarProps) {
           </For>
         </div>
       </Show>
-      <div
-        class="sidebar-list"
-        onDragOver={(e) => "tab" in (dragged() ?? {}) && dragOver(e, "ungrouped")}
-        onDrop={(e) => drop(e, (d) => "tab" in d && props.onMoveTab(d.tab, { group: undefined }))}
-      >
-        <For each={props.groups.filter((g) => props.filter === "all" || inGroup(g).length > 0)}>
-          {(g) => (
-            <div class="group" classList={{ colored: !!g.color }} style={g.color ? { "--group-color": g.color } : {}}>
-              <div
-                class="group-head"
-                classList={{ "drop-into": dropTarget() === g }}
-                draggable={editing() !== g}
-                onDragStart={(e) => dragStart(e, { group: g.id })}
-                onDragOver={(e) => dragOver(e, g)}
-                onDrop={(e) =>
-                  drop(e, (d) => ("tab" in d ? props.onMoveTab(d.tab, { group: g.id }) : props.onMoveGroup(d.group, g.id)))
-                }
-                onDragEnd={dragEnd}
-                onClick={() => props.onUpdateGroup(g.id, { collapsed: !g.collapsed })}
-                onDblClick={(e) => (e.stopPropagation(), setEditing(g))}
-                onContextMenu={(e) => groupMenu(e, g)}
-              >
-                <span class="chev">
-                  <Icon name={g.collapsed ? "right" : "down"} size={12} />
-                </span>
-                <span class="dot" style={{ background: g.color ?? "#777" }} />
-                <Show when={editing() === g} fallback={<span class="group-name">{g.name}</span>}>
-                  <Rename value={g.name} commit={(v) => v && props.onUpdateGroup(g.id, { name: v })} />
-                </Show>
-                <span class="count">{inGroup(g).length}</span>
-              </div>
-              {/* While filtering, matching tabs show even in a collapsed group. */}
-              <Show when={!g.collapsed || props.filter !== "all"}>
-                <For each={inGroup(g)}>{(tab) => <TabRow tab={tab} />}</For>
-              </Show>
-            </div>
-          )}
-        </For>
-        <For each={ungrouped()}>{(tab) => <TabRow tab={tab} />}</For>
-        <div class="drop-zone" classList={{ active: dropTarget() === "ungrouped" }} />
+      <div class="sidebar-list" onDragOver={(e) => dragOver(e, () => ({ spot: "bottom" }))} onDrop={drop}>
+        <For each={keys()}>{(key) => (key instanceof Tab ? <TabRow tab={key} /> : <GroupBlock g={key} />)}</For>
+        <div class="drop-zone" classList={{ active: hint()?.spot === "bottom" }} />
       </div>
 
       <menu.Menu />
     </aside>
   );
+
 }

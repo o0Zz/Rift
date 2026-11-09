@@ -4,7 +4,7 @@ import { COLORS } from "../tabs/layout";
 import { Icon } from "./Icon";
 
 type Action = { label: string; run(): void };
-export type MenuItem = Action | { colors(color: string | undefined): void } | "separator";
+export type MenuItem = Action | { colors(color: string | undefined): void; heading?: string } | "separator";
 const isAction = (item: MenuItem): item is Action => typeof item === "object" && "label" in item;
 
 /**
@@ -65,6 +65,9 @@ export function createMenu(onClosed?: () => void) {
                     <div class="menu-sep" />
                   ) : "colors" in item ? (
                     <div class="menu-colors">
+                      <Show when={item.heading}>
+                        <span class="menu-colors-heading">{item.heading}</span>
+                      </Show>
                       <For each={COLORS}>
                         {(c) => <span class="swatch" style={{ background: c }} onClick={() => (item.colors(c), close())} />}
                       </For>

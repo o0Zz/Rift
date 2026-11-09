@@ -22,7 +22,6 @@
   --primary: #2f6fb8;
   --on-bg: #2f3a4a;
   --branch: #8fb8e8;
-  --drop-bg: #23314a;
   --chip: #333;
   --input-bg: #111;
   --menu-bg: #252526;
@@ -88,7 +87,6 @@
   --primary: #0969da;
   --on-bg: #dbe8f7;
   --branch: #0b5cad;
-  --drop-bg: #dbe8f7;
   --chip: #e4e7eb;
   --input-bg: #fff;
   --menu-bg: #fff;
@@ -316,8 +314,16 @@ body,
   color: var(--fg-bright);
 }
 
-.group-head.drop-into {
-  background: var(--drop-bg);
+.group-head.labeled {
+  color: color-mix(in srgb, var(--label-color) 75%, var(--mix-text));
+}
+
+/* Drop lines: above or below a row or header, or below a whole group. */
+.group-head.drop-before,
+.group-head.drop-after,
+.tab-row.drop-after,
+.group.drop-after {
+  box-shadow: inset 0 -2px 0 var(--accent);
 }
 
 .group-name {
@@ -347,14 +353,10 @@ body,
   padding-left: 18px;
 }
 
-/* Colors fill the whole tab / group (Warp-style). A tab's own color wins over its group's. */
+/* A tab color fills its row, a group background its whole block (Warp-style); a group background wins. */
 .group.colored {
   margin: 2px 0;
   background: color-mix(in srgb, var(--group-color) 18%, transparent);
-}
-
-.group.colored .group-head {
-  color: color-mix(in srgb, var(--group-color) 55%, var(--mix-text));
 }
 
 .tab-row {
@@ -592,8 +594,14 @@ body,
 
 .menu-colors {
   display: flex;
+  align-items: center;
   gap: 5px;
   padding: 5px 8px;
+}
+
+.menu-colors-heading {
+  width: 72px;
+  color: var(--fg-soft);
 }
 
 .swatch {

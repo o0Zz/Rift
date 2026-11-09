@@ -33,7 +33,7 @@ import {
   statusFromHook,
   visualOrder,
   type Agent,
-  type Drop,
+  type Spot,
   type Group,
   type Status,
   type TabFilter,
@@ -348,8 +348,8 @@ function App() {
     activate(order[neighbour(order.indexOf(cur), order.length, dir)]);
   }
 
-  function move(tab: Tab, drop: Drop<Tab>) {
-    const r = moveTab(tabs(), tab, drop);
+  function move(tab: Tab, spot: Spot<Tab>) {
+    const r = moveTab(tabs(), groups(), tab, spot);
     batch(() => {
       tab.group = r.group;
       setTabs(r.tabs);
@@ -364,7 +364,7 @@ function App() {
     const id = `g${Date.now()}`;
     batch(() => {
       setGroups([...groups(), { id, name: `Group ${groups().length + 1}`, collapsed: false }]);
-      move(tab, { group: id });
+      tab.group = id; // the group stands where the tab is
     });
   }
 
@@ -816,7 +816,7 @@ function App() {
           onNewTab={(shell) => newTab(undefined, shell ? { shell } : {})}
           shells={shells()}
           onMoveTab={move}
-          onMoveGroup={(id, before) => setGroups(moveGroup(groups(), id, before))}
+          onMoveGroup={(id, spot) => setTabs(moveGroup(tabs(), groups(), id, spot))}
           onNewGroup={newGroup}
           onUpdateGroup={updateGroup}
           onDeleteGroup={deleteGroup}

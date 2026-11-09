@@ -10,6 +10,7 @@ import {
   nextNeedingAttention,
   ownRowColor,
   shouldNotify,
+  sidebarItems,
   isInterruptKey,
   statusAfterInterrupt,
   statusFromHook,
@@ -23,42 +24,82 @@ const t = (name: string, group?: string) => ({ name, group });
 const names = (list: { name: string }[]) => list.map((x) => x.name);
 
 describe("visualOrder", () => {
-  it("lists groups in order with their tabs, then ungrouped tabs", () => {
+  it("puts each group where its first tab is, so groups and ungrouped tabs mix", () => {
     const tabs = [t("a"), t("b", "G2"), t("c", "G1"), t("d"), t("e", "G2")];
-    expect(names(visualOrder(tabs, [g("G1"), g("G2")]))).toEqual(["c", "b", "e", "a", "d"]);
+    expect(names(visualOrder(tabs, [g("G1"), g("G2")]))).toEqual(["a", "b", "e", "c", "d"]);
   });
 
   it("treats tabs of a deleted group as ungrouped", () => {
     expect(names(visualOrder([t("a", "gone"), t("b")], []))).toEqual(["a", "b"]);
   });
+
+  it("lists empty groups last", () => {
+    const items = sidebarItems([t("a", "G1")], [g("G2"), g("G1")]);
+    expect(items.map((i) => ("tab" in i ? i.tab.name : i.group.id))).toEqual(["G1", "G2"]);
+  });
 });
 
 describe("moveTab", () => {
-  it("drops before a tab and joins its group", () => {
-    const [a, b, c] = [t("a"), t("b", "G"), t("c", "G")];
-    const r = moveTab([a, b, c], a, { before: c });
-    expect(names(r.tabs)).toEqual(["b", "a", "c"]);
-    expect(r.group).toBe("G");
+  // Sidebar: x, [G: a, b], y
+  const gs = [g("G")];
+  const setup = () => [t("x"), t("a", "G"), t("b", "G"), t("y")];
+
+  it("drops before or after a tab and joins its group", () => {
+    const [x, a, b, y] = setup();
+    expect(moveTab([x, a, b, y], gs, y, { before: b })).toEqual({ tabs: [x, a, y, b], group: "G" });
+    expect(moveTab([x, a, b, y], gs, x, { after: b })).toEqual({ tabs: [a, b, x, y], group: "G" });
   });
 
-  it("drops at the end of a group or ungrouped", () => {
-    const [a, b] = [t("a", "G"), t("b")];
-    expect(moveTab([a, b], a, { group: undefined })).toEqual({ tabs: [b, a], group: undefined });
-    expect(moveTab([a, b], b, { group: "G" })).toEqual({ tabs: [a, b], group: "G" });
+  it("drops after the last tab of a group, still in the group", () => {
+    const [x, a, b, y] = setup();
+    expect(moveTab([x, a, b, y], gs, a, { after: b })).toEqual({ tabs: [x, b, a, y], group: "G" });
+    expect(moveTab([x, a, b, y], gs, y, { end: "G" })).toEqual({ tabs: [x, a, b, y], group: "G" });
   });
 
-  it("dropping a tab on itself changes nothing", () => {
-    const [a, b] = [t("a", "G"), t("b")];
-    expect(moveTab([a, b], a, { before: a })).toEqual({ tabs: [a, b], group: "G" });
+  it("drops a tab between groups, outside both", () => {
+    const tabs = [t("a", "A"), t("b", "B"), t("c", "B")];
+    const r = moveTab(tabs, [g("A"), g("B")], tabs[2], { beforeGroup: "B" });
+    expect(names(r.tabs)).toEqual(["a", "c", "b"]);
+    expect(r.group).toBeUndefined();
+    tabs[2].group = r.group;
+    expect(sidebarItems(r.tabs, [g("A"), g("B")]).map((i) => ("tab" in i ? i.tab.name : i.group.id))).toEqual(["A", "c", "B"]);
+  });
+
+  it("drops first in a group, after a group, or at the bottom", () => {
+    const [x, a, b, y] = setup();
+    expect(moveTab([x, a, b, y], gs, y, { start: "G" })).toEqual({ tabs: [x, y, a, b], group: "G" });
+    expect(moveTab([x, a, b, y], gs, a, { afterGroup: "G" })).toEqual({ tabs: [x, b, a, y], group: undefined });
+    expect(moveTab([x, a, b, y], gs, a, "bottom")).toEqual({ tabs: [x, b, y, a], group: undefined });
+  });
+
+  it("dropping a tab next to itself changes nothing", () => {
+    const [x, a, b, y] = setup();
+    expect(moveTab([x, a, b, y], gs, a, { before: a })).toEqual({ tabs: [x, a, b, y], group: "G" });
+    expect(moveTab([x, a, b, y], gs, a, { after: a })).toEqual({ tabs: [x, a, b, y], group: "G" });
   });
 });
 
 describe("moveGroup", () => {
-  it("moves before another group or to the end", () => {
-    const gs = [g("A"), g("B"), g("C")];
-    expect(moveGroup(gs, "C", "A").map((x) => x.id)).toEqual(["C", "A", "B"]);
-    expect(moveGroup(gs, "A").map((x) => x.id)).toEqual(["B", "C", "A"]);
-    expect(moveGroup(gs, "B", "B")).toBe(gs);
+  // Sidebar: [A: a1, a2], x, [B: b]
+  const gs = [g("A"), g("B")];
+  const setup = () => [t("a1", "A"), t("a2", "A"), t("x"), t("b", "B")];
+
+  it("moves a group with its tabs next to an ungrouped tab", () => {
+    const tabs = setup();
+    expect(names(moveGroup(tabs, gs, "A", { after: tabs[2] }))).toEqual(["x", "a1", "a2", "b"]);
+    expect(names(moveGroup(tabs, gs, "B", { before: tabs[2] }))).toEqual(["a1", "a2", "b", "x"]);
+  });
+
+  it("moves a group before or after another group, or to the bottom", () => {
+    const tabs = setup();
+    expect(names(moveGroup(tabs, gs, "B", { beforeGroup: "A" }))).toEqual(["b", "a1", "a2", "x"]);
+    expect(names(moveGroup(tabs, gs, "A", { afterGroup: "B" }))).toEqual(["x", "b", "a1", "a2"]);
+    expect(names(moveGroup(tabs, gs, "A", "bottom"))).toEqual(["x", "b", "a1", "a2"]);
+  });
+
+  it("leaves an empty group where it is", () => {
+    const tabs = setup();
+    expect(moveGroup(tabs, [...gs, g("E")], "E", { beforeGroup: "A" })).toBe(tabs);
   });
 });
 
@@ -92,12 +133,12 @@ describe("shouldNotify", () => {
 });
 
 describe("ownRowColor", () => {
-  it("lets a colored group override the tab color", () => {
+  it("lets a group background override the tab color", () => {
     expect(ownRowColor("#red", "#blue")).toBeUndefined();
     expect(ownRowColor(undefined, "#blue")).toBeUndefined();
   });
 
-  it("shows the tab color outside a group or in a colorless group", () => {
+  it("shows the tab color outside a group or in a group without background", () => {
     expect(ownRowColor("#red", undefined)).toBe("#red");
     expect(ownRowColor(undefined, undefined)).toBeUndefined();
   });
