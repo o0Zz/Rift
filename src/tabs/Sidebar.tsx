@@ -33,6 +33,8 @@ type SidebarProps = {
   onNewWorktree(tab: Tab, agent: Agent): void;
   /** Gives the keyboard back to the active terminal. */
   onFocusTerminal(): void;
+  /** Agent messages waiting for one of the tab's agents to be idle. */
+  waiting(tab: Tab): number;
   /** Set to start renaming a tab (F2); a new object each time. */
   rename?: { tab: Tab };
 };
@@ -209,6 +211,11 @@ export function Sidebar(props: SidebarProps) {
                 </span>
                 <GitStatsView stats={tab.stats} />
               </Show>
+              <Show when={tab.startedBy}>
+                <span class="tab-from" title={`Started by ${tab.startedBy}`}>
+                  <Icon name="link" size={11} /> {tab.startedBy}
+                </span>
+              </Show>
               <Show when={tab.agent && tab.context !== undefined}>
                 <span class="tab-ctx" classList={{ high: tab.context! >= CONTEXT_WARN }} title="Context window used">
                   ctx {Math.round(tab.context!)}%
@@ -220,6 +227,14 @@ export function Sidebar(props: SidebarProps) {
             </span>
           </Show>
         </span>
+        <Show when={props.waiting(tab)}>
+          {(n) => (
+            <span class="tab-inbox" title={`${n()} agent message${n() === 1 ? "" : "s"} waiting for this agent to be idle`}>
+              <Icon name="mail" size={12} />
+              {n()}
+            </span>
+          )}
+        </Show>
         <Show when={tab.unread}>
           <span class="unread" title="New agent activity" />
         </Show>

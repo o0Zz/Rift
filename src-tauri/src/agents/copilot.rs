@@ -24,6 +24,8 @@ const BLOCKING: &str = "permission_prompt|elicitation_dialog";
 pub struct Copilot {
     /// Usually ~/.copilot/hooks/rift.json (or $COPILOT_HOME/hooks); a temp file in tests.
     pub hooks: PathBuf,
+    /// Usually ~/.copilot/mcp-config.json; a temp file in tests.
+    pub mcp: PathBuf,
 }
 
 /// The whole file: Rift owns it, so it is simply rewritten. Exec form, no shell involved.
@@ -100,6 +102,15 @@ impl AgentHarness for Copilot {
         config::write_json(&self.hooks, &hook_file(exe))
     }
 
+    fn mcp_installed(&self, exe: &Path) -> bool {
+        config::mcp_json_installed(&self.mcp, exe)
+    }
+
+    fn set_mcp(&self, exe: &Path, on: bool) -> Result<()> {
+        let entry = || config::mcp_json(exe, json!({ "type": "local", "tools": ["*"] }));
+        config::set_mcp_json(&self.mcp, on.then(entry))
+    }
+
     fn setup(&self) -> String {
         format!(
             "Writes Rift's hooks to their own file, {}.",
@@ -123,6 +134,7 @@ mod tests {
             .extend(extra.as_object().unwrap().clone());
         Copilot {
             hooks: PathBuf::new(),
+            mcp: PathBuf::new(),
         }
         .parse_hook(&p)
     }
@@ -175,6 +187,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let c = Copilot {
             hooks: dir.path().join("hooks").join("rift.json"),
+            mcp: PathBuf::new(),
         };
         assert!(c.detected());
         assert!(!c.hooks_installed(Path::new(EXE)));
@@ -196,6 +209,7 @@ mod tests {
     fn resume_command_rejects_shell_syntax() {
         let c = Copilot {
             hooks: PathBuf::new(),
+            mcp: PathBuf::new(),
         };
         assert_eq!(
             c.resume_command("043da599-c2d9-41f4-a539-98f8517d82fa")

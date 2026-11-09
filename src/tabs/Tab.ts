@@ -27,6 +27,9 @@ export class Tab {
     current: field(-1),
   };
 
+  /** Name of the agent that started this tab (agent messaging); set once, when it opens. */
+  startedBy?: string;
+
   get shells() { return this.f.shells.get(); }
   set shells(v) { this.f.shells.set(v); }
   /** The shell shown at `place` ("main" or a terminal panel), if this tab has one there. */

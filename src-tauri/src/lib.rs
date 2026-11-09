@@ -3,6 +3,7 @@ mod explorer_menu;
 mod files;
 mod git;
 pub mod hook;
+pub mod mcp;
 mod process;
 mod pty;
 mod scrollback;
@@ -10,7 +11,10 @@ mod session;
 mod settings;
 mod shell;
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use agents::{AgentEvent, AgentSession, Harnesses};
 use portable_pty::PtySize;
@@ -247,6 +251,104 @@ fn agent_install(harnesses: State<Harnesses>, id: String) -> Result<(), String> 
         .ok_or("unknown agent")?
         .install_hooks(&exe)
         .map_err(err)
+}
+
+// Agent messaging (`rift mcp`): an agent's tool call reaches the frontend as `mcp-call`, which answers
+// with `mcp_reply`. Turned on and off per agent config, from Settings.
+
+/// MCP calls waiting for the frontend's answer, by call id.
+#[derive(Default)]
+struct McpCalls {
+    next: AtomicU64,
+    waiting: Mutex<HashMap<u64, tokio::sync::oneshot::Sender<mcp::Reply>>>,
+}
+
+/// Payload of the `mcp-call` event.
+#[derive(Clone, Serialize)]
+struct McpCall {
+    id: u64,
+    /// The calling agent's pty.
+    tab: TabId,
+    tool: String,
+    args: serde_json::Value,
+}
+
+async fn on_mcp(handle: AppHandle, req: mcp::Request) -> mcp::Reply {
+    let (id, answer) = {
+        let calls = handle.state::<McpCalls>();
+        let id = calls.next.fetch_add(1, Ordering::Relaxed);
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        calls.waiting.lock().unwrap().insert(id, tx);
+        (id, rx)
+    };
+    let call = McpCall {
+        id,
+        tab: req.tab,
+        tool: req.tool,
+        args: req.args,
+    };
+    let _ = handle.emit("mcp-call", call);
+    match tokio::time::timeout(Duration::from_secs(60), answer).await {
+        Ok(Ok(reply)) => reply,
+        _ => {
+            handle
+                .state::<McpCalls>()
+                .waiting
+                .lock()
+                .unwrap()
+                .remove(&id);
+            mcp::Reply::error("Rift did not answer in time.")
+        }
+    }
+}
+
+#[tauri::command]
+fn mcp_reply(calls: State<McpCalls>, id: u64, ok: bool, text: String) {
+    if let Some(tx) = calls.waiting.lock().unwrap().remove(&id) {
+        let _ = tx.send(mcp::Reply { ok, text });
+    }
+}
+
+#[derive(Serialize)]
+struct McpAgent {
+    id: &'static str,
+    name: &'static str,
+    installed: bool,
+}
+
+/// The agents used here, and whether each runs Rift's MCP server.
+#[tauri::command(async)]
+fn mcp_status(harnesses: State<Harnesses>) -> Result<Vec<McpAgent>, String> {
+    let exe = std::env::current_exe().map_err(err)?;
+    let used = harnesses.0.iter().filter(|h| h.detected());
+    Ok(used
+        .map(|h| McpAgent {
+            id: h.id(),
+            name: h.name(),
+            installed: h.mcp_installed(&exe),
+        })
+        .collect())
+}
+
+/// Adds or removes Rift's MCP server in every used agent's config. Only called from the user's click.
+#[tauri::command(async)]
+fn mcp_set(harnesses: State<Harnesses>, on: bool) -> Result<(), String> {
+    let exe = std::env::current_exe().map_err(err)?;
+    let failed: Vec<String> = harnesses
+        .0
+        .iter()
+        .filter(|h| h.detected())
+        .filter_map(|h| {
+            h.set_mcp(&exe, on)
+                .err()
+                .map(|e| format!("{}: {e}", h.name()))
+        })
+        .collect();
+    if failed.is_empty() {
+        Ok(())
+    } else {
+        Err(failed.join("\n"))
+    }
 }
 
 // Explorer and git panel. All async: they run off the main thread and never delay a tab switch.
@@ -577,10 +679,15 @@ pub fn run() {
             app.manage(SettingsFile(data_file("settings.json")));
             app.manage(PromptsFile(SettingsFile(data_file("prompts.json"))));
             app.manage(Harnesses::new(&home));
+            app.manage(McpCalls::default());
 
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(hook::serve(pipe.clone(), move |msg| {
                 on_hook(&handle, msg)
+            }));
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(mcp::serve(mcp::channel(&pipe), move |req| {
+                on_mcp(handle.clone(), req)
             }));
 
             // Title shows the version: "Rift 1.2.3" (a release), "Rift 1.2.3+4" (4 master commits later),
@@ -621,6 +728,9 @@ pub fn run() {
             scrollback_prune,
             agent_integrations,
             agent_install,
+            mcp_reply,
+            mcp_status,
+            mcp_set,
             fs_list,
             fs_open,
             fs_read_text,

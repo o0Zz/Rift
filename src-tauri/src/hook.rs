@@ -97,7 +97,7 @@ pub async fn serve(name: String, on_message: impl Fn(HookMessage)) -> std::io::R
 }
 
 #[cfg(windows)]
-mod transport {
+pub(crate) mod transport {
     use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
 
     fn path(name: &str) -> String {
@@ -105,7 +105,11 @@ mod transport {
     }
 
     pub fn connect(name: &str) -> std::io::Result<std::fs::File> {
-        std::fs::OpenOptions::new().write(true).open(path(name))
+        // Read too: an MCP call waits for Rift's answer on the same connection.
+        std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(path(name))
     }
 
     pub struct Listener {
@@ -132,7 +136,7 @@ mod transport {
 }
 
 #[cfg(unix)]
-mod transport {
+pub(crate) mod transport {
     use std::path::PathBuf;
 
     use tokio::net::{UnixListener, UnixStream};

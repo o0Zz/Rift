@@ -3,8 +3,8 @@
 // "main" (the tab's own terminal and documents) is one leaf like the others, always there, alone in its group.
 // Pure: unit-tested in panes.test.ts.
 
-/** Files, git and prompts always exist; terminals (`term:<n>`) only while their shell runs. */
-const FIXED = ["explorer", "git", "prompts"] as const;
+/** Files, git, prompts and messages always exist; terminals (`term:<n>`) only while their shell runs. */
+const FIXED = ["explorer", "git", "prompts", "messages"] as const;
 export type PanelId = (typeof FIXED)[number] | `term:${number}` | "main";
 export const isTerminal = (id: PanelId): id is `term:${number}` => id.startsWith("term:");
 /** `shown` undefined = the group is closed (it keeps its place, the others take its room). */
@@ -25,7 +25,7 @@ export const DEFAULT_PANES: Split = {
   children: [
     { id: "g1", panels: ["explorer"] },
     { id: MAIN, panels: ["main"], shown: "main" },
-    { id: "g2", panels: ["git", "prompts"] },
+    { id: "g2", panels: ["git", "prompts", "messages"] },
   ],
   sizes: [240, 900, 440],
 };

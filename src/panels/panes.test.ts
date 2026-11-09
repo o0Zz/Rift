@@ -11,37 +11,37 @@ const open = show(show(DEFAULT_PANES, "explorer"), "git");
 
 describe("panes", () => {
   it("shows and hides a panel; a closed group keeps its place", () => {
-    expect(shape(open)).toEqual({ row: ["*explorer", "*main", "*git prompts"] });
+    expect(shape(open)).toEqual({ row: ["*explorer", "*main", "*git prompts messages"] });
     const d = toggle(open, "git");
     expect(isOpen(groupOf(d, "git")!)).toBe(false);
-    expect(shape(toggle(d, "prompts"))).toEqual({ row: ["*explorer", "*main", "git *prompts"] });
+    expect(shape(toggle(d, "prompts"))).toEqual({ row: ["*explorer", "*main", "git *prompts messages"] });
     expect(isShown(toggle(toggle(d, "git"), "git"), "git")).toBe(false);
   });
 
   it("splits any pane on any side, the way the user asked: two terminals side by side above a full-width one", () => {
     let d = move(open, "term:1" as never, { pane: "main", at: "bottom" });
-    expect(shape(d)).toEqual({ row: ["*explorer", { col: ["*main", "*term:1"] }, "*git prompts"] });
+    expect(shape(d)).toEqual({ row: ["*explorer", { col: ["*main", "*term:1"] }, "*git prompts messages"] });
     d = move(d, "term:2" as never, { pane: groupOf(d, "term:1")!.id, at: "right" });
-    expect(shape(d)).toEqual({ row: ["*explorer", { col: ["*main", { row: ["*term:1", "*term:2"] }] }, "*git prompts"] });
+    expect(shape(d)).toEqual({ row: ["*explorer", { col: ["*main", { row: ["*term:1", "*term:2"] }] }, "*git prompts messages"] });
     // Git across the whole bottom of the window.
     d = move(d, "git", { pane: "root", at: "bottom" });
-    expect(shape(d)).toEqual({ col: [{ row: ["*explorer", { col: ["*main", { row: ["*term:1", "*term:2"] }] }, "*prompts"] }, "*git"] });
+    expect(shape(d)).toEqual({ col: [{ row: ["*explorer", { col: ["*main", { row: ["*term:1", "*term:2"] }] }, "*prompts messages"] }, "*git"] });
   });
 
   it("adds a sibling when the parent already runs that way, sharing the pane's room", () => {
     const d = move(open, "prompts", { pane: "main", at: "left" });
-    expect(shape(d)).toEqual({ row: ["*explorer", "*prompts", "*main", "*git"] });
+    expect(shape(d)).toEqual({ row: ["*explorer", "*prompts", "*main", "*git messages"] });
     const root = d as Extract<Pane, { sizes: number[] }>;
     expect(root.sizes).toEqual([240, 450, 450, 440]);
   });
 
   it("joins a group as a tab, and collapses what a move leaves empty", () => {
     let d = move(open, "explorer", { pane: groupOf(open, "git")!.id, at: "tab" });
-    expect(shape(d)).toEqual({ row: ["*main", "git prompts *explorer"] });
+    expect(shape(d)).toEqual({ row: ["*main", "git prompts messages *explorer"] });
     d = move(open, "term:1" as never, { pane: "main", at: "bottom" });
     d = move(d, "term:1" as never, { pane: groupOf(d, "git")!.id, at: "tab" });
-    expect(shape(d)).toEqual({ row: ["*explorer", "*main", "git prompts *term:1"] }); // the column of one is gone
-    expect(shape(remove(d, "term:1" as never))).toEqual({ row: ["*explorer", "*main", "*git prompts"] });
+    expect(shape(d)).toEqual({ row: ["*explorer", "*main", "git prompts messages *term:1"] }); // the column of one is gone
+    expect(shape(remove(d, "term:1" as never))).toEqual({ row: ["*explorer", "*main", "*git prompts messages"] });
   });
 
   it("does nothing when a panel is dropped on its own lone group", () => {
@@ -93,7 +93,7 @@ describe("panes", () => {
       children: [{ panels: ["main", "git"] }, { dir: "row", children: [{ panels: ["git", "nope", "term:3"], shown: "git" }, { panels: [] }] }],
       sizes: [3, "x"],
     });
-    expect(shape(d)).toEqual({ row: ["explorer", { col: ["*main", "*git"] }, "prompts"] }); // missing ones added, closed
+    expect(shape(d)).toEqual({ row: ["explorer", { col: ["*main", "*git"] }, "prompts", "messages"] }); // missing ones added, closed
     expect((index(d).get(groupOf(d, "git")!.id) as { shown?: string }).shown).toBe("git");
   });
 });

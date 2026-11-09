@@ -11,6 +11,10 @@ export function SettingsPage(props: {
   onClose(): void;
   /** Checks for an update now: the new version (downloaded, banner shown) or undefined. None in dev/bench. */
   onCheckUpdate?(): Promise<string | undefined>;
+  /** The agents used here and whether each has Rift's MCP server (agent messaging); undefined = loading. */
+  mcp?: { id: string; name: string; installed: boolean }[];
+  /** Adds or removes Rift's MCP server in every used agent's config. */
+  onMessaging(on: boolean): Promise<void>;
 }) {
   const [recording, setRecording] = createSignal<Action>();
   const [note, setNote] = createSignal<string>();
@@ -32,6 +36,21 @@ export function SettingsPage(props: {
       setMenuError(String(e));
     }
   }
+  const [mcpBusy, setMcpBusy] = createSignal(false);
+  const [mcpError, setMcpError] = createSignal<string>();
+  const messagingOn = () => !!props.mcp?.some((a) => a.installed);
+  async function toggleMessaging() {
+    setMcpBusy(true);
+    setMcpError(undefined);
+    try {
+      await props.onMessaging(!messagingOn());
+    } catch (e) {
+      setMcpError(String(e));
+    } finally {
+      setMcpBusy(false);
+    }
+  }
+
   const set = (patch: Partial<Settings>) => props.onChange({ ...props.settings, ...patch });
 
   const [updateNote, setUpdateNote] = createSignal<string>();
@@ -171,6 +190,27 @@ export function SettingsPage(props: {
               onChange={(e) => e.currentTarget.value.trim() && set({ fontFamily: e.currentTarget.value })}
             />
           </div>
+
+          <h3>Agents</h3>
+          <div class="setting">
+            <label>
+              Agent messaging (MCP)
+              <span class="setting-sub">
+                Agents in Rift tabs can list each other, send each other messages (typed in once the receiver is idle)
+                and start agents in new tabs. Adds Rift's MCP server to{" "}
+                {props.mcp?.length ? props.mcp.map((a) => a.name + (a.installed ? " (on)" : "")).join(", ") : "no agent used here"}.
+                Running agents get it when restarted.
+              </span>
+            </label>
+            <Show when={props.mcp?.length}>
+              <button class="setting-btn" disabled={mcpBusy()} onClick={toggleMessaging}>
+                {mcpBusy() ? "…" : messagingOn() ? "Turn off" : "Turn on"}
+              </button>
+            </Show>
+          </div>
+          <Show when={mcpError()}>
+            <div class="settings-note">{mcpError()}</div>
+          </Show>
 
           <h3>Updates</h3>
           <div class="setting">

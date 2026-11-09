@@ -21,6 +21,8 @@ const EVENTS: [&str; 6] = [
 pub struct Claude {
     /// Usually ~/.claude/settings.json; a temp file in tests.
     pub settings: PathBuf,
+    /// ~/.claude.json, where Claude keeps its user MCP servers (read only: written through `claude mcp`).
+    pub user_config: PathBuf,
 }
 
 /// Rift's hook handler: exec form, so no shell (Git Bash on Windows) is involved.
@@ -147,6 +149,40 @@ impl AgentHarness for Claude {
         config::write_json(&self.settings, &settings)
     }
 
+    fn mcp_installed(&self, exe: &Path) -> bool {
+        config::mcp_json_installed(&self.user_config, exe)
+    }
+
+    /// Through `claude mcp`: every running Claude rewrites ~/.claude.json and could undo a change made behind
+    /// its back.
+    fn set_mcp(&self, exe: &Path, on: bool) -> Result<()> {
+        if on && self.mcp_installed(exe) {
+            return Ok(());
+        }
+        let home = self.user_config.parent().unwrap_or(Path::new("."));
+        let present = config::read_json(&self.user_config)
+            .is_ok_and(|v| v["mcpServers"].get("rift").is_some());
+        // `add` refuses a name in use: an entry for another exe path goes first.
+        if present {
+            config::run(
+                "claude",
+                &["mcp", "remove", "--scope", "user", "rift"],
+                home,
+                "",
+            )?;
+        }
+        if on {
+            let exe = exe.to_string_lossy();
+            config::run(
+                "claude",
+                &["mcp", "add", "--scope", "user", "rift", "--", &exe, "mcp"],
+                home,
+                "",
+            )?;
+        }
+        Ok(())
+    }
+
     fn setup(&self) -> String {
         format!(
             "Adds Rift's hooks and a status line showing context and plan usage (unless you have your own) to {}.",
@@ -164,6 +200,7 @@ mod tests {
     fn claude(dir: &tempfile::TempDir) -> Claude {
         Claude {
             settings: dir.path().join("settings.json"),
+            user_config: PathBuf::new(),
         }
     }
 
@@ -175,6 +212,7 @@ mod tests {
     fn parses_session_hooks() {
         let c = Claude {
             settings: PathBuf::new(),
+            user_config: PathBuf::new(),
         };
         let start =
             json!({ "hook_event_name": "SessionStart", "session_id": "abc", "source": "startup" });
@@ -199,6 +237,7 @@ mod tests {
     fn parses_status_hooks() {
         let c = Claude {
             settings: PathBuf::new(),
+            user_config: PathBuf::new(),
         };
         let ev = |name: &str, extra: Value| {
             let mut p = json!({ "hook_event_name": name, "session_id": "abc" });
@@ -266,6 +305,7 @@ mod tests {
     fn resume_command_rejects_non_uuid_ids() {
         let c = Claude {
             settings: PathBuf::new(),
+            user_config: PathBuf::new(),
         };
         assert_eq!(
             c.resume_command("00893aaf-19fa-41d2-8238-13269b9b3ca0")

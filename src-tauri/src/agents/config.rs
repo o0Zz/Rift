@@ -179,6 +179,111 @@ fn run_for(
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
+/// Rift's MCP server (agent messaging) as a JSON config entry: `exe mcp`, plus `extra` fields.
+pub fn mcp_json(exe: &Path, extra: Value) -> Value {
+    let mut entry = json!({ "command": exe.to_string_lossy(), "args": ["mcp"] });
+    if let (Some(e), Value::Object(more)) = (entry.as_object_mut(), extra) {
+        e.extend(more);
+    }
+    entry
+}
+
+/// Whether `mcpServers.rift` of the JSON file at `path` runs `exe mcp`.
+pub fn mcp_json_installed(path: &Path, exe: &Path) -> bool {
+    read_json(path).is_ok_and(|v| {
+        let entry = &v["mcpServers"]["rift"];
+        entry["command"].as_str() == Some(&*exe.to_string_lossy())
+            && entry["args"] == json!(["mcp"])
+    })
+}
+
+/// Sets (`Some`) or removes `mcpServers.rift` in the JSON file at `path`; everything else is kept.
+pub fn set_mcp_json(path: &Path, entry: Option<Value>) -> Result<()> {
+    let mut settings = read_json(path)?;
+    let root = settings
+        .as_object_mut()
+        .context("the settings file is not a JSON object")?;
+    if entry.is_none()
+        && root
+            .get("mcpServers")
+            .is_none_or(|s| s.get("rift").is_none())
+    {
+        return Ok(()); // nothing to remove: the file stays untouched
+    }
+    let servers = root.entry("mcpServers").or_insert_with(|| json!({}));
+    let servers = servers
+        .as_object_mut()
+        .context("\"mcpServers\" is not an object")?;
+    match entry {
+        Some(e) => {
+            servers.insert("rift".into(), e);
+        }
+        None => {
+            servers.remove("rift");
+        }
+    }
+    write_json(path, &settings)
+}
+
+/// Rift's MCP server as a Codex `config.toml` table. Codex passes MCP servers only a few variables:
+/// `env_vars` forwards the two that name the tab and the Rift instance.
+pub fn mcp_toml(exe: &Path) -> String {
+    // A JSON string is a valid TOML basic string.
+    let command = serde_json::to_string(&exe.to_string_lossy()).unwrap_or_default();
+    format!(
+        "[mcp_servers.rift]\ncommand = {command}\nargs = [\"mcp\"]\nenv_vars = [\"RIFT_TAB_ID\", \"RIFT_PIPE\"]\n"
+    )
+}
+
+/// `text` (a TOML file) without the `[mcp_servers.rift]` table and its sub-tables, then `table` if any.
+pub fn with_mcp_toml(text: &str, table: Option<&str>) -> String {
+    let mut out = String::new();
+    let mut skipping = false;
+    for line in text.lines() {
+        let head = line.trim();
+        if head.starts_with('[') {
+            let name = head.trim_matches(['[', ']']).trim();
+            skipping = name == "mcp_servers.rift" || name.starts_with("mcp_servers.rift.");
+        }
+        if !skipping {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    if let Some(table) = table {
+        if !out.is_empty() && !out.ends_with("\n\n") {
+            out.push('\n');
+        }
+        out.push_str(table);
+    }
+    out
+}
+
+/// Sets (`Some(exe)`) or removes Rift's table in the Codex config at `path` (previous file kept as `.bak`).
+pub fn set_mcp_toml(path: &Path, exe: Option<&Path>) -> Result<()> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(e.into()),
+    };
+    let next = with_mcp_toml(&text, exe.map(mcp_toml).as_deref());
+    if next == text {
+        return Ok(());
+    }
+    if path.exists() {
+        let mut bak = path.as_os_str().to_owned();
+        bak.push(".bak");
+        std::fs::copy(path, bak)?;
+    }
+    crate::files::write_atomic(path, next.as_bytes())?;
+    Ok(())
+}
+
+/// Whether the Codex config at `path` holds Rift's table for `exe`.
+pub fn mcp_toml_installed(path: &Path, exe: &Path) -> bool {
+    std::fs::read_to_string(path).is_ok_and(|t| t.replace("\r\n", "\n").contains(&mcp_toml(exe)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -362,6 +467,67 @@ mod tests {
                 .unwrap_err()
                 .to_string()
                 .contains("rift-no-such-agent")
+        );
+    }
+
+    #[test]
+    fn mcp_json_entry_is_added_and_removed_keeping_the_rest() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let exe = Path::new(r"C:\Apps\Rift\rift.exe");
+        std::fs::write(
+            &path,
+            r#"{"theme":"dark","mcpServers":{"other":{"command":"x"}}}"#,
+        )
+        .unwrap();
+        set_mcp_json(&path, Some(mcp_json(exe, json!({ "type": "local" })))).unwrap();
+        assert!(mcp_json_installed(&path, exe));
+        assert!(!mcp_json_installed(&path, Path::new("/other/rift")));
+        let v = read_json(&path).unwrap();
+        assert_eq!(v["mcpServers"]["rift"]["type"], "local");
+        assert_eq!(v["mcpServers"]["other"]["command"], "x");
+        set_mcp_json(&path, None).unwrap();
+        let v = read_json(&path).unwrap();
+        assert!(v["mcpServers"].get("rift").is_none());
+        assert_eq!(v["theme"], "dark");
+        assert!(!mcp_json_installed(&path, exe));
+    }
+
+    #[test]
+    fn removing_a_missing_mcp_entry_writes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        set_mcp_json(&path, None).unwrap();
+        assert!(!path.exists());
+        set_mcp_toml(&dir.path().join("config.toml"), None).unwrap();
+        assert!(!dir.path().join("config.toml").exists());
+    }
+
+    #[test]
+    fn codex_table_replaces_the_old_one_and_keeps_the_rest() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let exe = Path::new(r"C:\Program Files\Rift\rift.exe");
+        let before = "model = \"o3\"\n\n[mcp_servers.rift]\ncommand = \"old\"\n\n[mcp_servers.rift.env]\nA = \"1\"\n\n\
+                      [mcp_servers.docs]\ncommand = \"d\"\n";
+        std::fs::write(&path, before).unwrap();
+        set_mcp_toml(&path, Some(exe)).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(mcp_toml_installed(&path, exe));
+        assert!(!text.contains("old") && !text.contains("A = "), "{text}");
+        assert!(
+            text.starts_with("model = \"o3\"") && text.contains("[mcp_servers.docs]"),
+            "{text}"
+        );
+        assert!(
+            text.contains(r#"command = "C:\\Program Files\\Rift\\rift.exe""#),
+            "{text}"
+        );
+        set_mcp_toml(&path, None).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            !text.contains("mcp_servers.rift") && text.contains("[mcp_servers.docs]"),
+            "{text}"
         );
     }
 }

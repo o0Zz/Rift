@@ -121,6 +121,13 @@ export class TermView {
     this.term.focus();
   }
 
+  /** Types `text` as the agent's next prompt and sends it, without taking the focus (agent messaging). */
+  submit(text: string) {
+    this.term.paste(text);
+    // Enter apart from the paste: an agent reading the paste and Enter in one chunk may take Enter as a newline.
+    setTimeout(() => this.write("\r"), 200);
+  }
+
   private write(data: string) {
     this.pty.then((id) => invoke("pty_write", { id, data }));
   }

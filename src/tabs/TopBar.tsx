@@ -14,11 +14,14 @@ export function TopBar(p: {
   tab?: Tab;
   limits: Limits;
   promptsShown: boolean;
+  /** Whether the agent messages panel is shown; undefined = agent messaging is off (no button). */
+  messages?: boolean;
   gitShown: boolean;
   onShowDoc(tab: Tab, index: number): void;
   onCloseDoc(tab: Tab, index: number): void;
   onNewTerminal(): void;
   onTogglePrompts(): void;
+  onToggleMessages(): void;
   onToggleGit(): void;
 }) {
   return (
@@ -71,6 +74,11 @@ export function TopBar(p: {
       <button class="icon-btn" classList={{ on: p.promptsShown }} onClick={() => p.onTogglePrompts()} title="Prompts (Ctrl+Shift+O)">
         <Icon name="list" />
       </button>
+      <Show when={p.messages !== undefined}>
+        <button class="icon-btn" classList={{ on: p.messages }} onClick={() => p.onToggleMessages()} title="Agent messages (Ctrl+Shift+M)">
+          <Icon name="mail" />
+        </button>
+      </Show>
       <button class="git-button" classList={{ on: p.gitShown }} onClick={() => p.onToggleGit()} title="Git changes (Ctrl+Shift+G)">
         <Icon name="branch" size={14} />
         <span>{p.tab?.branch ?? "Git"}</span>

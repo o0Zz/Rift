@@ -93,6 +93,14 @@ impl AgentHarness for Gemini {
         config::install_hooks(&self.settings, &EVENTS, &handler(exe), "gemini")
     }
 
+    fn mcp_installed(&self, exe: &Path) -> bool {
+        config::mcp_json_installed(&self.settings, exe)
+    }
+
+    fn set_mcp(&self, exe: &Path, on: bool) -> Result<()> {
+        config::set_mcp_json(&self.settings, on.then(|| config::mcp_json(exe, json!({}))))
+    }
+
     fn setup(&self) -> String {
         format!("Adds Rift's hooks to {}.", self.settings.display())
     }

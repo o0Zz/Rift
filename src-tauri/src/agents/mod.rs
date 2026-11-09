@@ -125,6 +125,10 @@ pub trait AgentHarness: Send + Sync {
     fn one_shot(&self, cwd: &Path, prompt: &str, input: &str) -> Result<String>;
     /// Shell command starting a new interactive session (e.g. `claude`).
     fn start_command(&self) -> String;
+    /// Whether the agent runs `exe mcp` as its MCP server "rift" (agent messaging).
+    fn mcp_installed(&self, exe: &Path) -> bool;
+    /// Registers (`on`) or removes Rift's MCP server in the agent's config; its other servers are kept.
+    fn set_mcp(&self, exe: &Path, on: bool) -> Result<()>;
 }
 
 pub struct Harnesses(pub Vec<Box<dyn AgentHarness>>);
@@ -138,15 +142,18 @@ impl Harnesses {
         Harnesses(vec![
             Box::new(claude::Claude {
                 settings: home.join(".claude").join("settings.json"),
+                user_config: home.join(".claude.json"),
             }),
             Box::new(codex::Codex {
                 hooks: home.join(".codex").join("hooks.json"),
+                config: home.join(".codex").join("config.toml"),
             }),
             Box::new(gemini::Gemini {
                 settings: home.join(".gemini").join("settings.json"),
             }),
             Box::new(copilot::Copilot {
                 hooks: copilot_home.join("hooks").join("rift.json"),
+                mcp: copilot_home.join("mcp-config.json"),
             }),
         ])
     }

@@ -669,7 +669,8 @@ body,
   font-size: calc(13px * var(--scale-git, 1));
 }
 
-.panel.prompts {
+.panel.prompts,
+.panel.messages {
   font-size: calc(13px * var(--scale-prompts, 1));
 }
 
@@ -1654,6 +1655,92 @@ body,
 
 .tab-ctx.high {
   color: var(--s-m);
+}
+
+/* Agent messaging: messages waiting for this tab's agent, and the agent that started the tab. */
+.tab-inbox {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+  color: var(--accent);
+  font-size: 11px;
+}
+
+.tab-from {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+}
+
+.msg-list {
+  flex: 1;
+  overflow: auto;
+  padding: 6px;
+  user-select: text;
+}
+
+.msg {
+  margin-bottom: 6px;
+  padding: 4px 6px;
+  border: 1px solid var(--line-soft);
+  border-left: 3px solid var(--ok);
+  border-radius: 4px;
+}
+
+.msg.queued {
+  border-left-color: var(--accent);
+}
+
+.msg.failed {
+  border-left-color: var(--err);
+}
+
+.msg-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.92em;
+}
+
+.msg-time,
+.msg-state {
+  color: var(--fg-faint);
+}
+
+.msg-state {
+  margin-left: auto;
+}
+
+.msg.queued .msg-state {
+  color: var(--accent);
+}
+
+.msg-who {
+  padding: 0;
+  font-weight: 600;
+}
+
+.msg-arrow {
+  display: flex;
+  color: var(--fg-faint);
+}
+
+.msg-text {
+  display: -webkit-box;
+  margin-top: 3px;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.msg-text.open {
+  display: block;
 }
 
 .usage {

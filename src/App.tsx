@@ -50,6 +50,8 @@ import { Explorer } from "./panels/Explorer";
 import { isUnder } from "./panels/fileOps";
 import { GitPanel } from "./panels/GitPanel";
 import { Prompts } from "./panels/Prompts";
+import { Messages } from "./panels/Messages";
+import { createMessaging, type McpCall } from "./messages/messaging";
 import {
   addPrompt,
   editPrompt,
@@ -265,10 +267,11 @@ function App() {
   }
 
   /** New tabs open right after the active one, in its group and its folder. */
+  /** With `opts.behind`, the new tab opens after that tab and stays in the background (started by an agent). */
   function newTab(
     saved?: SavedTab,
-    opts: { cwd?: string; name?: string; group?: string; startAgent?: string; shell?: string } = {},
-  ): Promise<void> {
+    opts: { cwd?: string; name?: string; group?: string; startAgent?: string; shell?: string; behind?: Tab } = {},
+  ): Promise<Tab> {
     const tab = new Tab();
     const cwd = saved ? saved.cwd : (opts.cwd ?? active()?.cwd);
     tab.main.title = saved?.title ?? "shell";
@@ -288,11 +291,19 @@ function App() {
     if (tab.current >= 0) tab.view.hide(); // a restored document is shown instead
 
     const list = [...tabs()];
-    const after = saved ? -1 : list.indexOf(active()!);
+    const after = saved ? -1 : list.indexOf((opts.behind ?? active())!);
     list.splice(after < 0 ? list.length : after + 1, 0, tab);
-    active()?.shown.hide();
-    setTabs(list);
-    activate(tab);
+    if (opts.behind) {
+      // Hidden, it cannot measure itself: it takes the visible terminal's size, so its shell starts at it.
+      tab.view.hide();
+      const shown = active()?.view.term;
+      if (shown) tab.view.resizeTo(shown.cols, shown.rows);
+      setTabs(list);
+    } else {
+      active()?.shown.hide();
+      setTabs(list);
+      activate(tab);
+    }
     // A restored shell tab shows its previous history first. Not agent tabs: resuming redisplays the session.
     const history =
       saved?.ui?.snap && !saved.agent
@@ -302,7 +313,8 @@ function App() {
       .then((h) => h && tab.view.restoreSnapshot(h))
       .then(() => tab.view.start(cwd, saved?.agent, opts.startAgent, tab.shell))
       .then(session.save) // the pty id is not reactive
-      .catch((e) => void (tab.main.title = `error: ${e}`));
+      .catch((e) => void (tab.main.title = `error: ${e}`))
+      .then(() => tab);
   }
 
   async function restore() {
@@ -430,7 +442,28 @@ function App() {
     sizes: () => sizes,
   });
   const panelName = (id: PanelId) =>
-    isTerminal(id) ? `Terminal ${id.slice(5)}` : ({ explorer: "Files", git: "Git", prompts: "Prompts", main: "Terminal" } as const)[id];
+    isTerminal(id) ? `Terminal ${id.slice(5)}` : ({ explorer: "Files", git: "Git", prompts: "Prompts", messages: "Messages", main: "Terminal" } as const)[id];
+
+  // Agent messaging: whether its MCP server is in the agents' configs (Settings), and the messages themselves.
+  const [mcp, setMcp] = createSignal<{ id: string; name: string; installed: boolean }[]>();
+  const messagingOn = () => (mcp() ? mcp()!.some((a) => a.installed) : undefined);
+  const refreshMcp = () => invoke<{ id: string; name: string; installed: boolean }[]>("mcp_status").then(setMcp);
+  async function setMessaging(on: boolean) {
+    try {
+      await invoke("mcp_set", { on });
+    } finally {
+      await refreshMcp();
+    }
+  }
+  const messaging = createMessaging({
+    enabled: () => !!messagingOn(),
+    tabs,
+    shellOf,
+    agents,
+    startAgent: (from, o) =>
+      newTab(undefined, { cwd: o.cwd, name: o.name, group: from.group, startAgent: o.agent, shell: from.shell, behind: from }),
+    worktree: (from, branch) => invoke<string>("git_worktree_add", { root: from.root, branch }),
+  });
 
   function onAgentStatus({ pty, harness, status, message, continued }: AgentStatus) {
     const hit = shellOf(pty);
@@ -441,6 +474,7 @@ function App() {
       shell.agent = status ? harness : undefined;
       if (!status) shell.context = undefined;
     });
+    messaging.statusChanged(pty);
     git.stats(tab); // an agent at work changes files
     // Finished in the repo the git panel shows (any tab): it reloads now to show the agent's changes.
     git.agentMoved(tab.root, shell.status === "done");
@@ -542,6 +576,7 @@ function App() {
     toggleFiles: () => togglePanel("explorer"),
     toggleGit: () => togglePanel("git"),
     togglePrompts: () => togglePanel("prompts"),
+    toggleMessages: () => togglePanel("messages"),
     newTerminal: () => consoles.open(),
     focusLeft: () => focusPane("left"),
     focusRight: () => focusPane("right"),
@@ -595,6 +630,7 @@ function App() {
         else consoles.close(hit.shell.place, hit.tab);
       }),
       listen<AgentStatus>("agent-status", (e) => onAgentStatus(e.payload)),
+      listen<McpCall>("mcp-call", (e) => messaging.call(e.payload)),
       listen<AgentUsage>("agent-usage", ({ payload: u }) => {
         const hit = shellOf(u.pty);
         if (hit) hit.shell.context = u.context ?? undefined;
@@ -639,6 +675,7 @@ function App() {
       .then((saved) => setSettings(mergeSettings(saved)))
       .finally(restore);
     checkIntegrations();
+    refreshMcp();
     invoke("prompts_load").then((saved) => setPromptLists(mergePrompts(saved)));
     invoke<string[] | null>("bench_dirs").then(async (dirs) => {
       if (!dirs) {
@@ -718,6 +755,22 @@ function App() {
         />
       );
     }
+    if (id === "messages") {
+      return (
+        <Messages
+          entries={messaging.entries()}
+          enabled={messagingOn()}
+          onOpen={(pty) => {
+            const hit = shellOf(pty);
+            if (!hit) return;
+            activate(hit.tab);
+            if (hit.shell.place !== "main") consoles.reveal(hit.shell.place);
+          }}
+          onClear={messaging.clear}
+          onClose={() => togglePanel("messages")}
+        />
+      );
+    }
     if (id === "git") {
       return (
         <GitPanel
@@ -767,6 +820,8 @@ function App() {
         tab={barTab()}
         limits={limits()}
         promptsShown={shown("prompts")}
+        messages={messagingOn() ? shown("messages") : undefined}
+        onToggleMessages={() => togglePanel("messages")}
         gitShown={shown("git")}
         onShowDoc={docs.show}
         onCloseDoc={docs.close}
@@ -835,6 +890,7 @@ function App() {
           onFilter={setFilter}
           agents={agents()}
           onNewWorktree={(tab, agent) => setWorktreeFrom({ tab, agent })}
+          waiting={messaging.waiting}
           rename={renameRequest()}
           onFocusTerminal={() => active()?.shown.focus()}
         />
@@ -858,6 +914,8 @@ function App() {
           onChange={changeSettings}
           onClose={() => (setSettingsOpen(false), active()?.shown.show())}
           onCheckUpdate={updater && updater.checkNow}
+          mcp={mcp()}
+          onMessaging={setMessaging}
         />
       </Show>
       <Panes root={panes()} onChange={setPanes} name={panelName} render={renderPanel} onDragging={onDragging} ref={(el) => (panesEl = el)} />

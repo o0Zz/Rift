@@ -16,6 +16,8 @@ const PATHS = {
   right: "M6 4l4 4-4 4",
   down: "M4 6l4 4 4-4",
   up: "M4 10l4-4 4 4",
+  mail: "M2.5 4h11v8h-11zM2.5 4.5L8 8.5l5.5-4",
+  link: "M7 9l2-2M6.5 5.5l1-1a2.1 2.1 0 0 1 3 3l-1 1M9.5 10.5l-1 1a2.1 2.1 0 0 1-3-3l1-1",
 } as const;
 
 type IconName = keyof typeof PATHS;

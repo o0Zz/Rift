@@ -42,19 +42,21 @@ src-tauri/src/
   session.rs        what to restore: tabs (cwd, opaque ui) + agent session per tab
   scrollback.rs     per-tab history (`<id>.ans`) saved on close, shown again on restore
   hook.rs           `rift hook` client + server: named pipe (Windows) / Unix socket
+  mcp.rs            `rift mcp`: agents' MCP server (stdio), calls forwarded to the app on `<pipe>-mcp`
   agents/           AgentHarness trait + adapters (claude, codex, gemini, copilot); config.rs: hook files, one-shot runs
   git.rs            branch from .git/HEAD (no process); status/diff/stats/commit/worktree via git CLI
   process.rs        runs git and one-shots: no window, stdin + both outputs at once, killed with its children on timeout
   files.rs          one directory level per call (never recursive)
   settings.rs       settings.json (frontend owns its shape)
   explorer_menu.rs  "Open in Rift" registry entries (HKCU) + `rift.exe <dir>` parsing
-  lib.rs / main.rs  Tauri commands + setup / `rift hook|status <harness>`, else the app
+  lib.rs / main.rs  Tauri commands + setup / `rift hook|status <harness>`, `rift mcp`, else the app
 src/
   App.tsx           wiring: restore, keys (one handler per action), agent status, panels, Enable banners
   tabs/             layout.ts (pure: order, moves, titles, notify rule), Tab.ts (Solid signals), Sidebar, TopBar, GitStats, icons, nav,
                     session.ts (debounced session save, histories), gitWatch.ts (when the git panel reloads, stats refresh)
   terminal/         TermView.ts (one xterm per tab), themes.ts, osc.ts, paths.ts
-  panels/           panes.ts (tree of splits, pure), PaneTree.tsx (tree + drag and drop), Consoles.tsx (terminal panels), Explorer, GitPanel, Prompts, diff.ts, fileIcons.ts
+  panels/           panes.ts (tree of splits, pure), PaneTree.tsx (tree + drag and drop), Consoles.tsx (terminal panels), Explorer, GitPanel, Prompts, Messages, diff.ts, fileIcons.ts
+  messages/         bus.ts (pure: queue, prompts, limits, arguments), messaging.ts (answers MCP calls, delivers)
   docs/             docs.ts (open/show/close in a tab), DocView.ts, place.ts (pure), editor.ts + markdown.ts (lazy)
   ui/               Menu, Resizer (+ resize.ts), Icon, PromptDialog, FindBar, Panel (PanelHead, Loaded)
   settings/         settings.ts (pure), SettingsPage.tsx
@@ -126,6 +128,13 @@ Frontend ↔ backend: Tauri commands, the PTY `Channel`, events (`pty-exit`, `ag
 - Claude Code: **exec form** hooks (a shell form would go through Git Bash); `idle_prompt` notifications are not a block. Enable also sets `statusLine` to `rift status claude` (forward slashes, quoted only with a space: PowerShell would not run a quoted path) unless the user has one: it prints `ctx 34% · 5h 23% · 7d 41%` and forwards the JSON (`agent-usage`: context on the tab, plan limits in the top bar).
 - Codex, Gemini CLI, Copilot CLI: built from their docs/source, never run live (event mappings in each adapter + tests). Codex runs new hooks only once trusted (`/hooks`; Rift never writes trust hashes). Gemini hooks never print nor exit 2 (= block). Copilot gets Rift's own file, rewritten whole, PascalCase events for Claude-shaped payloads. No status line for them. OpenCode not built (plugins in a shared server, API mid-rewrite).
 - npm agents are `.cmd` shims on Windows: `config::program` searches PATH for `.exe`/`.cmd`/`.bat`; batch arguments escaped (tested through a node shim).
+
+### Agent messaging (MCP)
+- `rift mcp` is an MCP server each agent runs (stdio, JSON-RPC lines): `list_agents`, `send_message`, `start_agent`. A call goes over `<RIFT_PIPE>-mcp` (its own channel: calls run side by side, hooks stay in order) tagged with `RIFT_TAB_ID`; Rust emits `mcp-call`, the frontend answers with `mcp_reply` (60 s timeout). Outside Rift: a tool error. Ids = pty ids.
+- On/off = Settings → Agents, one button for every used agent (`mcp_set`, user's click only): `AgentHarness::set_mcp`. Claude through `claude mcp add/remove --scope user` (every running Claude rewrites ~/.claude.json); Codex `[mcp_servers.rift]` in config.toml with `env_vars` (Codex passes MCP servers only a few variables); Gemini `mcpServers` in settings.json; Copilot ~/.copilot/mcp-config.json. Off = calls refused at once, even by agents still running with it. Codex/Gemini/Copilot untested live.
+- Never typed mid-turn: a message waits until the receiver is idle/done (hooks), then 1.5 s, then bracketed paste + Enter apart (`TermView.submit`, focus kept), headed `── Message from <name> (agent <id>) via Rift ──` with how to answer. Answers are new messages, never tool results.
+- `start_agent`: a background tab after the caller, in its group, at the visible terminal's size (`newTab` `behind`), optional worktree; its task is queued like a message. At most 5 per agent; an agent started by an agent cannot start any (`startRefusal`).
+- Seen in: the Messages panel (Ctrl+Shift+M, top bar button when on; live log, in memory, 500 entries; a name opens that tab), the prompt itself in the receiver's terminal, sidebar mail icon + count (waiting) and link icon "started by".
 
 ## Windows specifics
 - Explorer menu (Settings → Windows): HKCU registry entries only (Windows 11: under "Show more options"; the top level needs MSIX). Tests use `HKCU\Software\RiftTest-*`.

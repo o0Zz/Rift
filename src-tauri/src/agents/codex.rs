@@ -21,6 +21,8 @@ const EVENTS: [&str; 6] = [
 pub struct Codex {
     /// Usually ~/.codex/hooks.json; a temp file in tests.
     pub hooks: PathBuf,
+    /// Usually ~/.codex/config.toml (MCP servers); a temp file in tests.
+    pub config: PathBuf,
 }
 
 /// Codex only runs command lines: `cmd /C` on Windows, `$SHELL -lc` elsewhere.
@@ -93,6 +95,14 @@ impl AgentHarness for Codex {
         config::install_hooks(&self.hooks, &EVENTS, &handler(exe), "codex")
     }
 
+    fn mcp_installed(&self, exe: &Path) -> bool {
+        config::mcp_toml_installed(&self.config, exe)
+    }
+
+    fn set_mcp(&self, exe: &Path, on: bool) -> Result<()> {
+        config::set_mcp_toml(&self.config, on.then_some(exe))
+    }
+
     fn setup(&self) -> String {
         format!(
             "Adds Rift's hooks to {}. Codex runs new hooks only once trusted: then type /hooks in Codex and approve them.",
@@ -116,6 +126,7 @@ mod tests {
             .extend(extra.as_object().unwrap().clone());
         Codex {
             hooks: PathBuf::new(),
+            config: PathBuf::new(),
         }
         .parse_hook(&p)
     }
@@ -165,6 +176,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let c = Codex {
             hooks: dir.path().join("hooks.json"),
+            config: PathBuf::new(),
         };
         assert!(!c.hooks_installed(Path::new(EXE)));
         c.install_hooks(Path::new(EXE)).unwrap();
@@ -186,6 +198,7 @@ mod tests {
     fn resume_command_rejects_shell_syntax() {
         let c = Codex {
             hooks: PathBuf::new(),
+            config: PathBuf::new(),
         };
         assert_eq!(
             c.resume_command("019a2b3c-4d5e-7f60-8a9b-0c1d2e3f4a5b")
