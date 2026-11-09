@@ -1277,8 +1277,8 @@ body,
 .settings {
   display: flex;
   flex-direction: column;
-  width: min(640px, 92vw);
-  max-height: 86vh;
+  width: min(780px, 92vw);
+  height: min(600px, 86vh);
   border: 1px solid var(--menu-line);
   border-radius: 8px;
   background: var(--menu-bg);
@@ -1296,20 +1296,77 @@ body,
   font-weight: 600;
 }
 
-.settings-body {
-  overflow: auto;
-  padding: 4px 18px 16px;
+/* Pages listed on the left, the chosen one on the right. */
+.settings-main {
+  display: flex;
+  flex: 1;
+  min-height: 0;
 }
 
-.settings h3 {
+.settings-nav {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 2px;
+  width: 160px;
+  padding: 10px 8px;
+  border-right: 1px solid var(--line);
+}
+
+.settings-nav button {
+  padding: 7px 10px;
+  border: none;
+  border-radius: 5px;
+  background: none;
+  color: var(--fg-soft);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.settings-nav button:hover {
+  background: var(--hover);
+  color: var(--fg-strong);
+}
+
+.settings-nav button.on {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--fg-strong);
+  font-weight: 600;
+}
+
+.settings-body {
+  flex: 1;
+  overflow: auto;
+  padding: 14px 20px 16px;
+}
+
+.settings h2 {
+  margin: 0;
+  color: var(--fg-strong);
+  font-size: 16px;
+}
+
+.settings-intro {
+  margin: 4px 0 12px;
+  color: var(--fg-dim);
+}
+
+.settings-tools {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin: 18px 0 8px;
-  color: var(--fg-muted);
-  font-size: 11px;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.settings-tools input {
+  flex: 1;
+  padding: 5px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  background: var(--input-bg);
+  color: var(--fg);
+  font: inherit;
 }
 
 .setting {
@@ -1337,6 +1394,7 @@ body,
 
 .segmented {
   display: flex;
+  flex: none;
   overflow: hidden;
   border: 1px solid var(--line-strong);
   border-radius: 5px;
@@ -1348,6 +1406,7 @@ body,
   background: none;
   color: var(--fg);
   font: inherit;
+  white-space: nowrap;
 }
 
 .segmented button.on {

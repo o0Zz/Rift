@@ -111,7 +111,7 @@ Frontend ↔ backend: Tauri commands, the PTY `Channel`, events (`pty-exit`, `ag
 - Unsaved changes: confirm before closing the document, its tab or Rift. Open documents saved per tab (`ui.docs`, `ui.doc`).
 
 ### Settings and themes
-- Overlay (⚙ or Ctrl+,; Esc closes); shortcuts off while open. `settings.ts` is the single source (`ACTIONS`, `defaultKeys(mac)`, `mergeSettings`, `actionFor`, `bind`). Settings load before tabs restore.
+- Overlay (⚙ or Ctrl+,; Esc closes); shortcuts off while open. One page at a time, listed on the left: General, Appearance, Agents, Shortcuts (with a filter), Windows (only there); reopens on the last one. `settings.ts` is the single source (`ACTIONS`, `defaultKeys(mac)`, `mergeSettings`, `actionFor`, `bind`). Settings load before tabs restore.
 - Every UI color is a CSS variable (`:root` dark, `[data-theme="light"]`). Terminal palettes in `terminal/themes.ts`. "System" follows `prefers-color-scheme` live.
 - Theme/font apply live (`TermView.setLook`); the effect tracks only theme + font. A font change re-wraps the visible tab now, hidden ones in idle time.
 
