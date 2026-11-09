@@ -375,9 +375,16 @@ function App() {
     });
   }
 
-  /** Closes every tab of the group, then the group (the window closes if no tab is left, as for a last tab). */
+  /**
+   * Closes every tab of the group, then the group (the window closes if no tab is left, as for a last tab).
+   * Asks first when the group has tabs.
+   */
   function closeGroup(id: string) {
-    for (const t of tabs().filter((t) => t.group === id)) closeTab(t);
+    const closing = tabs().filter((t) => t.group === id);
+    const name = groups().find((g) => g.id === id)?.name;
+    const n = closing.length;
+    if (n && !confirm(`Close the group “${name}” and its ${n} tab${n === 1 ? "" : "s"}?`)) return;
+    for (const t of closing) closeTab(t);
     setGroups(groups().filter((g) => g.id !== id));
   }
 
