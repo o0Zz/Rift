@@ -47,6 +47,8 @@ export function Explorer(props: {
   refresh?: number;
   onOpenFile(path: string): void;
   onDeleted(path: string): void;
+  /** Its git history; only in a repo. */
+  onHistory?(path: string): void;
   onClose(): void;
 }) {
   const [listings, setListings] = createSignal(new Map<string, Entry[] | string>());
@@ -105,6 +107,7 @@ export function Explorer(props: {
         : [
             { label: "Open", run: () => props.onOpenFile(path) },
             { label: "Open with default app", run: () => invoke("fs_open", { path }) },
+            ...(props.onHistory ? [{ label: "Show history", run: () => props.onHistory!(path) }] : []),
           ]),
       { label: `Reveal in ${FILE_MANAGER}`, run: () => invoke("fs_reveal", { path }) },
       { label: "Copy path", run: () => navigator.clipboard.writeText(path) },

@@ -16,6 +16,13 @@ export function isDeleteKey(e: { key: string; metaKey: boolean }, mac = IS_MAC):
   return e.key === "Delete" || (mac && e.metaKey && e.key === "Backspace");
 }
 
+/** `path` as git names it in the repo at `root` ("src/a.ts"); undefined when it is outside. */
+export function repoPath(root: string, path: string, ignoreCase = IS_WINDOWS || IS_MAC): string | undefined {
+  if (!isUnder(path, root, ignoreCase)) return undefined;
+  const rel = path.replace(/\\/g, "/").slice(root.replace(/\\/g, "/").replace(/\/+$/, "").length + 1);
+  return rel || undefined;
+}
+
 /**
  * `path` is `target` or inside it (a deleted folder takes its files with it). Windows and macOS file systems
  * ignore case: `C:\Repo\src` holds `c:\repo\SRC\a.ts`.

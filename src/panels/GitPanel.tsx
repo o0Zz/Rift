@@ -53,6 +53,8 @@ export function GitPanel(props: {
   /** Commits the upstream has that we do not (badge on Pull). */
   behind?: number;
   refresh?: number;
+  /** Asked from the files panel: History of this file (path from the repo root). A new object each time. */
+  showHistory?: { file: string };
   /** The agent ✨ Generate sends the diff to (the first one used on this machine). */
   agent?: string;
   onClose(): void;
@@ -308,6 +310,8 @@ export function GitPanel(props: {
     ),
   );
   createEffect(on(() => props.refresh, () => reload(true), { defer: true }));
+  // Not deferred: the panel may have just been shown for it. After the root effect, which clears the filter.
+  createEffect(on(() => props.showHistory, (ask) => ask && historyOf(ask.file)));
 
   const FileRow = (p: { change: Change; check?: boolean }) => (
     <div

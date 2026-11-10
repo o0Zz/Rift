@@ -47,7 +47,7 @@ import { createDocs } from "./docs/docs";
 import { Sidebar } from "./tabs/Sidebar";
 import type { Limit, Limits } from "./tabs/usage";
 import { Explorer } from "./panels/Explorer";
-import { isUnder } from "./panels/fileOps";
+import { isUnder, repoPath } from "./panels/fileOps";
 import { GitPanel } from "./panels/GitPanel";
 import { Prompts } from "./panels/Prompts";
 import { Messages } from "./panels/Messages";
@@ -64,7 +64,7 @@ import {
 import { Resizer } from "./ui/Resizer";
 import { Panes, paneBeside } from "./panels/PaneTree";
 import { createConsoles } from "./panels/Consoles";
-import { DEFAULT_PANES, index, isGroup, isShown, isTerminal, mergePanes, toggle, type Pane, type PanelId } from "./panels/panes";
+import { DEFAULT_PANES, index, isGroup, isShown, isTerminal, mergePanes, show as showPanel, toggle, type Pane, type PanelId } from "./panels/panes";
 import { FindBar } from "./ui/FindBar";
 import { PromptDialog } from "./ui/PromptDialog";
 import "./App.css";
@@ -436,6 +436,16 @@ function App() {
     setPanes(toggle(panes(), id));
   }
 
+  // "Show history" in the files panel: the git panel shows that file's commits (a new object re-asks the same file).
+  const [historyAsk, setHistoryAsk] = createSignal<{ file: string }>();
+  function showHistory(path: string) {
+    const root = panelTab()?.root;
+    const file = root && repoPath(root, path);
+    if (!file) return;
+    setPanes(showPanel(panes(), "git"));
+    setHistoryAsk({ file });
+  }
+
   let sizes: ResizeObserver | undefined; // refits the terminals when their area changes size
   const consoles = createConsoles({
     panes,
@@ -727,6 +737,7 @@ function App() {
           root={panelTab()?.root ?? panelTab()?.cwd}
           refresh={filesRefresh()}
           onOpenFile={(path) => docs.open(path)}
+          onHistory={panelTab()?.root ? showHistory : undefined}
           onDeleted={(path) => {
             // Its documents close (asking first about unsaved changes); the git panel shows the deletion.
             for (const tab of tabs()) {
@@ -784,6 +795,7 @@ function App() {
           behind={panelTab()?.stats?.behind}
           agent={agents()[0]?.name}
           refresh={git.refresh()}
+          showHistory={historyAsk()}
           onClose={() => togglePanel("git")}
           onHeadChanged={() => {
             // A switch, commit, pull or push: every tab of this repo shows the new branch and stats.

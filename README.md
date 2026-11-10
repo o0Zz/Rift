@@ -76,8 +76,8 @@ freezing the window) and fails when a change goes over budget.
 - **Git panel**, one click away on the top right: changed files with their `+added −deleted` lines, colored diff,
   commit or discard exactly the files you check (or commit and push), pull (it shows how many commits are waiting),
   push, switch or create a branch, and a history with branches and tags: click a commit to see its author, full
-  message and changes, Shift+click another one to see the changes of the whole range. Right-click a file for its
-  own history. Drag the lists' bottom edge to resize them.
+  message and changes, Shift+click another one to see the changes of the whole range. Right-click any file, in the git panel or
+  the files panel, for its own history. Drag the lists' bottom edge to resize them.
 - **Prompts panel**: write your next prompts ahead of time, one list per repo. Click one to edit it (Enter saves,
   Shift+Enter for a new line); its ✓ Apply button, or dragging it onto the terminal, pastes it there (you press Enter) and it leaves the list. Drag prompts up or down to reorder them.
 - **Terminals panel**: extra shells for the current tab (a dev server, logs), as many as you want. `+` in the top bar
