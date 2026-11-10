@@ -1,6 +1,6 @@
 import { createEffect, createSignal, For, on, Show } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
-import { createMenu } from "../ui/Menu";
+import { createMenu, type MenuItem } from "../ui/Menu";
 import { folderName } from "../tabs/layout";
 import { fileBadge } from "./fileIcons";
 import { Icon } from "../ui/Icon";
@@ -97,7 +97,11 @@ export function Explorer(props: {
   }
 
   /** Opening a folder (`fs_open`) shows it in the OS's file manager. */
-  const openInFileManager = (dir: string) => ({ label: `Open in ${FILE_MANAGER}`, run: () => invoke("fs_open", { path: dir }) });
+  const openInFileManager = (dir: string): MenuItem => ({
+    label: `Open in ${FILE_MANAGER}`,
+    icon: "external",
+    run: () => invoke("fs_open", { path: dir }),
+  });
 
   function fileMenu(e: MouseEvent, path: string, parent: string, dir: boolean) {
     setSelected({ path, parent });
@@ -105,14 +109,14 @@ export function Explorer(props: {
       ...(dir
         ? [openInFileManager(path)]
         : [
-            { label: "Open", run: () => props.onOpenFile(path) },
-            { label: "Open with default app", run: () => invoke("fs_open", { path }) },
-            ...(props.onHistory ? [{ label: "Show history", run: () => props.onHistory!(path) }] : []),
-          ]),
-      { label: `Reveal in ${FILE_MANAGER}`, run: () => invoke("fs_reveal", { path }) },
-      { label: "Copy path", run: () => navigator.clipboard.writeText(path) },
+            { label: "Open", icon: "file", run: () => props.onOpenFile(path) },
+            { label: "Open with default app", icon: "external", run: () => invoke("fs_open", { path }) },
+            ...(props.onHistory ? [{ label: "Show history", icon: "history", run: () => props.onHistory!(path) } as const] : []),
+          ] satisfies MenuItem[]),
+      { label: `Reveal in ${FILE_MANAGER}`, icon: "folder", run: () => invoke("fs_reveal", { path }) },
+      { label: "Copy path", icon: "copy", run: () => navigator.clipboard.writeText(path) },
       "separator",
-      { label: `Delete (move to ${TRASH_NAME})`, run: () => remove(path, parent) },
+      { label: `Delete (move to ${TRASH_NAME})`, icon: "trash", run: () => remove(path, parent) },
     ]);
   }
 

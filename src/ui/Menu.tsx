@@ -1,9 +1,9 @@
 import { createSignal, For, Show, onCleanup, onMount } from "solid-js";
 import { Portal } from "solid-js/web";
 import { COLORS } from "../tabs/layout";
-import { Icon } from "./Icon";
+import { Icon, type IconName } from "./Icon";
 
-type Action = { label: string; run(): void };
+type Action = { label: string; icon?: IconName; run(): void };
 export type MenuItem = Action | { colors(color: string | undefined): void; heading?: string } | "separator";
 const isAction = (item: MenuItem): item is Action => typeof item === "object" && "label" in item;
 
@@ -82,6 +82,7 @@ export function createMenu(onClosed?: () => void) {
                       onMouseEnter={() => setIndex(actions().indexOf(item))}
                       onClick={() => choose(item)}
                     >
+                      <Show when={item.icon}>{(name) => <Icon name={name()} size={14} />}</Show>
                       {item.label}
                     </div>
                   )

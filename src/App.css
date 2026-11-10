@@ -577,8 +577,16 @@ body,
 }
 
 .menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 5px 10px;
   border-radius: 4px;
+}
+
+.menu-item .icon {
+  flex: none;
+  opacity: 0.75;
 }
 
 .menu-item:hover {

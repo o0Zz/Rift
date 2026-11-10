@@ -20,9 +20,14 @@ const PATHS = {
   received: "M8 3v9.5M4.5 9L8 12.5 11.5 9",
   mail: "M2.5 4h11v8h-11zM2.5 4.5L8 8.5l5.5-4",
   link: "M7 9l2-2M6.5 5.5l1-1a2.1 2.1 0 0 1 3 3l-1 1M9.5 10.5l-1 1a2.1 2.1 0 0 1-3-3l1-1",
+  file: "M4 2.5h5l3 3v8H4zM9 2.5v3h3",
+  external: "M9 2.5h4.5V7M13.5 2.5L7.5 8.5M11.5 9.5v4h-9v-9h4",
+  history: "M8 2.5a5.5 5.5 0 1 0 0 11a5.5 5.5 0 0 0 0-11zM8 5v3l2 1.5",
+  copy: "M5.5 5.5h7v8h-7zM3.5 10.5v-8h7",
+  trash: "M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.5 9h6l.5-9M7 7v4M9 7v4",
 } as const;
 
-type IconName = keyof typeof PATHS;
+export type IconName = keyof typeof PATHS;
 
 export function Icon(props: { name: IconName; size?: number }) {
   const size = () => props.size ?? 16;
