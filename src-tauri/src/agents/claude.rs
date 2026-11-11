@@ -9,10 +9,12 @@ use super::config;
 use super::{AgentEvent, AgentHarness, Limit, Usage};
 
 // PostToolUse flips "blocked" back to "working" once a permission is granted and the tool ran.
-const EVENTS: [&str; 6] = [
+// PreToolUse: a new tool means the turn goes on, so an Esc that only closed an overlay (/btw) was no interrupt.
+const EVENTS: [&str; 7] = [
     "SessionStart",
     "SessionEnd",
     "UserPromptSubmit",
+    "PreToolUse",
     "PostToolUse",
     "Stop",
     "Notification",
@@ -95,7 +97,7 @@ impl AgentHarness for Claude {
         match payload["hook_event_name"].as_str()? {
             "SessionStart" => Some(AgentEvent::SessionStarted { session_id }),
             "SessionEnd" => Some(AgentEvent::SessionEnded { session_id }),
-            "UserPromptSubmit" => Some(AgentEvent::Working),
+            "UserPromptSubmit" | "PreToolUse" => Some(AgentEvent::Working),
             "PostToolUse" => Some(AgentEvent::ToolDone),
             "Stop" => Some(AgentEvent::Done),
             // idle_prompt is the "still waiting for you" reminder after a finished turn: not a block.
@@ -217,7 +219,7 @@ mod tests {
         let start =
             json!({ "hook_event_name": "SessionStart", "session_id": "abc", "source": "startup" });
         let end = json!({ "hook_event_name": "SessionEnd", "session_id": "abc" });
-        let other = json!({ "hook_event_name": "PreToolUse", "session_id": "abc" });
+        let other = json!({ "hook_event_name": "PreCompact", "session_id": "abc" });
         assert_eq!(
             c.parse_hook(&start),
             Some(AgentEvent::SessionStarted {
@@ -248,6 +250,10 @@ mod tests {
         };
         assert_eq!(
             ev("UserPromptSubmit", json!({ "prompt": "hi" })),
+            Some(AgentEvent::Working)
+        );
+        assert_eq!(
+            ev("PreToolUse", json!({ "tool_name": "Bash" })),
             Some(AgentEvent::Working)
         );
         assert_eq!(
