@@ -1,6 +1,6 @@
 //! Shared by the adapters: agent config files with Claude-style hooks, Rift's hook command line, one-shot runs.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use serde_json::{Map, Value, json};
@@ -137,23 +137,6 @@ pub fn safe_id(id: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
-/// Finds `name` on PATH. On Windows npm installs agents as `.cmd` shims, which `Command` does not look for.
-fn program(name: &str) -> PathBuf {
-    if cfg!(windows)
-        && let Some(paths) = std::env::var_os("PATH")
-    {
-        for dir in std::env::split_paths(&paths) {
-            for ext in ["exe", "cmd", "bat"] {
-                let candidate = dir.join(format!("{name}.{ext}"));
-                if candidate.is_file() {
-                    return candidate;
-                }
-            }
-        }
-    }
-    PathBuf::from(name)
-}
-
 /// How long a one-shot agent run may take (e.g. stuck on a login or an approval).
 const RUN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 
@@ -170,7 +153,7 @@ fn run_for(
     input: &str,
     timeout: std::time::Duration,
 ) -> Result<String> {
-    let mut cmd = crate::process::command(program(name));
+    let mut cmd = crate::process::command(crate::process::find_program(name));
     cmd.current_dir(cwd).args(args);
     let out = crate::process::output(cmd, input.as_bytes(), timeout, name)?;
     if !out.status.success() {

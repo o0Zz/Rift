@@ -2,7 +2,7 @@ import { createSignal, For, Match, Show, Switch, onCleanup, onMount } from "soli
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 import { Icon } from "../ui/Icon";
-import { ACTIONS, bind, comboOf, DEFAULT_KEYS, FONT_MAX, FONT_MIN, IS_MAC, isValidShortcut, type Action, type Settings, type TabSize, type ThemeChoice } from "./settings";
+import { ACTIONS, bind, comboOf, DEFAULT_KEYS, FONT_MAX, FONT_MIN, IS_MAC, IS_WINDOWS, isValidShortcut, type Action, type Settings, type TabSize, type ThemeChoice } from "./settings";
 
 type Page = "general" | "appearance" | "agents" | "shortcuts" | "windows";
 
@@ -177,6 +177,22 @@ export function SettingsPage(props: {
                       )}
                     </For>
                   </div>
+                </div>
+                <div class="setting">
+                  <label for="editor">
+                    External editor
+                    <span class="setting-sub">
+                      Double-click a file in the files panel, {IS_MAC ? "Cmd" : "Ctrl"}+Shift+N or the pencil in the top bar. A
+                      program name on PATH (notepad++, code) or its full path.
+                    </span>
+                  </label>
+                  <input
+                    id="editor"
+                    class="wide"
+                    placeholder={IS_WINDOWS ? "Automatic: Notepad++, else Notepad" : IS_MAC ? "Automatic: TextEdit" : "Automatic: the default app"}
+                    value={props.settings.editor}
+                    onChange={(e) => set({ editor: e.currentTarget.value.trim() })}
+                  />
                 </div>
                 <div class="setting">
                   <label>

@@ -358,6 +358,13 @@ function App() {
 
   const docs = createDocs({ host: () => host, active, single: () => settings().docs === "single" });
 
+  /** The external editor (Settings → General) on `path`, or empty, in the active tab's folder. */
+  function openEditor(path?: string) {
+    invoke("editor_open", { editor: settings().editor, path, cwd: active()?.cwd }).catch((e) =>
+      alert(`Could not open the editor: ${e}`),
+    );
+  }
+
   function step(dir: 1 | -1) {
     const order = visualOrder(tabs(), groups());
     const cur = active();
@@ -593,6 +600,7 @@ function App() {
     togglePrompts: () => togglePanel("prompts"),
     toggleMessages: () => togglePanel("messages"),
     newTerminal: () => consoles.open(),
+    openEditor: () => openEditor(),
     focusLeft: () => focusPane("left"),
     focusRight: () => focusPane("right"),
     focusUp: () => focusPane("up"),
@@ -737,6 +745,7 @@ function App() {
           root={panelTab()?.root ?? panelTab()?.cwd}
           refresh={filesRefresh()}
           onOpenFile={(path) => docs.open(path)}
+          onEditFile={openEditor}
           onHistory={panelTab()?.root ? showHistory : undefined}
           onDeleted={(path) => {
             // Its documents close (asking first about unsaved changes); the git panel shows the deletion.
@@ -843,6 +852,7 @@ function App() {
         onShowDoc={docs.show}
         onCloseDoc={docs.close}
         onNewTerminal={() => consoles.open()}
+        onOpenEditor={() => openEditor()}
         onTogglePrompts={() => togglePanel("prompts")}
         onToggleGit={() => togglePanel("git")}
       />

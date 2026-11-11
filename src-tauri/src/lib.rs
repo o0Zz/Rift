@@ -1,4 +1,5 @@
 mod agents;
+mod editor;
 mod explorer_menu;
 mod files;
 mod git;
@@ -12,6 +13,7 @@ mod settings;
 mod shell;
 
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -356,6 +358,21 @@ fn mcp_set(harnesses: State<Harnesses>, on: bool) -> Result<(), String> {
 #[tauri::command]
 async fn fs_list(dir: String) -> Result<Vec<files::Entry>, String> {
     files::list(dir.as_ref()).map_err(err)
+}
+
+/// The user's external editor (`editor`, "" = automatic) on `path`, or empty.
+#[tauri::command]
+async fn editor_open(
+    editor: String,
+    path: Option<String>,
+    cwd: Option<String>,
+) -> Result<(), String> {
+    editor::open(
+        &editor,
+        path.as_deref().map(Path::new),
+        cwd.as_deref().map(Path::new),
+    )
+    .map_err(err)
 }
 
 #[tauri::command]
@@ -734,6 +751,7 @@ pub fn run() {
             mcp_set,
             fs_list,
             fs_open,
+            editor_open,
             fs_read_text,
             fs_write_text,
             fs_mtime,

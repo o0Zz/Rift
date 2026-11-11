@@ -3,6 +3,7 @@
 
 use std::ffi::OsStr;
 use std::io::{Read, Write};
+use std::path::PathBuf;
 use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
@@ -18,6 +19,23 @@ pub fn command(program: impl AsRef<OsStr>) -> Command {
         cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW: no console flashing from the GUI app
     }
     cmd
+}
+
+/// Finds `name` on PATH. On Windows npm installs agents as `.cmd` shims, which `Command` does not look for.
+pub fn find_program(name: &str) -> PathBuf {
+    if cfg!(windows)
+        && let Some(paths) = std::env::var_os("PATH")
+    {
+        for dir in std::env::split_paths(&paths) {
+            for ext in ["exe", "cmd", "bat"] {
+                let candidate = dir.join(format!("{name}.{ext}"));
+                if candidate.is_file() {
+                    return candidate;
+                }
+            }
+        }
+    }
+    PathBuf::from(name)
 }
 
 /// Runs `cmd` with `input` on stdin and returns its output; after `timeout` it is killed and this fails.

@@ -39,13 +39,15 @@ const join = (dir: string, name: string) =>
 
 /**
  * File tree of the tab's repo (or folder). Each folder is listed once, when first expanded (cached until ⟳).
- * A click opens a file in the tab (`onOpenFile`), not in another app, and
+ * A click opens a file in the tab (`onOpenFile`), a double-click in the external editor (`onEditFile`); a click
  * selects it: focus stays here, so Delete moves it to the trash (`onDeleted` closes its documents).
  */
 export function Explorer(props: {
   root?: string;
   refresh?: number;
   onOpenFile(path: string): void;
+  /** In the external editor (double-click). */
+  onEditFile(path: string): void;
   onDeleted(path: string): void;
   /** Its git history; only in a repo. */
   onHistory?(path: string): void;
@@ -110,6 +112,7 @@ export function Explorer(props: {
         ? [openInFileManager(path)]
         : [
             { label: "Open", icon: "file", run: () => props.onOpenFile(path) },
+            { label: "Open in external editor", icon: "edit", run: () => props.onEditFile(path) },
             { label: "Open with default app", icon: "external", run: () => invoke("fs_open", { path }) },
             ...(props.onHistory ? [{ label: "Show history", icon: "history", run: () => props.onHistory!(path) } as const] : []),
           ] satisfies MenuItem[]),
@@ -148,6 +151,7 @@ export function Explorer(props: {
                       props.onOpenFile(path);
                       body.focus({ preventScroll: true });
                     }}
+                    onDblClick={() => !entry.dir && props.onEditFile(path)}
                     onContextMenu={(e) => fileMenu(e, path, p.dir, entry.dir)}
                   >
                     <span class="tree-chev">{entry.dir && <Icon name={open() ? "down" : "right"} size={12} />}</span>

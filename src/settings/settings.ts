@@ -12,6 +12,7 @@ export const ACTIONS = {
   togglePrompts: "Show / hide prompts panel",
   toggleMessages: "Show / hide agent messages panel",
   newTerminal: "New terminal",
+  openEditor: "Open the external editor",
   focusLeft: "Focus the pane on the left",
   focusRight: "Focus the pane on the right",
   focusUp: "Focus the pane above",
@@ -37,6 +38,8 @@ export type Settings = {
   shell: string;
   /** Opening a file: "single" replaces the shown document, "tabs" adds one each time. */
   docs: "single" | "tabs";
+  /** External editor: a program name on PATH or its full path; "" = automatic (Notepad++ or Notepad, TextEdit). */
+  editor: string;
   /** Height of a sidebar tab row. */
   tabSize: TabSize;
   /** Text scale of the sidebar, panels and documents (1 = normal); terminals use `fontSize`. Ctrl+wheel over one. */
@@ -76,6 +79,7 @@ export function defaultKeys(mac: boolean): Keymap {
       togglePrompts: ["Cmd+Shift+O"],
       toggleMessages: ["Cmd+Shift+M"],
       newTerminal: ["Cmd+Shift+K"],
+      openEditor: ["Cmd+Shift+N"],
       // Alt+arrows move by word in macOS terminals.
       focusLeft: ["Ctrl+Alt+ArrowLeft"],
       focusRight: ["Ctrl+Alt+ArrowRight"],
@@ -101,6 +105,7 @@ export function defaultKeys(mac: boolean): Keymap {
     togglePrompts: ["Ctrl+Shift+O"],
     toggleMessages: ["Ctrl+Shift+M"],
     newTerminal: ["Ctrl+Shift+K"],
+    openEditor: ["Ctrl+Shift+N"],
     focusLeft: ["Alt+ArrowLeft"],
     focusRight: ["Alt+ArrowRight"],
     focusUp: ["Alt+ArrowUp"],
@@ -125,6 +130,7 @@ export const DEFAULTS: Settings = {
   fontFamily: "'Cascadia Mono', Consolas, Menlo, 'DejaVu Sans Mono', monospace",
   shell: "",
   docs: "single",
+  editor: "",
   tabSize: "comfortable",
   scale: { sidebar: 1, files: 1, git: 1, prompts: 1, docs: 1 },
   keys: DEFAULT_KEYS,
@@ -145,6 +151,7 @@ export function mergeSettings(saved: unknown): Settings {
     fontFamily: typeof s.fontFamily === "string" && s.fontFamily.trim() ? s.fontFamily : DEFAULTS.fontFamily,
     shell: typeof s.shell === "string" ? s.shell : DEFAULTS.shell,
     docs: s.docs === "tabs" ? "tabs" : DEFAULTS.docs,
+    editor: typeof s.editor === "string" ? s.editor.trim() : DEFAULTS.editor,
     tabSize: s.tabSize && s.tabSize in TAB_ROW_HEIGHT ? s.tabSize : DEFAULTS.tabSize,
     scale: Object.fromEntries(
       SCALED.map((area) => {

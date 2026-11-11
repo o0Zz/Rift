@@ -20,6 +20,7 @@ export function TopBar(p: {
   onShowDoc(tab: Tab, index: number): void;
   onCloseDoc(tab: Tab, index: number): void;
   onNewTerminal(): void;
+  onOpenEditor(): void;
   onTogglePrompts(): void;
   onToggleMessages(): void;
   onToggleGit(): void;
@@ -70,6 +71,9 @@ export function TopBar(p: {
       </Show>
       <button class="icon-btn" onClick={() => p.onNewTerminal()} title="New terminal (Ctrl+Shift+K)">
         <Icon name="plus" />
+      </button>
+      <button class="icon-btn" onClick={() => p.onOpenEditor()} title="Open the external editor (Ctrl+Shift+N)">
+        <Icon name="edit" />
       </button>
       <button class="icon-btn" classList={{ on: p.promptsShown }} onClick={() => p.onTogglePrompts()} title="Prompts (Ctrl+Shift+O)">
         <Icon name="list" />
