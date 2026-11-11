@@ -234,17 +234,19 @@ function App() {
   /** A shell's folder, from its prompt: also catches `git checkout` (same cwd, new branch). */
   function onShellCwd(tab: Tab, shell: Shell, cwd: string) {
     shell.cwd = cwd;
-    invoke<{ root: string; branch: string } | null>("git_head", { cwd }).then((head) =>
-      batch(() => {
-        // The tab's repo is its main shell's.
-        if (shell === tab.main) {
-          tab.root = head?.root;
-          tab.branch = head?.branch;
-        }
-        if (head) git.promptCameBack(head.root);
-        git.stats(tab);
-      }),
-    );
+    readHead(tab, shell === tab.main ? undefined : cwd).then((head) => {
+      if (head) git.promptCameBack(head.root);
+      git.stats(tab);
+    });
+  }
+
+  /** The tab's repo root and branch, from its main shell's folder (`.git/HEAD`, no process); `cwd` = another shell's. */
+  function readHead(tab: Tab, cwd?: string) {
+    const main = !cwd;
+    return invoke<{ root: string; branch: string } | null>("git_head", { cwd: cwd ?? tab.cwd }).then((head) => {
+      if (main) batch(() => ((tab.root = head?.root), (tab.branch = head?.branch)));
+      return head;
+    });
   }
 
   /** Every shell of a tab (its own or in a terminal panel) gets the same terminal: agent keys, folder, title. */
@@ -498,6 +500,8 @@ function App() {
     });
     messaging.statusChanged(pty);
     git.stats(tab); // an agent at work changes files
+    // It may have run `git init` or switched branches: no prompt came back to show it.
+    if (shell.status === "done" && tab.cwd) readHead(tab);
     // Finished in the repo the git panel shows (any tab): it reloads now to show the agent's changes.
     git.agentMoved(tab.root, shell.status === "done");
     // A terminal panel's shell is in front only while its panel is shown.
@@ -612,7 +616,9 @@ function App() {
     zoomOut: () => zoomFocused(-1),
     zoomReset: () => zoomFocused(0),
     refreshPanels: () => {
-      git.reloadNow(panelTab()?.root);
+      const tab = panelTab();
+      if (tab?.cwd) readHead(tab);
+      git.reloadNow(tab?.root);
       setFilesRefresh(filesRefresh() + 1);
     },
     nextAttention: () => {
@@ -804,6 +810,7 @@ function App() {
           behind={panelTab()?.stats?.behind}
           agent={agents()[0]?.name}
           refresh={git.refresh()}
+          onRecheck={() => panelTab()?.cwd && readHead(panelTab()!)}
           showHistory={historyAsk()}
           onClose={() => togglePanel("git")}
           onHeadChanged={() => {

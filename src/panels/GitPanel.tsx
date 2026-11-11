@@ -53,6 +53,8 @@ export function GitPanel(props: {
   /** Commits the upstream has that we do not (badge on Pull). */
   behind?: number;
   refresh?: number;
+  /** ⟳: re-reads the tab's repo and branch (a `git init` or a checkout by an agent brings no prompt). */
+  onRecheck(): void;
   /** Asked from the files panel: History of this file (path from the repo root). A new object each time. */
   showHistory?: { file: string };
   /** The agent ✨ Generate sends the diff to (the first one used on this machine). */
@@ -369,17 +371,18 @@ export function GitPanel(props: {
           <button class="icon-btn" title="Push" disabled={!!busy()} onClick={push}>
             <Icon name="push" />
           </button>
-          <button
-            class="icon-btn"
-            title="Refresh (and fetch)"
-            onClick={() => {
-              reload();
-              if (props.root) fetchRemote(props.root, true);
-            }}
-          >
-            <Icon name="refresh" />
-          </button>
         </Show>
+        <button
+          class="icon-btn"
+          title="Refresh (and fetch)"
+          onClick={() => {
+            props.onRecheck();
+            reload();
+            if (props.root) fetchRemote(props.root, true);
+          }}
+        >
+          <Icon name="refresh" />
+        </button>
       </PanelHead>
       <Show when={props.root} fallback={<div class="tree-note">Not a git repository</div>}>
         <div class="git-views">
