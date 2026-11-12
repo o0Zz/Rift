@@ -1,6 +1,7 @@
 //! Git: branch from `.git/HEAD` (file reads only, cheap enough for every prompt) and, on demand,
 //! status/diff through the `git` CLI (respects the user's config).
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
@@ -565,6 +566,76 @@ pub struct Commit {
     pub body: String,
     /// Branches and tags pointing at this commit.
     pub refs: Vec<Ref>,
+    /// How many commits it holds (itself and every ancestor): the first commit is 1. None in a history over
+    /// `NUMBERED_MAX` commits.
+    pub number: Option<usize>,
+}
+
+/// Up to this many commits, the history is numbered (its whole graph is read: ~1 MB per 10,000 commits).
+const NUMBERED_MAX: usize = 50_000;
+
+/// HEAD's commit graph, to number commits.
+struct Graph {
+    index: HashMap<String, usize>,
+    parents: Vec<Vec<usize>>,
+    /// Per commit, the last count that reached it (no set allocated per count).
+    seen: Vec<usize>,
+    counts: usize,
+}
+
+impl Graph {
+    /// One `rev-list --parents HEAD`; None over `NUMBERED_MAX` commits or without commits.
+    fn read(root: &Path) -> Option<Graph> {
+        let limit = format!("-n{}", NUMBERED_MAX + 1);
+        let out = git(root, &["rev-list", "--parents", &limit, "HEAD"]).ok()?;
+        let text = String::from_utf8_lossy(&out.stdout);
+        let lines: Vec<Vec<&str>> = text.lines().map(|l| l.split(' ').collect()).collect();
+        if !out.status.success() || lines.len() > NUMBERED_MAX {
+            return None;
+        }
+        let index: HashMap<String, usize> = lines
+            .iter()
+            .enumerate()
+            .map(|(i, l)| (l[0].to_string(), i))
+            .collect();
+        // A shallow clone's missing parents are left out: its numbers count what it has.
+        let parents = lines
+            .iter()
+            .map(|l| {
+                l[1..]
+                    .iter()
+                    .filter_map(|p| index.get(*p).copied())
+                    .collect()
+            })
+            .collect();
+        let seen = vec![0; lines.len()];
+        Some(Graph {
+            index,
+            parents,
+            seen,
+            counts: 0,
+        })
+    }
+
+    /// The commits reachable from `hash`, itself included.
+    fn number(&mut self, hash: &str) -> Option<usize> {
+        let start = *self.index.get(hash)?;
+        self.counts += 1;
+        let mark = self.counts;
+        self.seen[start] = mark;
+        let mut stack = vec![start];
+        let mut count = 0;
+        while let Some(i) = stack.pop() {
+            count += 1;
+            for &p in &self.parents[i] {
+                if self.seen[p] != mark {
+                    self.seen[p] = mark;
+                    stack.push(p);
+                }
+            }
+        }
+        Some(count)
+    }
 }
 
 #[derive(Debug, PartialEq, Serialize)]
@@ -631,7 +702,12 @@ pub fn log(root: &Path, max: usize, file: Option<&str>) -> Result<Vec<Commit>> {
     if let Some(file) = file {
         args.extend(["--follow", "--", file]);
     }
-    let out = git(root, &args)?;
+    // The graph is read beside the log.
+    let (out, mut graph) = std::thread::scope(|s| {
+        let graph = s.spawn(|| Graph::read(root));
+        (git(root, &args), graph.join().ok().flatten())
+    });
+    let out = out?;
     if !out.status.success() {
         let has_head = git(root, &["rev-parse", "--verify", "--quiet", "HEAD"])?;
         return if has_head.status.success() {
@@ -645,6 +721,7 @@ pub fn log(root: &Path, max: usize, file: Option<&str>) -> Result<Vec<Commit>> {
         .filter_map(|record| {
             let f: Vec<_> = record.trim_start_matches('\n').split('\x1f').collect();
             (f.len() == 9).then(|| Commit {
+                number: graph.as_mut().and_then(|g| g.number(f[0])),
                 hash: f[0].into(),
                 short: f[1].into(),
                 author: f[2].into(),
@@ -823,6 +900,33 @@ mod tests {
         run(r, &["add", "."]);
         run(r, &["commit", "-q", "-m", "init"]);
         dir
+    }
+
+    #[test]
+    fn numbers_count_every_ancestor_across_merges() {
+        let dir = repo();
+        let r = dir.path();
+        run(r, &["switch", "-q", "-c", "side"]);
+        run(r, &["commit", "-q", "--allow-empty", "-m", "side 1"]);
+        run(r, &["commit", "-q", "--allow-empty", "-m", "side 2"]);
+        run(r, &["switch", "-q", "main"]);
+        run(r, &["commit", "-q", "--allow-empty", "-m", "main 2"]);
+        run(r, &["merge", "-q", "--no-ff", "-m", "merge", "side"]);
+        let number = |subject: &str| {
+            log(r, 10, None)
+                .unwrap()
+                .into_iter()
+                .find(|c| c.subject == subject)
+                .unwrap()
+                .number
+        };
+        assert_eq!(number("init"), Some(1));
+        assert_eq!(number("main 2"), Some(2));
+        assert_eq!(number("side 2"), Some(3)); // init, side 1, side 2
+        assert_eq!(number("merge"), Some(5));
+        // A file's history keeps the numbers of the whole history.
+        let file = log(r, 10, Some("kept.txt")).unwrap();
+        assert_eq!(file[0].number, Some(1));
     }
 
     #[test]
@@ -1318,6 +1422,8 @@ three
         let commits = log(r, 10, None).unwrap();
         let subjects: Vec<_> = commits.iter().map(|c| c.subject.as_str()).collect();
         assert_eq!(subjects, ["Second | with a pipe", "init"]);
+        let numbers: Vec<_> = commits.iter().map(|c| c.number).collect();
+        assert_eq!(numbers, [Some(2), Some(1)]);
         assert_eq!(commits[0].hash.len(), 40);
         assert!(commits[0].hash.starts_with(&commits[0].short));
         assert_eq!(log(r, 1, None).unwrap().len(), 1);

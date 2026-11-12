@@ -31,6 +31,8 @@ type Commit = {
   subject: string;
   body: string;
   refs: Ref[];
+  /** Commits it holds (itself and its ancestors): the first commit is 1; null in a very large history. */
+  number: number | null;
 };
 type Branch = { name: string; current: boolean };
 type Busy = "commit" | "generate" | "push" | "pull" | "branch" | "discard";
@@ -461,6 +463,9 @@ export function GitPanel(props: {
                         onMouseDown={(e) => e.shiftKey && e.preventDefault()}
                         onClick={(e) => pick(commit.hash, e.shiftKey)}
                       >
+                        <Show when={commit.number}>
+                          <span class="git-num">#{commit.number}</span>
+                        </Show>
                         <span class="git-hash">{commit.short}</span>
                         <For each={commit.refs}>
                           {(ref) => <span class={`git-ref ${ref.kind}`}>{ref.name}</span>}

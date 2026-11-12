@@ -1234,6 +1234,13 @@ body,
   color: var(--fg-strong);
 }
 
+.git-num {
+  flex: none;
+  color: var(--fg-dim);
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 0.923em;
+}
+
 .git-hash {
   flex: none;
   color: var(--branch);
