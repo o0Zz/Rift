@@ -1,5 +1,5 @@
 import { createEffect, createMemo, createSignal, For, Show, onMount, type JSX } from "solid-js";
-import { displayTitle, matchesFilter, ownRowColor, sidebarItems, type Agent, type Group, type Spot, type TabFilter } from "./layout";
+import { displayTitle, filteredTabs, matchesFilter, ownRowColor, sidebarItems, type Agent, type Group, type Spot, type TabFilter } from "./layout";
 import { createMenu } from "../ui/Menu";
 import { Tab } from "./Tab";
 import { TabIcon } from "./icons";
@@ -56,12 +56,11 @@ export function Sidebar(props: SidebarProps) {
   });
 
   const groupOf = (tab: Tab) => props.groups.find((g) => g.id === tab.group);
-  // Groups and ungrouped tabs in sidebar order, ordered once per change. While filtering, empty groups hide.
+  // Groups and ungrouped tabs in sidebar order, ordered once per change. While filtering, empty groups hide and
+  // the active tab stays.
   const items = createMemo(() =>
-    sidebarItems(
-      props.tabs.filter((t) => matchesFilter(t, props.filter)),
-      props.groups,
-    ).filter((i) => "tab" in i || props.filter === "all" || i.tabs.length > 0),
+    // Unfiltered, the active tab is not read: a switch recomputes nothing.
+    sidebarItems(props.filter === "all" ? props.tabs : filteredTabs(props.tabs, props.filter, props.active), props.groups).filter((i) => "tab" in i || props.filter === "all" || i.tabs.length > 0),
   );
   // Rows keyed by their tab or group object: a move never rebuilds them.
   const keys = createMemo(() => items().map((i) => ("tab" in i ? i.tab : i.group)));

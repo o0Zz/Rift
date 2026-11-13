@@ -206,6 +206,11 @@ export function matchesFilter(t: { status?: Status; unread: boolean }, filter: T
   return true;
 }
 
+/** The sidebar's rows under a filter: the active tab always stays (seeing it clears "needs me", it must not vanish). */
+export function filteredTabs<T extends { status?: Status; unread: boolean }>(tabs: T[], filter: TabFilter, active?: T): T[] {
+  return tabs.filter((t) => t === active || matchesFilter(t, filter));
+}
+
 /** The next tab that needs the user after `current`, in sidebar order, wrapping; blocked ones first. */
 export function nextNeedingAttention<T extends { status?: Status; unread: boolean }>(
   order: T[],

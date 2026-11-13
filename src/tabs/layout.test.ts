@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   displayTitle,
   folderName,
+  filteredTabs,
   matchesFilter,
   moveGroup,
   moveTab,
@@ -207,6 +208,16 @@ describe("attention", () => {
     expect(tabs.filter((t) => matchesFilter(t, "attention")).map((t) => t.name)).toEqual(["b", "d"]);
     expect(tabs.filter((t) => matchesFilter(t, "working")).map((t) => t.name)).toEqual(["w"]);
     expect(tabs.filter((t) => matchesFilter(t, "all"))).toHaveLength(4);
+  });
+
+  it("keeps the active tab in a filtered sidebar once seen", () => {
+    const tabs = [tab("w", "working"), tab("b", "blocked"), tab("d", "done", true), tab("s")];
+    const [, , d, s] = tabs;
+    expect(filteredTabs(tabs, "attention", d).map((t) => t.name)).toEqual(["b", "d"]);
+    d.unread = false; // seen: no longer needs the user, still the one on screen
+    expect(filteredTabs(tabs, "attention", d).map((t) => t.name)).toEqual(["b", "d"]);
+    expect(filteredTabs(tabs, "attention", s).map((t) => t.name)).toEqual(["b", "s"]);
+    expect(filteredTabs(tabs, "working").map((t) => t.name)).toEqual(["w"]);
   });
 
   it("goes to the next tab that needs the user, blocked first, wrapping", () => {
