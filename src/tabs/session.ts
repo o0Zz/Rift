@@ -9,6 +9,8 @@ import type { Tab } from "./Tab";
 export type TabUi = { name?: string; color?: string; group?: string; shell?: string; snap?: string; docs?: string[]; doc?: number };
 export type SavedTab = { cwd?: string; title: string; agent?: AgentSession; ui?: TabUi };
 export type Saved = { tabs: SavedTab[]; active: number; layout?: { groups?: Group[]; panes?: unknown; widths?: { tabs?: number } } };
+/** What `session_restore` returns: `problem` = the file or some tabs could not be read (a copy is kept). */
+export type Restored = Saved & { problem?: string | null };
 
 /**
  * Keeps the backend's session (tabs, layout) up to date. Written 300 ms after the last change, never during it:

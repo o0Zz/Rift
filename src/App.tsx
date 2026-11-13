@@ -40,7 +40,7 @@ import {
 } from "./tabs/layout";
 import { Tab } from "./tabs/Tab";
 import { Shell } from "./tabs/Shell";
-import { createSessionSave, saveHistories, type Saved, type SavedTab } from "./tabs/session";
+import { createSessionSave, saveHistories, type Restored, type SavedTab } from "./tabs/session";
 import { createGitWatch } from "./tabs/gitWatch";
 import { TopBar } from "./tabs/TopBar";
 import { createDocs } from "./docs/docs";
@@ -325,7 +325,7 @@ function App() {
   }
 
   async function restore() {
-    const saved = await invoke<Saved>("session_restore");
+    const saved = await invoke<Restored>("session_restore");
     setGroups(saved.layout?.groups ?? []);
     setPanes(mergePanes(saved.layout?.panes));
     if (saved.layout?.widths?.tabs) setTabsWidth(saved.layout.widths.tabs);
@@ -334,7 +334,9 @@ function App() {
     activate(list[Math.min(saved.active, list.length - 1)]);
     await Promise.all(starts);
     session.restored();
-    invoke("scrollback_prune", { keep: tabs().map((t) => t.snap) });
+    // Some tabs were not restored: their histories stay, and the user hears about it (backups hold the file).
+    if (saved.problem) alert(`Rift could not restore every tab: ${saved.problem}`);
+    else invoke("scrollback_prune", { keep: tabs().map((t) => t.snap) });
     // Launched from Explorer's "Open in Rift": that folder opens as a new tab, after the restored ones.
     const dir = await invoke<string | null>("startup_dir");
     if (dir) newTab({ cwd: dir, title: "" });

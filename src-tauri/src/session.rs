@@ -2,8 +2,10 @@
 //! The frontend owns the tab list; agent bindings come from hooks. Written to disk on every change.
 
 use std::collections::HashMap;
+use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -30,6 +32,21 @@ pub struct Saved {
     pub layout: Value,
 }
 
+/// What a freshly loaded page restores: the saved state, and what went wrong reading it (shown to the user).
+#[derive(Debug, Serialize)]
+pub struct Restored {
+    #[serde(flatten)]
+    pub saved: Saved,
+    pub problem: Option<String>,
+}
+
+/// While tabs change, a backup at most this often: a burst (tabs closing one after another) keeps the
+/// state from before it instead of rolling every copy out.
+const BACKUP_EVERY: Duration = Duration::from_secs(60);
+
+/// `rift.log` past this size starts over (the previous one kept as `rift.log.old`).
+const LOG_MAX: u64 = 512 * 1024;
+
 /// A tab as the frontend reports it. `pty` is unknown until its shell is open.
 #[derive(Debug, Clone, Deserialize)]
 pub struct TabInfo {
@@ -50,6 +67,9 @@ struct Inner {
     initialized: bool,
     /// Set when the window closes: shells are about to die and their exit must not erase the state.
     frozen: bool,
+    /// Tabs and groups as last written: a backup is taken only when they change (not the active tab).
+    last_tabs: Vec<u8>,
+    last_backup: Option<Instant>,
 }
 
 pub struct SessionStore {
@@ -65,15 +85,100 @@ impl SessionStore {
         }
     }
 
-    /// The state saved by the previous run (empty if none or unreadable).
+    /// The state saved on disk (tests: what the next run would restore).
+    #[cfg(test)]
     pub fn load(&self) -> Saved {
-        crate::files::read_json_or_default(&self.path)
+        self.read().0
+    }
+
+    /// For a freshly loaded page, before the previous page's shells are closed: forgets that page's tabs
+    /// (their agents' exit hooks must not rewrite the file with them), backs the file up, then reads it.
+    pub fn restore(&self) -> Restored {
+        let mut inner = self.inner.lock().unwrap();
+        *inner = Inner {
+            frozen: inner.frozen,
+            last_backup: Some(Instant::now()),
+            ..Inner::default()
+        };
+        drop(inner);
+        let backed_up = crate::files::backup(&self.path);
+        let (saved, problem) = self.read();
+        let problem = problem.map(|p| match backed_up {
+            Ok(()) => format!(
+                "{p}. A copy of the file is in {}, with the previous ones.",
+                crate::files::backups_dir(&self.path).display()
+            ),
+            Err(e) => format!("{p} (no backup: {e})."),
+        });
+        self.note(&format!(
+            "page loaded: {} tabs to restore{}",
+            saved.tabs.len(),
+            problem
+                .as_deref()
+                .map_or(String::new(), |p| format!(" ({p})"))
+        ));
+        Restored { saved, problem }
+    }
+
+    /// The saved state, read tab by tab: a tab that does not parse is left out, not the whole session.
+    fn read(&self) -> (Saved, Option<String>) {
+        let Ok(text) = std::fs::read_to_string(&self.path) else {
+            return (Saved::default(), None); // first run
+        };
+        let value = match serde_json::from_str::<Value>(&text) {
+            Ok(v) if v.is_object() => v,
+            Ok(_) => {
+                return (
+                    Saved::default(),
+                    Some("session.json holds no session".into()),
+                );
+            }
+            Err(e) => {
+                return (
+                    Saved::default(),
+                    Some(format!("session.json could not be read ({e})")),
+                );
+            }
+        };
+        let all = value["tabs"].as_array().map_or(&[][..], Vec::as_slice);
+        let tabs: Vec<SavedTab> = all
+            .iter()
+            .filter_map(|t| serde_json::from_value(t.clone()).ok())
+            .collect();
+        let lost = all.len() - tabs.len();
+        let problem =
+            (lost > 0).then(|| format!("{lost} of {} saved tabs could not be read", all.len()));
+        let saved = Saved {
+            tabs,
+            active: value["active"].as_u64().unwrap_or(0) as usize,
+            layout: value["layout"].clone(),
+        };
+        (saved, problem)
+    }
+
+    /// One line in `rift.log` (next to the session): rare events only, to tell later what happened to tabs.
+    pub fn note(&self, line: &str) {
+        let log = self.path.with_file_name("rift.log");
+        if std::fs::metadata(&log).is_ok_and(|m| m.len() > LOG_MAX) {
+            let _ = std::fs::rename(&log, log.with_extension("log.old"));
+        }
+        let stamp = crate::files::stamp(std::time::SystemTime::now());
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log)
+        {
+            let _ = writeln!(f, "{stamp} {line}");
+        }
     }
 
     pub fn update_tabs(&self, tabs: Vec<TabInfo>, active: usize, layout: Value) {
         let mut inner = self.inner.lock().unwrap();
         if inner.frozen {
             return;
+        }
+        if inner.initialized && tabs.len() < inner.tabs.len() {
+            self.note(&format!("tabs: {} -> {}", inner.tabs.len(), tabs.len()));
         }
         inner
             .agents
@@ -82,7 +187,7 @@ impl SessionStore {
         inner.active = active;
         inner.layout = layout;
         inner.initialized = true;
-        self.write(&inner);
+        self.write(&mut inner);
     }
 
     /// Binds a resumed session to its new shell before the agent reports it, so it survives an early close.
@@ -119,14 +224,21 @@ impl SessionStore {
             // Status changes are live-only, nothing to restore.
             _ => return,
         }
-        self.write(&inner);
+        self.write(&mut inner);
     }
 
     pub fn freeze(&self) {
-        self.inner.lock().unwrap().frozen = true;
+        let mut inner = self.inner.lock().unwrap();
+        if !inner.frozen {
+            inner.frozen = true;
+            self.note(&format!(
+                "closing: session kept with {} tabs",
+                inner.tabs.len()
+            ));
+        }
     }
 
-    fn write(&self, inner: &Inner) {
+    fn write(&self, inner: &mut Inner) {
         if !inner.initialized {
             return;
         }
@@ -144,6 +256,20 @@ impl SessionStore {
             active: inner.active,
             layout: inner.layout.clone(),
         };
+        // The file about to be replaced goes to the backups when tabs or groups changed.
+        let tabs = serde_json::to_vec(&(&saved.tabs, saved.layout.get("groups"))).unwrap();
+        if tabs != inner.last_tabs {
+            if inner
+                .last_backup
+                .is_none_or(|t| t.elapsed() >= BACKUP_EVERY)
+            {
+                if let Err(e) = crate::files::backup(&self.path) {
+                    eprintln!("rift: could not back up the session: {e}");
+                }
+                inner.last_backup = Some(Instant::now());
+            }
+            inner.last_tabs = tabs;
+        }
         let json = serde_json::to_vec_pretty(&saved).unwrap();
         if let Err(e) = crate::files::write_atomic(&self.path, &json) {
             eprintln!("rift: could not save session: {e}");
@@ -294,6 +420,105 @@ mod tests {
         store.agent_event(1, "claude", &AgentEvent::Working);
         store.agent_event(1, "claude", &AgentEvent::Done);
         assert!(!path.exists());
+    }
+
+    fn backups(path: &std::path::Path) -> Vec<Saved> {
+        let mut files: Vec<_> = std::fs::read_dir(crate::files::backups_dir(path))
+            .map(|d| d.map(|e| e.unwrap().path()).collect())
+            .unwrap_or_default();
+        files.sort();
+        files
+            .iter()
+            .map(|f| crate::files::read_json_or_default(f))
+            .collect()
+    }
+
+    #[test]
+    fn a_reloaded_page_starts_clean_and_old_agent_exits_never_rewrite_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("session.json");
+        let store = SessionStore::new(path.clone());
+        store.update_tabs(vec![tab(1, "a"), tab(2, "b")], 0, Value::Null);
+        store.agent_event(1, "claude", &started("s1"));
+
+        // The page reloads: its shells are closed, so their agents end after the new page asked.
+        let restored = store.restore();
+        assert_eq!(restored.saved.tabs.len(), 2);
+        assert_eq!(restored.problem, None);
+        let ended = AgentEvent::SessionEnded {
+            session_id: "s1".into(),
+        };
+        store.agent_event(1, "claude", &ended);
+        assert_eq!(store.load().tabs[0].agent, agent("s1"), "still resumable");
+        assert_eq!(backups(&path).len(), 1, "the file was backed up on load");
+        let log = std::fs::read_to_string(dir.path().join("rift.log")).unwrap();
+        assert!(log.contains("page loaded: 2 tabs to restore"), "{log}");
+    }
+
+    #[test]
+    fn unreadable_tabs_are_left_out_and_reported() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("session.json");
+        std::fs::write(
+            &path,
+            r#"{"tabs":[{"cwd":"a","title":"t","agent":null},{"cwd":5},{"cwd":"b","title":"u","agent":null}],
+                "active":1,"layout":{"groups":[]}}"#,
+        )
+        .unwrap();
+        let store = SessionStore::new(path.clone());
+        let r = store.restore();
+        assert_eq!(r.saved.tabs.len(), 2);
+        assert_eq!(r.saved.active, 1);
+        let problem = r.problem.unwrap();
+        assert!(
+            problem.starts_with("1 of 3 saved tabs could not be read"),
+            "{problem}"
+        );
+        assert_eq!(backups(&path).len(), 1);
+
+        std::fs::write(&path, "{ cut").unwrap();
+        let r = store.restore();
+        assert!(r.saved.tabs.is_empty());
+        assert!(
+            r.problem
+                .unwrap()
+                .starts_with("session.json could not be read")
+        );
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "{ cut",
+            "kept until the page saves"
+        );
+    }
+
+    #[test]
+    fn tab_changes_are_backed_up_at_most_once_a_minute_and_switches_never() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("session.json");
+        let store = SessionStore::new(path.clone());
+        let all = vec![tab(1, "a"), tab(2, "b"), tab(3, "c")];
+        store.update_tabs(all.clone(), 0, Value::Null);
+        assert!(backups(&path).is_empty(), "no file before the first write");
+        // Switching tabs only changes `active`: never a backup.
+        store.inner.lock().unwrap().last_backup = None;
+        store.update_tabs(all.clone(), 2, Value::Null);
+        assert!(backups(&path).is_empty());
+        // Tabs closing one after another: one backup, the state before the burst.
+        store.update_tabs(all[..2].to_vec(), 0, Value::Null);
+        store.update_tabs(all[..1].to_vec(), 0, Value::Null);
+        let b = backups(&path);
+        assert_eq!(b.len(), 1);
+        assert_eq!(b[0].tabs.len(), 3);
+        // A minute later, the next change backs up again.
+        store.inner.lock().unwrap().last_backup = Some(Instant::now() - BACKUP_EVERY);
+        store.update_tabs(vec![], 0, Value::Null);
+        assert_eq!(
+            backups(&path)
+                .iter()
+                .map(|s| s.tabs.len())
+                .collect::<Vec<_>>(),
+            [3, 1]
+        );
     }
 
     #[test]

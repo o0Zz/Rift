@@ -29,7 +29,7 @@ How we hold it:
 ## Stack
 
 - **Tauri 2** (Rust, system WebView). No Electron.
-- **Rust**: PTY via `portable-pty` (ConPTY on Windows), git via the `git` CLI (user's config/hooks), state in the app data dir (`%APPDATA%\dev.rift.terminal\`: `session.json`, `settings.json`, `prompts.json`, `scrollback/`).
+- **Rust**: PTY via `portable-pty` (ConPTY on Windows), git via the `git` CLI (user's config/hooks), state in the app data dir (`%APPDATA%\dev.rift.terminal\`: `session.json`, `settings.json`, `prompts.json`, `scrollback/`, `backups/`, `rift.log`).
 - **Frontend**: TypeScript + Solid. Terminal: **xterm.js, DOM renderer**. Editor: CodeMirror 6 (lazy).
 - **Shells** (`shell.rs`): default PowerShell 7, else Windows PowerShell; Unix `$SHELL` (fallback zsh / bash). Profiles (installed only): PowerShell 7, Windows PowerShell, cmd, Git Bash, WSL; Unix: login shell + `/etc/shells`. Default in Settings; right-click + for another; a new tab inherits the active tab's shell (`ui.shell`). The spare shell is only for the default shell.
 
@@ -121,7 +121,8 @@ Frontend ↔ backend: Tauri commands, the PTY `Channel`, events (`pty-exit`, `ag
 - Frontend owns the tab list (`session_update`, 300 ms after the last change, at once before closing or updating: `session.flush`); hooks own the agent binding per pty. `SessionStore` writes tmp + rename, never before the first report, never after the freeze (`WindowEvent::Destroyed`).
 - A restored tab binds its session at `pty_open` and runs the harness's `resume_command` in its cwd. `SessionEnded` unbinds only a matching id (`/clear`). Resume ids validated (UUID for Claude, `config::safe_id` for others).
 - Scrollback: on close and before an update restart, each **shell** tab's last 2000 lines (with colors) to `scrollback/<snap>.ans` (tmp + rename), written back under a dim "── restored ──" line. Agent tabs skipped (resume redisplays). Orphans pruned; ids validated.
-- `session_restore` first closes every tab shell (dev reloads would leak them). Bench mode: fresh temp session/settings/prompts files. `RIFT_DATA_DIR` = isolated profile, no single instance (screenshots, experiments).
+- Backups (`files::backup`, `backups/<stem>-<UTC time>.json`, newest 20 per file): settings/prompts before every changed save (identical = no write); session at each page load and before a write that changes tabs or groups (not `active`), at most once a minute, so a burst of closing tabs keeps the state before it. Restore them by hand.
+- `session_restore` first resets the store (`restore`: the previous page's tabs are forgotten, so their agents' exit hooks cannot rewrite the file), then closes every tab shell (dev reloads would leak them). The file is read tab by tab: an unreadable tab or file is reported (`problem`, an alert after restore, histories not pruned), the copy is in `backups/`. `rift.log` (512 KB, then `.old`) notes page loads, shell exits, tab count drops and the freeze: rare events only, to tell what happened to lost tabs. Bench mode: fresh temp session/settings/prompts files. `RIFT_DATA_DIR` = isolated profile, no single instance (screenshots, experiments).
 
 ### Agent harness
 - Everything agent-specific goes through `AgentHarness` (`agents/mod.rs`): `id`, `name`, `detected` (config folder exists: only those get Enable, a worktree entry and Generate), `parse_hook`, `resume_command`, `start_command`, `hooks_installed`, `install_hooks`, `setup` (what Enable writes, shown before the click), `one_shot`, `set_mcp`. `Harnesses::new(home)` lists them. UI and session code never name an agent.

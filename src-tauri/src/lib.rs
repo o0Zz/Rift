@@ -23,7 +23,7 @@ use portable_pty::PtySize;
 use pty::{PtyManager, TabId};
 use scrollback::Scrollback;
 use serde::Serialize;
-use session::{Saved, SessionStore, TabInfo};
+use session::{Restored, SessionStore, TabInfo};
 use settings::SettingsFile;
 use shell::Shell;
 use tauri::ipc::{Channel, InvokeResponseBody};
@@ -78,6 +78,8 @@ fn pty_open(
                 let _ = on_data.send(InvokeResponseBody::Raw(bytes));
             }),
             Box::new(move |id| {
+                app.state::<SessionStore>()
+                    .note(&format!("shell {id} exited"));
                 let _ = app.emit("pty-exit", id);
             }),
         )
@@ -150,11 +152,12 @@ async fn git_worktree_add(root: String, branch: String) -> Result<String, String
 }
 
 /// Tabs saved by the previous run. Called once per page load: shells left over from a previous
-/// page (dev reload, WebView reload) have no tab anymore and are closed.
+/// page (dev reload, WebView reload) have no tab anymore and are closed, after the store forgot them.
 #[tauri::command(async)]
-fn session_restore(session: State<SessionStore>, ptys: Ptys) -> Saved {
+fn session_restore(session: State<SessionStore>, ptys: Ptys) -> Restored {
+    let restored = session.restore();
     ptys.close_all_tabs();
-    session.load()
+    restored
 }
 
 /// A tab's history, saved when Rift closes (`id`: the tab's snapshot id, a UUID).
