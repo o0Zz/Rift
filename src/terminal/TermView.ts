@@ -25,6 +25,8 @@ type TermEvents = {
   onCwd(cwd: string): void;
   /** Whether an agent (Claude...) runs in this tab: Shift+Enter then inserts a new line. */
   isAgent(): boolean;
+  /** What a paste without text (an image) sends: the running agent's image paste key (Ctrl+V by default). */
+  imagePasteKey(): string;
   /** Esc or Ctrl+C pressed: an agent is interrupted (no hook reports it). */
   onInterrupt(): void;
 };
@@ -91,12 +93,12 @@ export class TermView {
       // to the shell like any other key.
       return e.key !== "v" || IS_MAC;
     });
-    // A paste without text (an image): send the Ctrl+V key itself. Claude Code then reads the image from the
-    // clipboard (its image paste key is Ctrl+V on Linux/macOS; Alt+V on Windows, which xterm passes through).
+    // A paste without text (an image): send the agent's image paste key, then it reads the clipboard itself
+    // (Claude Code: Alt+V on Windows, Ctrl+V elsewhere; from its harness).
     this.el.addEventListener(
       "paste",
       (e) => {
-        if (!e.clipboardData?.getData("text/plain")) this.write("\x16");
+        if (!e.clipboardData?.getData("text/plain")) this.write(events.imagePasteKey());
       },
       true,
     );

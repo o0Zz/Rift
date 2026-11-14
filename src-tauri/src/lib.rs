@@ -229,6 +229,8 @@ struct Integration {
     installed: bool,
     /// What Enable writes, shown before the click.
     setup: String,
+    /// Sent for a Ctrl+V of an image in a shell running this agent.
+    image_paste_key: &'static str,
 }
 
 #[tauri::command]
@@ -243,6 +245,7 @@ fn agent_integrations(harnesses: State<Harnesses>) -> Result<Vec<Integration>, S
             detected: h.detected(),
             installed: h.hooks_installed(&exe),
             setup: h.setup(),
+            image_paste_key: h.image_paste_key(),
         })
         .collect())
 }

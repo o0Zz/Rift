@@ -129,6 +129,11 @@ pub trait AgentHarness: Send + Sync {
     fn mcp_installed(&self, exe: &Path) -> bool;
     /// Registers (`on`) or removes Rift's MCP server in the agent's config; its other servers are kept.
     fn set_mcp(&self, exe: &Path, on: bool) -> Result<()>;
+    /// What a Ctrl+V of an image (clipboard without text) sends: the agent's own image paste key, after which
+    /// it reads the clipboard itself. Ctrl+V by default.
+    fn image_paste_key(&self) -> &'static str {
+        ""
+    }
 }
 
 pub struct Harnesses(pub Vec<Box<dyn AgentHarness>>);

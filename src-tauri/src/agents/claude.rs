@@ -92,6 +92,11 @@ impl AgentHarness for Claude {
         "Claude Code"
     }
 
+    /// Claude Code pastes images with Alt+V on Windows (Ctrl+V elsewhere).
+    fn image_paste_key(&self) -> &'static str {
+        if cfg!(windows) { "v" } else { "" }
+    }
+
     fn parse_hook(&self, payload: &Value) -> Option<AgentEvent> {
         let session_id = payload["session_id"].as_str()?.to_string();
         match payload["hook_event_name"].as_str()? {
@@ -208,6 +213,16 @@ mod tests {
 
     fn read(c: &Claude) -> Value {
         serde_json::from_str(&std::fs::read_to_string(&c.settings).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn image_paste_key_is_alt_v_on_windows() {
+        let c = Claude {
+            settings: PathBuf::new(),
+            user_config: PathBuf::new(),
+        };
+        let expected = if cfg!(windows) { "v" } else { "" };
+        assert_eq!(c.image_paste_key(), expected);
     }
 
     #[test]

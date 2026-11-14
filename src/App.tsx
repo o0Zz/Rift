@@ -69,7 +69,15 @@ import { FindBar } from "./ui/FindBar";
 import { PromptDialog } from "./ui/PromptDialog";
 import "./App.css";
 
-type Integration = { id: string; name: string; detected: boolean; installed: boolean; setup: string };
+type Integration = {
+  id: string;
+  name: string;
+  detected: boolean;
+  installed: boolean;
+  setup: string;
+  /** Sent for a Ctrl+V of an image in a shell running this agent. */
+  image_paste_key: string;
+};
 type AgentStatus = { pty: number; harness: string; status: Status | null; message: string | null; continued: boolean };
 type AgentUsage = { pty: number; context: number | null } & { [K in keyof Limits]: Limit | null };
 
@@ -257,6 +265,7 @@ function App() {
         onTitle: (v) => (shell.title = v),
         onCwd: (cwd) => onShellCwd(tab, shell, cwd),
         isAgent: () => !!shell.agent,
+        imagePasteKey: () => agents().find((a) => a.id === shell.agent)?.image_paste_key ?? "\x16",
         onInterrupt: () => (shell.status = statusAfterInterrupt(shell.status)),
       },
       look(),
