@@ -774,7 +774,8 @@ function App() {
         <Explorer
           root={panelTab()?.filesRoot}
           refresh={filesRefresh()}
-          onUp={(dir) => panelTab() && (panelTab()!.filesDir = dir)}
+          picked={!!panelTab()?.filesDir}
+          onRoot={(dir) => panelTab() && (panelTab()!.filesDir = dir)}
           onUseForGit={(dir) => panelTab() && pinGit(panelTab()!, dir)}
           onOpenFile={(path) => docs.open(path)}
           onEditFile={openEditor}

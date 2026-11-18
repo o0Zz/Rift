@@ -51,8 +51,10 @@ export function Explorer(props: {
   onDeleted(path: string): void;
   /** Its git history; only in a repo. */
   onHistory?(path: string): void;
-  /** ".." clicked: show this folder instead. */
-  onUp(dir: string): void;
+  /** Show this folder instead (".." or "Set as root"); undefined = back to the terminal's folder. */
+  onRoot(dir: string | undefined): void;
+  /** The root was picked by hand: offers the way back. */
+  picked?: boolean;
   /** The tab's git panel follows this folder's repo. */
   onUseForGit(dir: string): void;
   onClose(): void;
@@ -113,7 +115,11 @@ export function Explorer(props: {
     setSelected({ path, parent });
     menu.open(e, [
       ...(dir
-        ? [openInFileManager(path), { label: "Use for git panel", icon: "branch", run: () => props.onUseForGit(path) } as const]
+        ? [
+            openInFileManager(path),
+            { label: "Set as root", icon: "folder", run: () => props.onRoot(path) } as const,
+            { label: "Use for git panel", icon: "branch", run: () => props.onUseForGit(path) } as const,
+          ]
         : [
             { label: "Open", icon: "file", run: () => props.onOpenFile(path) },
             { label: "Open in external editor", icon: "edit", run: () => props.onEditFile(path) },
@@ -182,6 +188,11 @@ export function Explorer(props: {
         closeTip="Close (Ctrl+Shift+E)"
         onClose={() => props.onClose()}
       >
+        <Show when={props.picked}>
+          <button class="icon-btn" title="Back to the terminal's folder" onClick={() => props.onRoot(undefined)}>
+            <Icon name="terminal" />
+          </button>
+        </Show>
         <button class="icon-btn" title="Refresh" onClick={refresh}>
           <Icon name="refresh" />
         </button>
@@ -207,7 +218,7 @@ export function Explorer(props: {
             <>
               <Show when={parentDir(root())}>
                 {(up) => (
-                  <div class="tree-row" style={{ "padding-left": "8px" }} title={up()} onClick={() => props.onUp(up())}>
+                  <div class="tree-row" style={{ "padding-left": "8px" }} title={up()} onClick={() => props.onRoot(up())}>
                     <span class="tree-chev">
                       <Icon name="up" size={12} />
                     </span>

@@ -15,4 +15,8 @@ it("files panel shows the repo, the terminal's folder when git is pinned elsewhe
 
   tab.filesDir = "C:\\";
   expect(tab.filesRoot).toBe("C:\\");
+  tab.filesDir = "C:\\work\\api\\src"; // "Set as root" on a folder below
+  expect(tab.filesRoot).toBe("C:\\work\\api\\src");
+  tab.filesDir = undefined; // back to the terminal's folder
+  expect(tab.filesRoot).toBe("C:\\work");
 });
