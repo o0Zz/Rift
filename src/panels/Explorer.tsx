@@ -218,7 +218,7 @@ export function Explorer(props: {
             <>
               <Show when={parentDir(root())}>
                 {(up) => (
-                  <div class="tree-row" style={{ "padding-left": "8px" }} title={up()} onClick={() => props.onRoot(up())}>
+                  <div class="tree-row" style={{ "padding-left": "8px" }} title={`${up()} (double-click)`} onDblClick={() => props.onRoot(up())}>
                     <span class="tree-chev">
                       <Icon name="up" size={12} />
                     </span>
