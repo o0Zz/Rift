@@ -31,6 +31,15 @@ type TermEvents = {
   onInterrupt(): void;
 };
 
+/** How a shell starts (`TermView.start`). */
+export type StartOptions = {
+  agent?: AgentSession;
+  startAgent?: string;
+  shell?: string;
+  clone?: { url: string; name: string };
+  admin?: boolean;
+};
+
 /**
  * One tab's terminal. Stays mounted for the tab's lifetime: switching tabs only hides/shows it.
  * Uses xterm's DOM renderer on purpose: WebGL context creation made tab switching 3-4x slower (npm run bench).
@@ -136,17 +145,16 @@ export class TermView {
 
   /**
    * Opens the shell in `cwd`. With `agent`, the shell starts by resuming that agent session;
-   * with `startAgent` (harness id), by starting a new one.
+   * with `startAgent` (harness id), by starting a new one; with `clone`, by cloning that repository into
+   * `cwd`/`name` and going in it. `admin`: as administrator (Windows sudo).
    */
-  async start(cwd?: string, agent?: AgentSession, startAgent?: string, shell?: string) {
+  async start(cwd?: string, o: StartOptions = {}) {
     this.fit.fit();
     const onData = new Channel<ArrayBuffer>();
     onData.onmessage = (buf) => this.term.write(new Uint8Array(buf));
     this.ptyId = await invoke<number>("pty_open", {
       cwd,
-      agent,
-      startAgent,
-      shell,
+      ...o,
       cols: this.term.cols,
       rows: this.term.rows,
       onData,

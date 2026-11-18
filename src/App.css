@@ -485,6 +485,14 @@ body,
   text-overflow: ellipsis;
 }
 
+/* Its shell runs as administrator. */
+.tab-admin {
+  display: inline-flex;
+  margin-right: 4px;
+  color: var(--s-m);
+  vertical-align: -1px;
+}
+
 .tab-sub {
   display: flex;
   gap: 6px;

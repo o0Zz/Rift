@@ -125,6 +125,10 @@ impl PtyManager {
         })
     }
 
+    pub fn default_shell(&self) -> Shell {
+        self.shell.lock().unwrap().clone()
+    }
+
     /// Changes the default shell (settings). The spare shell, started with the old one, is dropped.
     pub fn set_default_shell(&self, shell: Shell) {
         *self.shell.lock().unwrap() = shell;
@@ -277,8 +281,7 @@ impl PtyManager {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let pair = native_pty_system().openpty(size)?;
 
-        let mut cmd = shell.command(startup);
-        cmd.cwd(cwd);
+        let mut cmd = shell.command(startup, cwd);
         cmd.env("RIFT_TAB_ID", id.to_string());
         for (k, v) in &self.env {
             cmd.env(k, v);
@@ -674,6 +677,80 @@ mod tests {
         m.set_default_shell(os::shell());
         assert!(m.spare.lock().unwrap().is_none());
         assert!(m.write(spare, b"x").is_err());
+    }
+
+    /// "Clone a repository": in every integrated shell, the clone lands in the tab's folder and the shell
+    /// then stands in it (its prompt reports that folder).
+    #[test]
+    fn clone_commands_clone_then_enter_the_repo_in_every_shell() {
+        let source = tempfile::tempdir().unwrap();
+        let git = |dir: &std::path::Path, args: &[&str]| {
+            let ok = std::process::Command::new("git")
+                .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+                .args(args)
+                .current_dir(dir)
+                .output()
+                .unwrap()
+                .status
+                .success();
+            assert!(ok, "git {args:?}");
+        };
+        git(source.path(), &["init", "-q"]);
+        git(
+            source.path(),
+            &["commit", "-q", "--allow-empty", "-m", "one"],
+        );
+        let path = source.path().to_string_lossy().replace('\\', "/");
+        let url = format!(
+            "file://{}{path}",
+            if path.starts_with('/') { "" } else { "/" }
+        );
+        let [get, go] = crate::git::clone_commands(&url, "cloned_repo").unwrap();
+
+        for profile in crate::shell::profiles() {
+            // WSL runs plain (no cwd report); other shells than bash/zsh too.
+            let integrated = match &profile.shell {
+                Shell::Posix { exe } => {
+                    exe.ends_with("bash") || exe.ends_with("bash.exe") || exe.ends_with("zsh")
+                }
+                #[cfg(windows)]
+                Shell::Wsl { .. } => false,
+                #[cfg(windows)]
+                _ => true, // PowerShell, cmd (Unix has no other kind)
+            };
+            if !integrated {
+                continue;
+            }
+            let into = tempfile::tempdir().unwrap();
+            let m = test_manager();
+            let startup = profile.shell.and_then(&get, &go);
+            let (id, out, _) = open_with(
+                &m,
+                Some(into.path().into()),
+                Some(&startup),
+                Some(profile.shell.clone()),
+                1,
+            );
+            // OSC 9;9 ends `...\cloned_repo"` (PowerShell) or `...\cloned_repo` (cmd), OSC 7 `.../cloned_repo`.
+            let deadline = Instant::now() + Duration::from_secs(20);
+            let mut seen = String::new();
+            while !(seen.contains("cloned_repo\x1b\\") || seen.contains("cloned_repo\"\x1b\\")) {
+                assert!(
+                    Instant::now() < deadline,
+                    "{}: never entered the clone: {seen}",
+                    profile.name
+                );
+                if let Ok(chunk) = out.recv_timeout(Duration::from_millis(100)) {
+                    seen.push_str(&String::from_utf8_lossy(&chunk));
+                }
+            }
+            assert!(
+                into.path().join("cloned_repo").join(".git").is_dir(),
+                "{}: {seen}",
+                profile.name
+            );
+            m.close(id);
+        }
     }
 
     /// bash/zsh integration: the user's config still loads, the startup command runs, and each prompt

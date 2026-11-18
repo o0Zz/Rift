@@ -43,8 +43,16 @@ fn err(e: impl std::fmt::Display) -> String {
     e.to_string()
 }
 
+/// A repository to clone in a new tab: `git clone <url> <name>` in its folder, then `cd <name>`.
+#[derive(serde::Deserialize)]
+struct CloneInto {
+    url: String,
+    name: String,
+}
+
 /// Opens a shell for a new tab. Output is streamed as raw bytes on `on_data`; exit is the `pty-exit` event.
-/// With `agent`, the shell starts by resuming that agent session.
+/// With `agent`, the shell starts by resuming that agent session; with `clone`, by cloning that
+/// repository. `admin`: as administrator (Windows `sudo`, see `sudo_state`).
 /// Off the main thread (`async`), like every command that creates or closes a pseudo console: those calls
 /// wait for the console host process, and a sync command would freeze the window with them.
 #[tauri::command(async)]
@@ -58,21 +66,40 @@ fn pty_open(
     agent: Option<AgentSession>,
     start_agent: Option<String>,
     shell: Option<String>,
+    clone: Option<CloneInto>,
+    admin: Option<bool>,
     cols: u16,
     rows: u16,
     on_data: Channel<InvokeResponseBody>,
 ) -> Result<TabId, String> {
-    // Resume a saved session, or start a new one (`start_agent`: harness id, e.g. a new worktree tab).
-    let startup = agent
-        .as_ref()
-        .and_then(|a| harnesses.get(&a.harness)?.resume_command(&a.session_id))
-        .or_else(|| Some(harnesses.get(start_agent.as_deref()?)?.start_command()));
+    // A tab's own shell profile; unknown (uninstalled) profiles fall back to the default shell.
+    let mut shell = shell.as_deref().and_then(Shell::from_profile);
+    let startup = match clone {
+        Some(c) => {
+            let [get, go] = git::clone_commands(&c.url, &c.name).map_err(err)?;
+            let s = shell.get_or_insert_with(|| ptys.default_shell());
+            Some(s.and_then(&get, &go))
+        }
+        // Resume a saved session, or start a new one (`start_agent`: harness id, e.g. a new worktree tab).
+        None => agent
+            .as_ref()
+            .and_then(|a| harnesses.get(&a.harness)?.resume_command(&a.session_id))
+            .or_else(|| Some(harnesses.get(start_agent.as_deref()?)?.start_command())),
+    };
+    if admin == Some(true) {
+        #[cfg(windows)]
+        {
+            let s = shell.unwrap_or_else(|| ptys.default_shell());
+            shell = Some(Shell::Admin(Box::new(s)));
+        }
+        #[cfg(unix)]
+        return Err("Run sudo in the tab instead".into());
+    }
     let id = ptys
         .open(
             cwd.map(Into::into),
             startup.as_deref(),
-            // A tab's own shell profile; unknown (uninstalled) profiles fall back to the default shell.
-            shell.as_deref().and_then(Shell::from_profile),
+            shell,
             size(cols, rows),
             Box::new(move |bytes| {
                 let _ = on_data.send(InvokeResponseBody::Raw(bytes));
@@ -98,6 +125,19 @@ fn pty_write(ptys: Ptys, id: TabId, data: String) -> Result<(), String> {
 #[tauri::command]
 fn pty_resize(ptys: Ptys, id: TabId, cols: u16, rows: u16) -> Result<(), String> {
     ptys.resize(id, size(cols, rows)).map_err(err)
+}
+
+/// Whether a tab can restart as administrator: "ready", "off" (Windows' sudo not on, or not inline) or
+/// "missing" (no sudo: before Windows 11 24H2, or not Windows).
+#[tauri::command]
+fn sudo_state() -> &'static str {
+    shell::sudo_state()
+}
+
+/// Windows Settings → System → For developers, where sudo is turned on.
+#[tauri::command]
+async fn sudo_settings() -> Result<(), String> {
+    tauri_plugin_opener::open_url("ms-settings:developers", None::<&str>).map_err(err)
 }
 
 /// The shells installed here (default first), for settings and "New tab with…".
@@ -141,6 +181,15 @@ async fn open_url(url: String) -> Result<(), String> {
 #[tauri::command]
 async fn git_stats(root: String) -> Result<git::Stats, String> {
     git::stats(root.as_ref()).map_err(err)
+}
+
+/// Why `url` cannot be cloned into folder `name` by a new tab (`pty_open`'s `clone`), checked before the tab
+/// opens; None = it can.
+#[tauri::command]
+fn git_clone_check(url: String, name: String) -> Option<String> {
+    git::clone_commands(&url, &name)
+        .err()
+        .map(|e| e.to_string())
 }
 
 /// New git worktree (and branch) next to the repository, for a parallel agent. Returns its folder.
@@ -743,6 +792,8 @@ pub fn run() {
             pty_close,
             pty_prewarm,
             shell_profiles,
+            sudo_state,
+            sudo_settings,
             shell_set_default,
             session_restore,
             session_update,
@@ -778,6 +829,7 @@ pub fn run() {
             git_commit,
             git_discard,
             git_worktree_add,
+            git_clone_check,
             git_stats,
             open_url,
             settings_load,

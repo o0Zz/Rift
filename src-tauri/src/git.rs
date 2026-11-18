@@ -344,6 +344,25 @@ pub fn worktree_add(root: &Path, branch: &str) -> Result<PathBuf> {
     Ok(path)
 }
 
+/// The commands typed in a new tab to clone `url` into its folder `name` and go in it: `git clone`, then
+/// `cd`. They go through the user's shell (progress and credential prompts show in the tab), so both are
+/// checked to need no quoting in any shell: no spaces, quotes, variables or separators, nothing taken for
+/// an option (a leading `-`).
+pub fn clone_commands(url: &str, name: &str) -> Result<[String; 2]> {
+    let plain = |s: &str, extra: &str| {
+        s.starts_with(|c: char| c.is_ascii_alphanumeric() || c == '_')
+            && s.chars()
+                .all(|c| c.is_ascii_alphanumeric() || "-._".contains(c) || extra.contains(c))
+    };
+    if url.len() > 2048 || !plain(url, ":/@~+=") {
+        bail!("Not a repository URL Rift can clone: {url}");
+    }
+    if name.len() > 255 || !plain(name, "") {
+        bail!("Folder name: letters, digits, - . _ only, got {name}");
+    }
+    Ok([format!("git clone {url} {name}"), format!("cd {name}")])
+}
+
 /// Diff of several files, for an AI commit message: capped at `max` bytes. Tracked files in one git call
 /// per hundred paths (a command line has a length limit), untracked ones one by one.
 pub fn diff_many(root: &Path, changes: &[(String, bool)], max: usize) -> Result<String> {
@@ -900,6 +919,32 @@ mod tests {
         run(r, &["add", "."]);
         run(r, &["commit", "-q", "-m", "init"]);
         dir
+    }
+
+    #[test]
+    fn clone_commands_need_no_quoting() {
+        assert_eq!(
+            clone_commands("https://github.com/o0Zz/Rift.git", "Rift").unwrap(),
+            ["git clone https://github.com/o0Zz/Rift.git Rift", "cd Rift"]
+        );
+        assert!(clone_commands("git@github.com:o0Zz/Rift.git", "my_rift-2.x").is_ok());
+        for url in [
+            "",
+            "--upload-pack=x",
+            "https://x/a b",
+            "https://x/a;calc",
+            "https://x/$HOME",
+            "https://x/a&b",
+            "https://x/%PATH%",
+            "https://x/\"a",
+        ] {
+            assert!(clone_commands(url, "a").is_err(), "{url}");
+        }
+        for name in [
+            "", "-x", ".", "..", "a b", "a/b", "a\\b", "C:x", "$x", "a;b",
+        ] {
+            assert!(clone_commands("https://x/a", name).is_err(), "{name}");
+        }
     }
 
     #[test]

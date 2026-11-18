@@ -32,6 +32,9 @@ type SidebarProps = {
   /** Agents used on this machine, offered for a new worktree. */
   agents: Agent[];
   onNewWorktree(tab: Tab, agent: Agent): void;
+  /** Windows only: the same tab again, its shell run as administrator. */
+  onRestartAsAdmin?(tab: Tab): void;
+  onClone(): void;
   /** Gives the keyboard back to the active terminal. */
   onFocusTerminal(): void;
   /** Agent messages the tab sent and received since the user last left it, and those waiting for it. */
@@ -85,6 +88,9 @@ export function Sidebar(props: SidebarProps) {
             label: `New ${agent.name} in a worktree…`,
             run: () => props.onNewWorktree(tab, agent),
           }))
+        : []),
+      ...(props.onRestartAsAdmin && !tab.admin
+        ? [{ label: "Restart as administrator", icon: "shield", run: () => props.onRestartAsAdmin!(tab) } as const]
         : []),
       { label: "New group from this tab", run: () => props.onNewGroup(tab) },
       ...props.groups
@@ -200,7 +206,19 @@ export function Sidebar(props: SidebarProps) {
           </Show>
         </span>
         <span class="tab-text">
-          <Show when={editing() === tab} fallback={<span class="tab-title">{title()}</span>}>
+          <Show
+            when={editing() === tab}
+            fallback={
+              <span class="tab-title">
+                {tab.admin && (
+                  <span class="tab-admin" title="Administrator">
+                    <Icon name="shield" size={11} />
+                  </span>
+                )}
+                {title()}
+              </span>
+            }
+          >
             <Rename value={tab.name ?? title()} commit={(v) => (tab.name = v)} />
           </Show>
           <Show when={tab.cwd}>
@@ -339,10 +357,14 @@ export function Sidebar(props: SidebarProps) {
             onContextMenu={(e) =>
               menu.open(
                 e,
-                props.shells.map((s) => ({ label: `New tab: ${s.name}`, run: () => props.onNewTab(s.id) })),
+                [
+                  ...props.shells.map((s) => ({ label: `New tab: ${s.name}`, run: () => props.onNewTab(s.id) })),
+                  "separator",
+                  { label: "Clone a repository…", icon: "branch", run: () => props.onClone() },
+                ],
               )
             }
-            title="New tab (Ctrl+Shift+T) — right-click to choose the shell"
+            title="New tab (Ctrl+Shift+T) — right-click to choose the shell or clone a repository"
           >
             <Icon name="plus" />
           </button>

@@ -3,6 +3,8 @@
 //! command (e.g. `claude --resume <id>`) runs once the user's own config is loaded. The user's profile and
 //! rc files are never modified. `profiles()` lists the shells installed on this machine.
 
+use std::path::Path;
+
 use portable_pty::CommandBuilder;
 
 #[derive(Clone, Debug)]
@@ -18,6 +20,9 @@ pub enum Shell {
     /// bash and zsh get cwd reporting and the startup command; any other shell runs plain.
     /// On Windows: Git Bash.
     Posix { exe: String },
+    /// Another shell run as administrator, in this terminal: Windows' own `sudo` in inline mode.
+    #[cfg(windows)]
+    Admin(Box<Shell>),
 }
 
 /// A shell offered to the user ("New tab with…", default shell in settings).
@@ -52,9 +57,9 @@ impl Shell {
             .map(|p| p.shell.clone())
     }
 
-    /// The shell command line, running `startup` once the shell is ready.
-    pub fn command(&self, startup: Option<&str>) -> CommandBuilder {
-        match self {
+    /// The shell command line in `cwd`, running `startup` once the shell is ready.
+    pub fn command(&self, startup: Option<&str>, cwd: &Path) -> CommandBuilder {
+        let mut cmd = match self {
             #[cfg(windows)]
             Shell::PowerShell { exe } => windows::powershell(exe, startup),
             #[cfg(windows)]
@@ -62,6 +67,22 @@ impl Shell {
             #[cfg(windows)]
             Shell::Wsl { exe } => windows::wsl(exe, startup),
             Shell::Posix { exe } => posix::command(exe, startup),
+            #[cfg(windows)]
+            Shell::Admin(shell) => windows::elevate(shell.command(startup, cwd), cwd),
+        };
+        cmd.cwd(cwd);
+        cmd
+    }
+
+    /// One startup line running `first`, then `next` if it succeeded, in this shell's syntax (Windows
+    /// PowerShell has no `&&`).
+    pub fn and_then(&self, first: &str, next: &str) -> String {
+        match self {
+            #[cfg(windows)]
+            Shell::PowerShell { .. } => format!("{first}; if ($?) {{ {next} }}"),
+            #[cfg(windows)]
+            Shell::Admin(shell) => shell.and_then(first, next),
+            _ => format!("{first} && {next}"),
         }
     }
 }
@@ -80,7 +101,8 @@ pub fn profiles() -> &'static [Profile] {
 
 #[cfg(windows)]
 mod windows {
-    use std::path::PathBuf;
+    use std::ffi::OsString;
+    use std::path::{Path, PathBuf};
 
     use base64::Engine;
     use portable_pty::CommandBuilder;
@@ -152,9 +174,7 @@ function global:prompt {
                 },
             ));
         }
-        let wsl =
-            PathBuf::from(std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into()))
-                .join(r"System32\wsl.exe");
+        let wsl = system32("wsl.exe");
         if wsl.is_file() {
             list.push(profile(
                 "wsl",
@@ -165,6 +185,49 @@ function global:prompt {
             ));
         }
         list
+    }
+
+    fn system32(exe: &str) -> PathBuf {
+        PathBuf::from(std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into()))
+            .join("System32")
+            .join(exe)
+    }
+
+    /// `cmd` elevated by Windows' `sudo` (24H2 and later) in this console: a UAC prompt, then the shell
+    /// runs as administrator in `cwd`, with Rift's variables (hooks, startup command). Full path: never
+    /// a `sudo` found on PATH.
+    pub fn elevate(mut cmd: CommandBuilder, cwd: &Path) -> CommandBuilder {
+        let argv = cmd.get_argv_mut();
+        let shell = std::mem::take(argv);
+        argv.push(system32("sudo.exe").into());
+        argv.extend(["--inline", "--preserve-env", "--chdir"].map(OsString::from));
+        argv.push(cwd.into());
+        argv.extend(shell);
+        cmd
+    }
+
+    /// Whether a tab can run as administrator: `sudo` exists and allows inline mode (Settings → System →
+    /// For developers: "Enable sudo", configured "Inline"), a group policy allowing it too.
+    pub fn sudo_state() -> &'static str {
+        use winreg::RegKey;
+        use winreg::enums::HKEY_LOCAL_MACHINE;
+        if !system32("sudo.exe").is_file() {
+            return "missing";
+        }
+        let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+        let mode = |key: &str| {
+            hklm.open_subkey(key)
+                .and_then(|k| k.get_value::<u32, _>("Enabled"))
+                .ok()
+        };
+        // 0 off, 1 new window, 2 input closed, 3 inline.
+        let set = mode(r"SOFTWARE\Microsoft\Windows\CurrentVersion\Sudo").unwrap_or(0);
+        let allowed = mode(r"SOFTWARE\Policies\Microsoft\Windows\Sudo").unwrap_or(3);
+        if set.min(allowed) >= 3 {
+            "ready"
+        } else {
+            "off"
+        }
     }
 
     /// `-EncodedCommand`: init + startup without writing any file.
@@ -195,6 +258,14 @@ function global:prompt {
         }
         cmd
     }
+}
+
+/// See `windows::sudo_state`: "ready", "off" (sudo not in inline mode) or "missing".
+pub fn sudo_state() -> &'static str {
+    #[cfg(windows)]
+    return windows::sudo_state();
+    #[cfg(unix)]
+    return "missing";
 }
 
 #[cfg(unix)]
@@ -365,6 +436,48 @@ mod tests {
                 list.iter().any(|p| p.id == id),
                 "{id} is always there on Windows"
             );
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn admin_runs_the_shell_through_inline_sudo_in_the_tab_folder() {
+        let dir = std::env::temp_dir();
+        let cmd = Shell::Admin(Box::new(Shell::Cmd)).command(Some("echo hi"), &dir);
+        let argv: Vec<String> = cmd
+            .get_argv()
+            .iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert!(
+            argv[0].to_lowercase().ends_with(r"\system32\sudo.exe"),
+            "{argv:?}"
+        );
+        assert_eq!(argv[1..4], ["--inline", "--preserve-env", "--chdir"]);
+        assert_eq!(argv[4], dir.to_string_lossy());
+        assert_eq!(argv[5], "cmd.exe");
+        assert!(argv[7].ends_with("& echo hi"), "{argv:?}");
+        assert_eq!(cmd.get_cwd(), Some(&dir.clone().into_os_string()));
+        assert!(["ready", "off", "missing"].contains(&sudo_state()));
+    }
+
+    #[test]
+    fn and_then_runs_the_next_command_only_on_success() {
+        let posix = Shell::Posix {
+            exe: "/bin/bash".into(),
+        };
+        assert_eq!(posix.and_then("a", "b"), "a && b");
+        #[cfg(windows)]
+        {
+            let pwsh = Shell::PowerShell {
+                exe: "powershell.exe".into(),
+            };
+            assert_eq!(pwsh.and_then("a", "b"), "a; if ($?) { b }");
+            assert_eq!(
+                Shell::Admin(Box::new(pwsh)).and_then("a", "b"),
+                "a; if ($?) { b }"
+            );
+            assert_eq!(Shell::Cmd.and_then("a", "b"), "a && b");
         }
     }
 }

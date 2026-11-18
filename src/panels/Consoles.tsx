@@ -40,7 +40,7 @@ export function createConsoles(o: {
     tab.shells = [...tab.shells, shell];
     last = id;
     // Next frame: the panel is in the page, so the terminal can measure itself.
-    requestAnimationFrame(() => shell.view.start(tab.cwd, undefined, undefined, tab.shell).then(() => shell.view.focus()));
+    requestAnimationFrame(() => shell.view.start(tab.cwd, { shell: tab.shell }).then(() => shell.view.focus()));
   }
 
   /** A new terminal for the active tab: in a panel where it has none yet, else in a new panel. */

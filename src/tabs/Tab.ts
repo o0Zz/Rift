@@ -31,6 +31,8 @@ export class Tab {
 
   /** Name of the agent that started this tab (agent messaging); set once, when it opens. */
   startedBy?: string;
+  /** Its shell runs as administrator (Windows sudo); set once, when it opens. Not restored. */
+  admin?: boolean;
 
   get shells() { return this.f.shells.get(); }
   set shells(v) { this.f.shells.set(v); }

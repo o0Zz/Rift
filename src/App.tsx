@@ -11,6 +11,7 @@ import {
   actionFor,
   DEFAULTS,
   isReloadKey,
+  IS_WINDOWS,
   mergeSettings,
   resolveTheme,
   TAB_ROW_HEIGHT,
@@ -48,6 +49,7 @@ import { Sidebar } from "./tabs/Sidebar";
 import type { Limit, Limits } from "./tabs/usage";
 import { Explorer } from "./panels/Explorer";
 import { isUnder, repoPath } from "./panels/fileOps";
+import { cloneBase, clonePlan } from "./tabs/clone";
 import { GitPanel } from "./panels/GitPanel";
 import { Prompts } from "./panels/Prompts";
 import { Messages } from "./panels/Messages";
@@ -112,6 +114,9 @@ function App() {
     requestAnimationFrame(() => setBarTab(tab));
   });
   const [worktreeFrom, setWorktreeFrom] = createSignal<{ tab: Tab; agent: Agent }>();
+  const [cloning, setCloning] = createSignal(false);
+  /** A tab restarting as administrator (new tab → old one): the old one closes once the new shell is up. */
+  const replacing = new WeakMap<Tab, Tab>();
   let updater: Updater | undefined;
 
   // Window title: version, plus how many tabs need the user ("Rift 1.2.3+4 — 2 waiting").
@@ -241,6 +246,12 @@ function App() {
 
   /** A shell's folder, from its prompt: also catches `git checkout` (same cwd, new branch). */
   function onShellCwd(tab: Tab, shell: Shell, cwd: string) {
+    // Its first prompt: the elevated shell runs (UAC accepted), the tab it replaces goes.
+    const old = shell === tab.main && replacing.get(tab);
+    if (old) {
+      replacing.delete(tab);
+      if (tabs().includes(old)) closeTab(old);
+    }
     if (shell === tab.main && shell.cwd !== cwd) tab.filesDir = undefined; // the files panel follows it again
     shell.cwd = cwd;
     readHead(tab, shell === tab.main ? undefined : cwd).then((head) => {
@@ -290,7 +301,18 @@ function App() {
   /** With `opts.behind`, the new tab opens after that tab and stays in the background (started by an agent). */
   function newTab(
     saved?: SavedTab,
-    opts: { cwd?: string; name?: string; group?: string; startAgent?: string; shell?: string; behind?: Tab } = {},
+    opts: {
+      cwd?: string;
+      name?: string;
+      group?: string;
+      startAgent?: string;
+      shell?: string;
+      behind?: Tab;
+      clone?: { url: string; name: string };
+      admin?: boolean;
+      /** Closed once this tab's shell shows its first prompt (`replacing`). */
+      replaces?: Tab;
+    } = {},
   ): Promise<Tab> {
     const tab = new Tab();
     const cwd = saved ? saved.cwd : (opts.cwd ?? active()?.cwd);
@@ -307,8 +329,10 @@ function App() {
       tab.docs = saved.ui.docs.map((path) => docs.make(tab, path));
       tab.current = Math.min(saved.ui.doc ?? -1, tab.docs.length - 1);
     }
+    tab.admin = opts.admin;
     buildShell(tab, tab.main, host);
     if (cwd) onShellCwd(tab, tab.main, cwd);
+    if (opts.replaces) replacing.set(tab, opts.replaces);
     if (tab.current >= 0) tab.view.hide(); // a restored document is shown instead
 
     const list = [...tabs()];
@@ -332,7 +356,9 @@ function App() {
         : Promise.resolve(null);
     return history
       .then((h) => h && tab.view.restoreSnapshot(h))
-      .then(() => tab.view.start(cwd, saved?.agent, opts.startAgent, tab.shell))
+      .then(() =>
+        tab.view.start(cwd, { agent: saved?.agent, startAgent: opts.startAgent, shell: tab.shell, clone: opts.clone, admin: opts.admin }),
+      )
       .then(session.save) // the pty id is not reactive
       .catch((e) => void (tab.main.title = `error: ${e}`))
       .then(() => tab);
@@ -571,6 +597,44 @@ function App() {
     } catch (e) {
       alert(`Could not enable integration: ${e}`);
     }
+  }
+
+  /**
+   * The same tab (folder, name, group, shell) with its shell run as administrator by Windows' sudo, inline: the
+   * new tab opens after it and the old one closes at the new shell's first prompt, so a refused UAC prompt
+   * (the new shell exits) leaves the old tab as it was.
+   */
+  async function restartAsAdmin(tab: Tab) {
+    const state = await invoke<string>("sudo_state");
+    if (state === "missing") return alert("Running a tab as administrator needs sudo for Windows (Windows 11 24H2 or later).");
+    if (state === "off") {
+      const open = confirm(
+        "Rift runs a tab as administrator with Windows' own sudo, inside the tab.\n\n" +
+          'Turn it on once in Settings > System > For developers: "Enable sudo", then set ' +
+          '"Configure how sudo runs applications" to "Inline".\n\nOpen those settings now?',
+      );
+      if (open) invoke("sudo_settings");
+      return;
+    }
+    activate(tab);
+    newTab(undefined, { cwd: tab.cwd, name: tab.name, group: tab.group, shell: tab.shell, admin: true, replaces: tab });
+  }
+
+  /** "url [folder]" from the clone dialog: a new tab in the folder that receives the clone, cloning then going in. */
+  async function cloneRepo(input: string) {
+    const base = cloneBase(active() ?? {});
+    const plan = base ? clonePlan(input, base) : undefined;
+    const problem = !plan
+      ? "Type a repository URL, and the folder to clone into if the URL does not name one."
+      : await invoke<string | null>("git_clone_check", { url: plan.url, name: plan.name });
+    if (problem || !plan) return alert(problem);
+    try {
+      await invoke("fs_list", { dir: plan.parent });
+    } catch {
+      return alert(`${plan.parent} does not exist.`);
+    }
+    setCloning(false);
+    newTab(undefined, { cwd: plan.parent, clone: { url: plan.url, name: plan.name } });
   }
 
   /** A parallel agent: new branch + git worktree next to the repo, opened in a tab running a new `agent`. */
@@ -953,6 +1017,8 @@ function App() {
           onFilter={setFilter}
           agents={agents()}
           onNewWorktree={(tab, agent) => setWorktreeFrom({ tab, agent })}
+          onRestartAsAdmin={IS_WINDOWS ? restartAsAdmin : undefined}
+          onClone={() => setCloning(true)}
           messages={messaging.counts}
           rename={renameRequest()}
           onFocusTerminal={() => active()?.shown.focus()}
@@ -970,6 +1036,16 @@ function App() {
             onCancel={() => (setWorktreeFrom(undefined), active()?.shown.focus())}
           />
         )}
+      </Show>
+      <Show when={cloning()}>
+        <PromptDialog
+          title="Clone a repository"
+          placeholder="https://github.com/user/repo.git"
+          hint={`Into ${cloneBase(active() ?? {}) ?? "your home folder"}, in a new tab that then stands in the clone. To clone elsewhere, add a folder after the URL, as with git clone.`}
+          confirm="Clone"
+          onSubmit={cloneRepo}
+          onCancel={() => (setCloning(false), active()?.shown.focus())}
+        />
       </Show>
       <Show when={settingsOpen()}>
         <SettingsPage
