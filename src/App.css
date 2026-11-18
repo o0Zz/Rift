@@ -960,8 +960,13 @@ body,
 }
 
 .tree-row.selected {
-  background: var(--hover);
+  background: var(--active);
   box-shadow: inset 2px 0 var(--accent);
+}
+
+/* Keys go to the files panel: its selection shows as in File Explorer. */
+.panel-body:focus .tree-row.selected {
+  background: var(--selection);
 }
 
 .panel-body:focus {

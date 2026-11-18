@@ -6,9 +6,7 @@ import { fileBadge } from "./fileIcons";
 import { Icon } from "../ui/Icon";
 import { Loaded, PanelHead } from "../ui/Panel";
 import { PATH_DRAG_TYPE } from "../terminal/TermView";
-import { FILE_MANAGER, isDeleteKey, isUnder, parentDir, TRASH_NAME } from "./fileOps";
-
-type Entry = { name: string; dir: boolean };
+import { FILE_MANAGER, isDeleteKey, isUnder, joinPath as join, parentDir, TRASH_NAME, typeAhead, visibleRows, type Entry } from "./fileOps";
 
 function FileIcon(p: { name: string; dir: boolean; open: boolean }) {
   if (p.dir) {
@@ -33,14 +31,11 @@ function FileIcon(p: { name: string; dir: boolean; open: boolean }) {
   );
 }
 
-/** Joins with the folder's own separator: `\\` for Windows paths, `/` otherwise. */
-const join = (dir: string, name: string) =>
-  `${dir.replace(/[\\/]+$/, "")}${dir.includes("\\") ? "\\" : "/"}${name}`;
-
 /**
  * File tree of the tab's repo (or folder). Each folder is listed once, when first expanded (cached until ⟳).
  * A click opens a file in the tab (`onOpenFile`), a double-click in the external editor (`onEditFile`); a click
- * selects it: focus stays here, so Delete moves it to the trash (`onDeleted` closes its documents).
+ * selects it: focus stays here, so Delete moves it to the trash (`onDeleted` closes its documents). Keys as in
+ * File Explorer: arrows move the selection (Right/Left open/close a folder), Enter opens, typing a name selects it.
  */
 export function Explorer(props: {
   root?: string;
@@ -104,6 +99,52 @@ export function Explorer(props: {
     props.onDeleted(path);
   }
 
+  // Type to select: letters typed within a second of each other make one name.
+  let typed = "";
+  let typedAt = 0;
+
+  function select(row: { path: string; parent: string }) {
+    setSelected({ path: row.path, parent: row.parent });
+    body.querySelector(`[data-path="${CSS.escape(row.path)}"]`)?.scrollIntoView({ block: "nearest" });
+  }
+
+  function onKey(e: KeyboardEvent) {
+    const sel = selected();
+    if (sel && isDeleteKey(e)) {
+      e.preventDefault();
+      return remove(sel.path, sel.parent);
+    }
+    const root = props.root;
+    if (!root || e.ctrlKey || e.altKey || e.metaKey) return;
+    const rows = visibleRows(root, listings(), expanded());
+    const i = rows.findIndex((r) => r.path === sel?.path);
+    const row = rows[i];
+    const go = (j: number) => rows.length && select(rows[Math.max(0, Math.min(rows.length - 1, j))]);
+    if (e.key === "ArrowDown") go(i + 1);
+    else if (e.key === "ArrowUp") go(i < 0 ? 0 : i - 1);
+    else if (e.key === "Home") go(0);
+    else if (e.key === "End") go(rows.length - 1);
+    else if (e.key === "ArrowRight" && row?.dir) {
+      if (!expanded().has(row.path)) toggle(row.path);
+      else if (rows[i + 1]?.parent === row.path) go(i + 1);
+    } else if (e.key === "ArrowLeft" && row) {
+      if (row.dir && expanded().has(row.path)) toggle(row.path);
+      else go(rows.findIndex((r) => r.path === row.parent));
+    } else if (e.key === "Enter" && row) {
+      if (row.dir) toggle(row.path);
+      else {
+        props.onOpenFile(row.path);
+        body.focus({ preventScroll: true });
+      }
+    } else if (e.key.length === 1 && (e.key !== " " || typed)) {
+      typed = e.timeStamp - typedAt < 1000 ? typed + e.key : e.key;
+      typedAt = e.timeStamp;
+      const j = typeAhead(rows.map((r) => r.name), i, typed);
+      if (j >= 0) go(j);
+    } else return;
+    e.preventDefault();
+  }
+
   /** Opening a folder (`fs_open`) shows it in the OS's file manager. */
   const openInFileManager = (dir: string): MenuItem => ({
     label: `Open in ${FILE_MANAGER}`,
@@ -155,10 +196,11 @@ export function Explorer(props: {
                       e.dataTransfer!.setData("text/plain", path);
                       e.dataTransfer!.effectAllowed = "copy";
                     }}
+                    data-path={path}
                     onClick={() => {
                       setSelected({ path, parent: p.dir });
-                      if (entry.dir) return toggle(path);
-                      props.onOpenFile(path);
+                      if (entry.dir) toggle(path);
+                      else props.onOpenFile(path);
                       body.focus({ preventScroll: true });
                     }}
                     onDblClick={() => !entry.dir && props.onEditFile(path)}
@@ -205,13 +247,7 @@ export function Explorer(props: {
           const root = props.root;
           if (root && !(e.target as Element).closest(".tree-row")) menu.open(e, [openInFileManager(root)]);
         }}
-        onKeyDown={(e) => {
-          const sel = selected();
-          if (sel && isDeleteKey(e)) {
-            e.preventDefault();
-            remove(sel.path, sel.parent);
-          }
-        }}
+        onKeyDown={onKey}
       >
         <Show when={props.root} fallback={<div class="tree-note">No folder</div>}>
           {(root) => (
