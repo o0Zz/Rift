@@ -1151,6 +1151,10 @@ body,
   cursor: pointer;
 }
 
+.git-pin {
+  color: var(--fg-dim);
+}
+
 .branch-btn:hover:not(:disabled) {
   border-color: var(--line-strong);
   background: var(--hover);

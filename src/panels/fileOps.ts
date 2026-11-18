@@ -23,6 +23,16 @@ export function repoPath(root: string, path: string, ignoreCase = IS_WINDOWS || 
   return rel || undefined;
 }
 
+/** The folder holding `dir` (the files panel's ".."); undefined at a drive or file system root. */
+export function parentDir(dir: string): string | undefined {
+  const s = dir.replace(/[\\/]+$/, "");
+  const cut = Math.max(s.lastIndexOf("\\"), s.lastIndexOf("/"));
+  if (cut < 0) return undefined;
+  const parent = s.slice(0, cut);
+  if (parent === "") return "/";
+  return /^[A-Za-z]:$/.test(parent) ? parent + "\\" : parent;
+}
+
 /**
  * `path` is `target` or inside it (a deleted folder takes its files with it). Windows and macOS file systems
  * ignore case: `C:\Repo\src` holds `c:\repo\SRC\a.ts`.

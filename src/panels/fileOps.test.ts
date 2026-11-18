@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { fileManagerName, isDeleteKey, isUnder, repoPath } from "./fileOps";
+import { fileManagerName, isDeleteKey, isUnder, parentDir, repoPath } from "./fileOps";
 
 it("deletes on Delete, and on Cmd+Backspace on macOS only", () => {
   expect(isDeleteKey({ key: "Delete", metaKey: false }, false)).toBe(true);
@@ -34,4 +34,13 @@ it("names the file manager of each OS", () => {
   expect(fileManagerName(true, false)).toBe("File Explorer");
   expect(fileManagerName(false, true)).toBe("Finder");
   expect(fileManagerName(false, false)).toBe("file manager");
+});
+
+it("goes up one folder, never above a root", () => {
+  expect(parentDir("C:\\Dev\\oozz")).toBe("C:\\Dev");
+  expect(parentDir("C:\\Dev\\")).toBe("C:\\");
+  expect(parentDir("C:\\")).toBe(undefined);
+  expect(parentDir("/home/me")).toBe("/home");
+  expect(parentDir("/home")).toBe("/");
+  expect(parentDir("/")).toBe(undefined);
 });

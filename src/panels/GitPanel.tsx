@@ -13,6 +13,7 @@ import {
   type Change,
 } from "./diff";
 import { TRASH_NAME } from "./fileOps";
+import { folderName } from "../tabs/layout";
 import { Icon } from "../ui/Icon";
 import { createMenu } from "../ui/Menu";
 import { Loaded, PanelHead } from "../ui/Panel";
@@ -52,6 +53,9 @@ const fetched = new Map<string, number>();
 export function GitPanel(props: {
   root?: string;
   branch?: string;
+  /** Folder the tab's git follows instead of its terminal's ("Use for git panel"); `onUnpin` goes back. */
+  pinned?: string;
+  onUnpin(): void;
   /** Commits the upstream has that we do not (badge on Pull). */
   behind?: number;
   refresh?: number;
@@ -358,6 +362,13 @@ export function GitPanel(props: {
         closeTip="Close (Ctrl+Shift+G)"
         onClose={() => props.onClose()}
       >
+        <Show when={props.pinned}>
+          {(dir) => (
+            <button class="branch-btn git-pin" title={`Pinned to ${dir()}. Click to follow the terminal's folder again.`} onClick={() => props.onUnpin()}>
+              <Icon name="folder" size={14} /> {folderName(dir())} <Icon name="close" size={10} />
+            </button>
+          )}
+        </Show>
         <Show when={props.root}>
           <button
             class="icon-btn pull-btn"

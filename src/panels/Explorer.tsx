@@ -6,7 +6,7 @@ import { fileBadge } from "./fileIcons";
 import { Icon } from "../ui/Icon";
 import { Loaded, PanelHead } from "../ui/Panel";
 import { PATH_DRAG_TYPE } from "../terminal/TermView";
-import { FILE_MANAGER, isDeleteKey, isUnder, TRASH_NAME } from "./fileOps";
+import { FILE_MANAGER, isDeleteKey, isUnder, parentDir, TRASH_NAME } from "./fileOps";
 
 type Entry = { name: string; dir: boolean };
 
@@ -51,6 +51,10 @@ export function Explorer(props: {
   onDeleted(path: string): void;
   /** Its git history; only in a repo. */
   onHistory?(path: string): void;
+  /** ".." clicked: show this folder instead. */
+  onUp(dir: string): void;
+  /** The tab's git panel follows this folder's repo. */
+  onUseForGit(dir: string): void;
   onClose(): void;
 }) {
   const [listings, setListings] = createSignal(new Map<string, Entry[] | string>());
@@ -109,7 +113,7 @@ export function Explorer(props: {
     setSelected({ path, parent });
     menu.open(e, [
       ...(dir
-        ? [openInFileManager(path)]
+        ? [openInFileManager(path), { label: "Use for git panel", icon: "branch", run: () => props.onUseForGit(path) } as const]
         : [
             { label: "Open", icon: "file", run: () => props.onOpenFile(path) },
             { label: "Open in external editor", icon: "edit", run: () => props.onEditFile(path) },
@@ -199,7 +203,21 @@ export function Explorer(props: {
         }}
       >
         <Show when={props.root} fallback={<div class="tree-note">No folder</div>}>
-          {(root) => <Folder dir={root()} depth={0} />}
+          {(root) => (
+            <>
+              <Show when={parentDir(root())}>
+                {(up) => (
+                  <div class="tree-row" style={{ "padding-left": "8px" }} title={up()} onClick={() => props.onUp(up())}>
+                    <span class="tree-chev">
+                      <Icon name="up" size={12} />
+                    </span>
+                    <span class="tree-dir">..</span>
+                  </div>
+                )}
+              </Show>
+              <Folder dir={root()} depth={0} />
+            </>
+          )}
         </Show>
       </div>
       <menu.Menu />

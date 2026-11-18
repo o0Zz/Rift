@@ -6,7 +6,7 @@ import type { Group } from "./layout";
 import type { Tab } from "./Tab";
 
 /** What the backend keeps of a tab, opaque to it. */
-export type TabUi = { name?: string; color?: string; group?: string; shell?: string; snap?: string; docs?: string[]; doc?: number };
+export type TabUi = { name?: string; color?: string; group?: string; shell?: string; gitDir?: string; snap?: string; docs?: string[]; doc?: number };
 export type SavedTab = { cwd?: string; title: string; agent?: AgentSession; ui?: TabUi };
 export type Saved = { tabs: SavedTab[]; active: number; layout?: { groups?: Group[]; panes?: unknown; widths?: { tabs?: number } } };
 /** What `session_restore` returns: `problem` = the file or some tabs could not be read (a copy is kept). */
@@ -41,6 +41,7 @@ export function createSessionSave(o: {
           color: t.color,
           group: t.group,
           shell: t.shell,
+          gitDir: t.gitDir,
           snap: t.snap,
           docs: t.docs.map((d) => d.path),
           doc: t.current,

@@ -241,6 +241,7 @@ function App() {
 
   /** A shell's folder, from its prompt: also catches `git checkout` (same cwd, new branch). */
   function onShellCwd(tab: Tab, shell: Shell, cwd: string) {
+    if (shell === tab.main && shell.cwd !== cwd) tab.filesDir = undefined; // the files panel follows it again
     shell.cwd = cwd;
     readHead(tab, shell === tab.main ? undefined : cwd).then((head) => {
       if (head) git.promptCameBack(head.root);
@@ -248,10 +249,13 @@ function App() {
     });
   }
 
-  /** The tab's repo root and branch, from its main shell's folder (`.git/HEAD`, no process); `cwd` = another shell's. */
+  /**
+   * The tab's repo root and branch, from its pinned git folder or else its main shell's folder (`.git/HEAD`, no
+   * process); `cwd` = another shell's.
+   */
   function readHead(tab: Tab, cwd?: string) {
     const main = !cwd;
-    return invoke<{ root: string; branch: string } | null>("git_head", { cwd: cwd ?? tab.cwd }).then((head) => {
+    return invoke<{ root: string; branch: string } | null>("git_head", { cwd: cwd ?? tab.gitDir ?? tab.cwd }).then((head) => {
       if (main) batch(() => ((tab.root = head?.root), (tab.branch = head?.branch)));
       return head;
     });
@@ -296,6 +300,7 @@ function App() {
     tab.group = saved ? saved.ui?.group : (opts.group ?? active()?.group);
     // Like the folder, a new tab keeps the shell of the tab it was opened from.
     tab.shell = saved ? saved.ui?.shell : (opts.shell ?? active()?.shell);
+    tab.gitDir = saved?.ui?.gitDir;
     if (saved?.ui?.snap) tab.snap = saved.ui.snap;
     // Restored documents are read only when first shown.
     if (saved?.ui?.docs?.length) {
@@ -464,6 +469,14 @@ function App() {
     if (!file) return;
     setPanes(showPanel(panes(), "git"));
     setHistoryAsk({ file });
+  }
+
+  /** The tab's git (panel, branch, stats) follows `dir` instead of its terminal's folder; undefined = the terminal's. */
+  async function pinGit(tab: Tab, dir: string | undefined) {
+    if (dir && !(await invoke("git_head", { cwd: dir }))) return alert(`${dir} is not in a git repository.`);
+    tab.gitDir = dir;
+    await readHead(tab);
+    git.stats(tab);
   }
 
   let sizes: ResizeObserver | undefined; // refits the terminals when their area changes size
@@ -759,8 +772,10 @@ function App() {
     if (id === "explorer") {
       return (
         <Explorer
-          root={panelTab()?.root ?? panelTab()?.cwd}
+          root={panelTab()?.filesRoot}
           refresh={filesRefresh()}
+          onUp={(dir) => panelTab() && (panelTab()!.filesDir = dir)}
+          onUseForGit={(dir) => panelTab() && pinGit(panelTab()!, dir)}
           onOpenFile={(path) => docs.open(path)}
           onEditFile={openEditor}
           onHistory={panelTab()?.root ? showHistory : undefined}
@@ -818,6 +833,8 @@ function App() {
         <GitPanel
           root={panelTab()?.root}
           branch={panelTab()?.branch}
+          pinned={panelTab()?.gitDir}
+          onUnpin={() => panelTab() && pinGit(panelTab()!, undefined)}
           behind={panelTab()?.stats?.behind}
           agent={agents()[0]?.name}
           refresh={git.refresh()}
@@ -829,7 +846,7 @@ function App() {
             const root = panelTab()?.root;
             for (const tab of tabs()) {
               if (!root || tab.root !== root || !tab.cwd) continue;
-              invoke<{ branch: string } | null>("git_head", { cwd: tab.cwd }).then((head) => (tab.branch = head?.branch));
+              invoke<{ branch: string } | null>("git_head", { cwd: tab.gitDir ?? tab.cwd }).then((head) => (tab.branch = head?.branch));
               git.stats(tab);
             }
           }}

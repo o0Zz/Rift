@@ -18,6 +18,8 @@ export class Tab {
     color: field<string | undefined>(undefined),
     group: field<string | undefined>(undefined),
     root: field<string | undefined>(undefined),
+    gitDir: field<string | undefined>(undefined),
+    filesDir: field<string | undefined>(undefined),
     branch: field<string | undefined>(undefined),
     unread: field(false),
     shell: field<string | undefined>(undefined),
@@ -52,9 +54,17 @@ export class Tab {
   set color(v) { this.f.color.set(v); }
   get group() { return this.f.group.get(); }
   set group(v) { this.f.group.set(v); }
-  /** Git repository root containing the main shell's folder, and its branch (read from .git/HEAD at each prompt). */
+  /** Git repository root containing the main shell's folder (or `gitDir`), and its branch (.git/HEAD at each prompt). */
   get root() { return this.f.root.get(); }
   set root(v) { this.f.root.set(v); }
+  /** Folder the tab's repo is read from instead of its terminal's ("Use for git panel"); saved. */
+  get gitDir() { return this.f.gitDir.get(); }
+  set gitDir(v) { this.f.gitDir.set(v); }
+  /** Folder the files panel shows instead of the default (its ".."); forgotten when the terminal changes folder. */
+  get filesDir() { return this.f.filesDir.get(); }
+  set filesDir(v) { this.f.filesDir.set(v); }
+  /** The files panel's folder: chosen with "..", else the repo (unless pinned elsewhere), else the terminal's. */
+  get filesRoot() { return this.filesDir ?? (this.gitDir ? this.cwd : (this.root ?? this.cwd)); }
   get branch() { return this.f.branch.get(); }
   set branch(v) { this.f.branch.set(v); }
   /** Shell profile id (see shell_profiles) of all its shells; undefined = the default shell. */
