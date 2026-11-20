@@ -1,6 +1,9 @@
 /** The folder part of a path, with its trailing separator ("" for a bare name). Either separator. */
 export const dirOf = (path: string) => path.slice(0, Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\")) + 1);
 
+/** Images the WebView shows itself: opened in Rift, not in the default app. */
+export const isImage = (path: string) => /\.(png|jpe?g|gif|webp|svg|bmp|ico|avif)$/i.test(path);
+
 /** Same file? Paths compare without case and with either separator (Windows). */
 export function sameFile(a: string, b: string) {
   const norm = (p: string) => p.replace(/\\/g, "/").toLowerCase();

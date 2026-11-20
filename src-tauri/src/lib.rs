@@ -469,6 +469,13 @@ async fn fs_mkdir(parent: String, name: String) -> Result<String, String> {
         .map_err(err)
 }
 
+#[tauri::command]
+async fn fs_rename(path: String, name: String) -> Result<String, String> {
+    files::rename(path.as_ref(), &name)
+        .map(|p| p.to_string_lossy().into_owned())
+        .map_err(err)
+}
+
 /// Puts files on the OS clipboard (File Explorer / Finder can paste them).
 #[tauri::command]
 async fn fs_copy(paths: Vec<String>) -> Result<(), String> {
@@ -841,6 +848,7 @@ pub fn run() {
             fs_reveal,
             fs_trash,
             fs_mkdir,
+            fs_rename,
             fs_copy,
             fs_paste,
             git_head,

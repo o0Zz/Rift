@@ -192,16 +192,36 @@ pub fn free_name(dir: &Path, name: &str) -> PathBuf {
 
 /// Creates the folder `name` in `parent`; `name` is one plain name (no separator, not `.`/`..`).
 pub fn make_dir(parent: &Path, name: &str) -> std::io::Result<PathBuf> {
-    let invalid = name.is_empty() || name == "." || name == ".." || name.contains(['/', '\\']);
-    if invalid {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            format!("Not a folder name: {name}"),
-        ));
-    }
-    let path = parent.join(name);
+    let path = parent.join(plain_name(name)?);
     std::fs::create_dir(&path)?;
     Ok(path)
+}
+
+fn plain_name(name: &str) -> std::io::Result<&str> {
+    if name.is_empty() || name == "." || name == ".." || name.contains(['/', '\\']) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("Not a valid name: {name}"),
+        ));
+    }
+    Ok(name)
+}
+
+/// Renames the file or folder `path` to `name` in the same folder. Never replaces another file (a rename on
+/// Windows would); a change of case only is allowed.
+pub fn rename(path: &Path, name: &str) -> std::io::Result<PathBuf> {
+    let parent = path.parent().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "Cannot rename a drive")
+    })?;
+    let to = parent.join(plain_name(name)?);
+    if to.exists() && to.canonicalize()? != path.canonicalize()? {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            format!("{name} already exists"),
+        ));
+    }
+    std::fs::rename(path, &to)?;
+    Ok(to)
 }
 
 /// Copies files and folders (with their content) into `dir`, as a paste does: a name already there gets a
@@ -317,6 +337,44 @@ mod tests {
         for bad in ["", ".", "..", "a/b", "a\\b"] {
             assert!(make_dir(tmp.path(), bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn renames_in_place_never_over_another_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let a = tmp.path().join("a.txt");
+        std::fs::write(&a, "a").unwrap();
+        std::fs::write(tmp.path().join("b.txt"), "b").unwrap();
+
+        assert!(rename(&a, "b.txt").is_err());
+        assert_eq!(
+            std::fs::read_to_string(tmp.path().join("b.txt")).unwrap(),
+            "b"
+        );
+        for bad in ["", "..", "sub/c.txt", "sub\\c.txt"] {
+            assert!(rename(&a, bad).is_err(), "{bad}");
+        }
+
+        let c = rename(&a, "c.txt").unwrap();
+        assert_eq!(c, tmp.path().join("c.txt"));
+        assert_eq!(std::fs::read_to_string(&c).unwrap(), "a");
+        assert!(!a.exists());
+
+        // Case only (one file on Windows and macOS): allowed, the name changes.
+        let upper = rename(&c, "C.txt").unwrap();
+        let names: Vec<String> = list(tmp.path())
+            .unwrap()
+            .into_iter()
+            .map(|e| e.name)
+            .collect();
+        assert!(names.contains(&"C.txt".into()), "{names:?}");
+        assert_eq!(std::fs::read_to_string(upper).unwrap(), "a");
+
+        let dir = tmp.path().join("d");
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::write(dir.join("x"), "x").unwrap();
+        let moved = rename(&dir, "e").unwrap();
+        assert_eq!(std::fs::read_to_string(moved.join("x")).unwrap(), "x");
     }
 
     #[test]

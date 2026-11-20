@@ -2070,6 +2070,22 @@ button.doc-tab {
   background: var(--bg);
 }
 
+/* Image viewer: fits the area, never upscaled */
+.doc-image {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100%;
+  padding: 16px;
+  box-sizing: border-box;
+}
+
+.doc-image img {
+  max-width: 100%;
+  max-height: calc(100vh - 120px);
+  object-fit: contain;
+}
+
 /* Markdown reader: large text, shades of gray, a rule under headings, one color per table row */
 
 .md {

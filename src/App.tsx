@@ -721,6 +721,8 @@ function App() {
     if (settingsOpen()) return; // the settings page owns the keyboard (shortcut recording, Esc)
     const action = actionFor(e, settings().keys);
     if (!action) return;
+    // In the files panel, F2 renames the selected file (as in File Explorer), not the tab.
+    if (action === "renameTab" && e.key === "F2" && (e.target as Element).closest?.(".explorer")) return;
     // Capture phase: handled before xterm sees the key.
     e.preventDefault();
     e.stopPropagation();

@@ -36,7 +36,7 @@ function FileIcon(p: { name: string; dir: boolean; open: boolean }) {
 /**
  * File tree of the tab's repo (or folder). Each folder is listed once, when first expanded (cached until ⟳).
  * A click opens a file in the tab (`onOpenFile`), a double-click in the external editor (`onEditFile`); a click
- * selects it: focus stays here, so Delete moves it to the trash (`onDeleted` closes its documents). Keys as in
+ * selects it: focus stays here, so Delete moves it to the trash and F2 renames it (`onDeleted` closes its documents either way). Keys as in
  * File Explorer: arrows move the selection (Right/Left open/close a folder), Enter opens, typing a name selects it.
  */
 export function Explorer(props: {
@@ -142,6 +142,20 @@ export function Explorer(props: {
     body.focus({ preventScroll: true });
   }
 
+  const [renaming, setRenaming] = createSignal<{ path: string; parent: string }>();
+  async function rename(path: string, parent: string, name: string) {
+    setRenaming(undefined);
+    try {
+      const to = await invoke<string>("fs_rename", { path, name });
+      setExpanded(new Set([...expanded()].filter((dir) => !isUnder(dir, path))));
+      props.onDeleted(path);
+      await showIn(parent, to);
+    } catch (e) {
+      alert(`Could not rename ${folderName(path)}: ${e}`);
+    }
+    body.focus({ preventScroll: true });
+  }
+
   const folderItems = (dir: string): MenuItem[] => [
     { label: "Paste", icon: "paste", run: () => paste(dir) },
     { label: "New folder…", icon: "newFolder", run: () => setNaming(dir) },
@@ -161,6 +175,10 @@ export function Explorer(props: {
     if (sel && isDeleteKey(e)) {
       e.preventDefault();
       return remove(sel.path, sel.parent);
+    }
+    if (sel && e.key === "F2" && !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey) {
+      e.preventDefault();
+      return setRenaming(sel);
     }
     const clip = clipboardKey(e);
     if (clip) {
@@ -224,6 +242,7 @@ export function Explorer(props: {
             ...(props.onHistory ? [{ label: "Show history", icon: "history", run: () => props.onHistory!(path) } as const] : []),
           ] satisfies MenuItem[]),
       { label: `Reveal in ${FILE_MANAGER}`, icon: "folder", run: () => invoke("fs_reveal", { path }) },
+      { label: "Rename… (F2)", icon: "edit", run: () => setRenaming({ path, parent }) },
       { label: "Copy", icon: "copy", run: () => copy(path) },
       ...(dir ? [] : [{ label: "Paste", icon: "paste", run: () => paste(parent) } as const]),
       { label: "Copy path", icon: "copy", run: () => navigator.clipboard.writeText(path) },
@@ -332,6 +351,22 @@ export function Explorer(props: {
           )}
         </Show>
       </div>
+      <Show when={renaming()}>
+        {(r) => (
+          <Portal>
+            <PromptDialog
+              title={`Rename ${folderName(r().path)}`}
+              value={folderName(r().path)}
+              confirm="Rename"
+              onSubmit={(name) => rename(r().path, r().parent, name)}
+              onCancel={() => {
+                setRenaming(undefined);
+                body.focus({ preventScroll: true });
+              }}
+            />
+          </Portal>
+        )}
+      </Show>
       <Show when={naming()}>
         {(parent) => (
           <Portal>

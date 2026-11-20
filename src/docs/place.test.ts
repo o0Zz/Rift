@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { afterClose, placeDoc, sameFile } from "./place";
+import { afterClose, isImage, placeDoc, sameFile } from "./place";
 
 const doc = (path: string, dirty = false) => ({ path, dirty });
 
@@ -39,4 +39,8 @@ describe("sameFile", () => {
     expect(sameFile("C:\\Repo\\README.md", "c:/repo/readme.md")).toBe(true);
     expect(sameFile("a.md", "b.md")).toBe(false);
   });
+});
+it("shows images in Rift, any case; other binaries go to the default app", () => {
+  for (const p of ["C:\a\shot.PNG", "/x/photo.jpeg", "a.jpg", "logo.svg", "i.webp", "f.ico"]) expect(isImage(p)).toBe(true);
+  for (const p of ["a.pdf", "png", "a.png.exe", "notes.md"]) expect(isImage(p)).toBe(false);
 });

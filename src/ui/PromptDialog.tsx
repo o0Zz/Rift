@@ -5,12 +5,20 @@ export function PromptDialog(props: {
   title: string;
   hint?: string;
   placeholder?: string;
+  /** Starting text, selected up to its extension (as a rename in File Explorer). */
+  value?: string;
   confirm: string;
   onSubmit(value: string): void;
   onCancel(): void;
 }) {
   let input!: HTMLInputElement;
-  onMount(() => input.focus());
+  onMount(() => {
+    input.focus();
+    if (!props.value) return;
+    input.value = props.value;
+    const dot = props.value.lastIndexOf(".");
+    input.setSelectionRange(0, dot > 0 ? dot : props.value.length);
+  });
   const submit = () => input.value.trim() && props.onSubmit(input.value.trim());
 
   return (

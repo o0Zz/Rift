@@ -1,7 +1,7 @@
 import { createSignal } from "solid-js";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import type { Editor } from "./editor";
-import { dirOf } from "./place";
+import { dirOf, isImage } from "./place";
 import { folderName } from "../tabs/layout";
 
 type Text = { text: string; mtime: number };
@@ -31,7 +31,7 @@ export class DocView {
   ) {
     this.name = folderName(path);
     this.markdown = isMarkdown(path);
-    this.editingSig[1](!this.markdown);
+    this.editingSig[1](!this.markdown && !isImage(path));
     this.el.className = "doc";
     this.el.dataset.zoom = "docs";
     this.el.style.display = "none";
@@ -89,6 +89,7 @@ export class DocView {
   }
 
   private async load() {
+    if (isImage(this.path)) return this.showImage();
     const file = await invoke<Text | null>("fs_read_text", { path: this.path }).catch((e) => {
       this.el.textContent = String(e);
       return undefined;
@@ -105,11 +106,26 @@ export class DocView {
     await this.loaded;
     const mtime = await invoke<number>("fs_mtime", { path: this.path }).catch(() => this.mtime);
     if (mtime === this.mtime || this.dirty) return;
+    if (isImage(this.path)) return this.showImage();
     const file = await invoke<Text | null>("fs_read_text", { path: this.path }).catch(() => undefined);
     if (!file) return;
     this.text = file.text;
     this.mtime = file.mtime;
     await this.render(true);
+  }
+
+  /** An image, through the asset protocol (an SVG in an <img> runs no script); the mtime busts the cache. */
+  private async showImage() {
+    this.mtime = await invoke<number>("fs_mtime", { path: this.path }).catch(() => 0);
+    const box = document.createElement("div");
+    box.className = "doc-image";
+    const img = document.createElement("img");
+    img.alt = this.name;
+    img.onerror = () => (box.textContent = `Cannot show ${this.name}`);
+    img.src = `${convertFileSrc(this.path)}?v=${this.mtime}`;
+    box.appendChild(img);
+    this.el.tabIndex = -1;
+    this.el.replaceChildren(box);
   }
 
   private takeText() {
