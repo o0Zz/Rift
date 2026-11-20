@@ -1,4 +1,5 @@
 mod agents;
+mod clipboard;
 mod editor;
 mod explorer_menu;
 mod files;
@@ -13,7 +14,7 @@ mod settings;
 mod shell;
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -462,6 +463,31 @@ async fn fs_trash(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn fs_mkdir(parent: String, name: String) -> Result<String, String> {
+    files::make_dir(parent.as_ref(), &name)
+        .map(|p| p.to_string_lossy().into_owned())
+        .map_err(err)
+}
+
+/// Puts files on the OS clipboard (File Explorer / Finder can paste them).
+#[tauri::command]
+async fn fs_copy(paths: Vec<String>) -> Result<(), String> {
+    let paths: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
+    clipboard::copy_files(&paths)
+}
+
+/// Pastes the clipboard's files (copies) or image (a PNG) into `dir`; returns what was created.
+#[tauri::command]
+async fn fs_paste(dir: String) -> Result<Vec<String>, String> {
+    let content = clipboard::read()?.ok_or("Nothing to paste: copy files or an image first")?;
+    let made = clipboard::paste_into(dir.as_ref(), content).map_err(err)?;
+    Ok(made
+        .iter()
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect())
+}
+
+#[tauri::command]
 async fn git_head(cwd: String) -> Option<git::Head> {
     git::head(cwd.as_ref())
 }
@@ -814,6 +840,9 @@ pub fn run() {
             fs_mtime,
             fs_reveal,
             fs_trash,
+            fs_mkdir,
+            fs_copy,
+            fs_paste,
             git_head,
             git_status,
             git_diff,

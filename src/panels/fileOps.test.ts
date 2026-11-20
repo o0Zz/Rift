@@ -1,11 +1,30 @@
 import { expect, it } from "vitest";
-import { fileManagerName, isDeleteKey, isUnder, parentDir, repoPath, typeAhead, visibleRows, type Entry } from "./fileOps";
+import { clipboardKey, fileManagerName, isDeleteKey, isUnder, parentDir, repoPath, typeAhead, visibleRows, type Entry } from "./fileOps";
 
 it("deletes on Delete, and on Cmd+Backspace on macOS only", () => {
   expect(isDeleteKey({ key: "Delete", metaKey: false }, false)).toBe(true);
   expect(isDeleteKey({ key: "Backspace", metaKey: true }, true)).toBe(true);
   expect(isDeleteKey({ key: "Backspace", metaKey: true }, false)).toBe(false);
   expect(isDeleteKey({ key: "Backspace", metaKey: false }, true)).toBe(false);
+});
+
+it("copies and pastes on Ctrl+C / Ctrl+V, Cmd on macOS, nothing with another modifier", () => {
+  const k = (key: string, mods: Partial<{ ctrlKey: boolean; metaKey: boolean; shiftKey: boolean; altKey: boolean }>) => ({
+    key,
+    ctrlKey: false,
+    metaKey: false,
+    shiftKey: false,
+    altKey: false,
+    ...mods,
+  });
+  expect(clipboardKey(k("c", { ctrlKey: true }), false)).toBe("copy");
+  expect(clipboardKey(k("V", { ctrlKey: true }), false)).toBe("paste");
+  expect(clipboardKey(k("v", { metaKey: true }), true)).toBe("paste");
+  expect(clipboardKey(k("v", { ctrlKey: true }), true)).toBeUndefined();
+  expect(clipboardKey(k("v", { metaKey: true }), false)).toBeUndefined();
+  expect(clipboardKey(k("c", { ctrlKey: true, shiftKey: true }), false)).toBeUndefined();
+  expect(clipboardKey(k("c", {}), false)).toBeUndefined();
+  expect(clipboardKey(k("x", { ctrlKey: true }), false)).toBeUndefined();
 });
 
 it("finds the files a deletion takes with it", () => {

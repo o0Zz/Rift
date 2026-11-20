@@ -25,6 +25,8 @@ const PATHS = {
   external: "M9 2.5h4.5V7M13.5 2.5L7.5 8.5M11.5 9.5v4h-9v-9h4",
   history: "M8 2.5a5.5 5.5 0 1 0 0 11a5.5 5.5 0 0 0 0-11zM8 5v3l2 1.5",
   copy: "M5.5 5.5h7v8h-7zM3.5 10.5v-8h7",
+  paste: "M5.5 3h-2v10.5h9V3h-2M5.5 2h5v2h-5z",
+  newFolder: "M2 4.5h4l1.5 1.5H14v6.5H2zM8 7.5v4M6 9.5h4",
   shield: "M8 1.5l5.5 2v4c0 3.3-2.3 5.8-5.5 7-3.2-1.2-5.5-3.7-5.5-7v-4z",
   trash: "M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.5 9h6l.5-9M7 7v4M9 7v4",
 } as const;

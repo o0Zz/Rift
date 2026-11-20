@@ -171,6 +171,94 @@ pub fn trash(path: &Path) -> Result<(), trash::Error> {
     trash.delete(path)
 }
 
+/// `name` if `dir` has nothing by that name, else the first free `stem (2).ext`, `stem (3).ext`...
+pub fn free_name(dir: &Path, name: &str) -> PathBuf {
+    let first = dir.join(name);
+    if !first.exists() {
+        return first;
+    }
+    let (stem, ext) = match Path::new(name).extension() {
+        Some(ext) if !first.is_dir() => {
+            let ext = ext.to_string_lossy();
+            (&name[..name.len() - ext.len() - 1], format!(".{ext}"))
+        }
+        _ => (name, String::new()),
+    };
+    (2..)
+        .map(|n| dir.join(format!("{stem} ({n}){ext}")))
+        .find(|p| !p.exists())
+        .unwrap()
+}
+
+/// Creates the folder `name` in `parent`; `name` is one plain name (no separator, not `.`/`..`).
+pub fn make_dir(parent: &Path, name: &str) -> std::io::Result<PathBuf> {
+    let invalid = name.is_empty() || name == "." || name == ".." || name.contains(['/', '\\']);
+    if invalid {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("Not a folder name: {name}"),
+        ));
+    }
+    let path = parent.join(name);
+    std::fs::create_dir(&path)?;
+    Ok(path)
+}
+
+/// Copies files and folders (with their content) into `dir`, as a paste does: a name already there gets a
+/// number (`free_name`). A folder is never pasted inside itself. Returns the copies.
+pub fn copy_into(dir: &Path, sources: &[PathBuf]) -> std::io::Result<Vec<PathBuf>> {
+    let target = dir.canonicalize()?;
+    let mut made = Vec::new();
+    for src in sources {
+        let name = src.file_name().ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "Cannot paste a drive")
+        })?;
+        let dest = free_name(dir, &name.to_string_lossy());
+        if src.is_dir() {
+            if target.starts_with(src.canonicalize()?) {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    format!("Cannot paste {} inside itself", name.to_string_lossy()),
+                ));
+            }
+            copy_dir(src, &dest)?;
+        } else {
+            std::fs::copy(src, &dest)?;
+        }
+        made.push(dest);
+    }
+    Ok(made)
+}
+
+fn copy_dir(src: &Path, dest: &Path) -> std::io::Result<()> {
+    std::fs::create_dir(dest)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let to = dest.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_dir(&entry.path(), &to)?;
+        } else {
+            std::fs::copy(entry.path(), &to)?;
+        }
+    }
+    Ok(())
+}
+
+/// Saves RGBA pixels as `image.png` in `dir` (numbered if taken).
+pub fn save_png(dir: &Path, width: usize, height: usize, rgba: &[u8]) -> std::io::Result<PathBuf> {
+    let path = free_name(dir, "image.png");
+    image::save_buffer_with_format(
+        &path,
+        rgba,
+        width as u32,
+        height as u32,
+        image::ExtendedColorType::Rgba8,
+        image::ImageFormat::Png,
+    )
+    .map_err(std::io::Error::other)?;
+    Ok(path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -182,6 +270,65 @@ mod tests {
         // 2026-11-13T07:25:47.123Z
         assert_eq!(at(1_794_554_747_123), "2026-11-13_07-25-47-123Z");
         assert_eq!(at(951_782_400_000), "2000-02-29_00-00-00-000Z");
+    }
+
+    #[test]
+    fn pastes_files_and_folders_numbering_taken_names() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src = tmp.path().join("src");
+        std::fs::create_dir_all(src.join("sub")).unwrap();
+        std::fs::write(src.join("sub").join("b.txt"), "b").unwrap();
+        let file = tmp.path().join("a.tar.gz");
+        std::fs::write(&file, "a").unwrap();
+        let dest = tmp.path().join("dest");
+        std::fs::create_dir(&dest).unwrap();
+
+        let made = copy_into(&dest, &[file.clone(), src.clone()]).unwrap();
+        assert_eq!(made, vec![dest.join("a.tar.gz"), dest.join("src")]);
+        assert_eq!(
+            std::fs::read_to_string(dest.join("src").join("sub").join("b.txt")).unwrap(),
+            "b"
+        );
+
+        // Again: names are taken, so copies get a number; a file into its own folder too.
+        let again = copy_into(&dest, &[file.clone(), src.clone()]).unwrap();
+        assert_eq!(again, vec![dest.join("a.tar (2).gz"), dest.join("src (2)")]);
+        let beside = copy_into(tmp.path(), &[file]).unwrap();
+        assert_eq!(beside, vec![tmp.path().join("a.tar (2).gz")]);
+        assert_eq!(std::fs::read_to_string(&beside[0]).unwrap(), "a");
+    }
+
+    #[test]
+    fn a_folder_is_never_pasted_inside_itself() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src = tmp.path().join("src");
+        std::fs::create_dir_all(src.join("sub")).unwrap();
+        assert!(copy_into(&src.join("sub"), std::slice::from_ref(&src)).is_err());
+        assert!(copy_into(&src, std::slice::from_ref(&src)).is_err());
+        assert!(!src.join("sub").join("src").exists());
+    }
+
+    #[test]
+    fn makes_a_folder_from_one_plain_name() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert_eq!(make_dir(tmp.path(), "new").unwrap(), tmp.path().join("new"));
+        assert!(tmp.path().join("new").is_dir());
+        assert!(make_dir(tmp.path(), "new").is_err()); // already there
+        for bad in ["", ".", "..", "a/b", "a\\b"] {
+            assert!(make_dir(tmp.path(), bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn saves_pixels_as_a_png() {
+        let tmp = tempfile::tempdir().unwrap();
+        let rgba = [255, 0, 0, 255, 0, 255, 0, 128];
+        let first = save_png(tmp.path(), 2, 1, &rgba).unwrap();
+        let second = save_png(tmp.path(), 2, 1, &rgba).unwrap();
+        assert_eq!(first, tmp.path().join("image.png"));
+        assert_eq!(second, tmp.path().join("image (2).png"));
+        let img = image::open(&first).unwrap().to_rgba8();
+        assert_eq!(img.into_raw(), rgba);
     }
 
     #[test]

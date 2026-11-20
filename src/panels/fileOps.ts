@@ -16,6 +16,16 @@ export function isDeleteKey(e: { key: string; metaKey: boolean }, mac = IS_MAC):
   return e.key === "Delete" || (mac && e.metaKey && e.key === "Backspace");
 }
 
+/** Ctrl+C / Ctrl+V (Cmd on macOS) in the files panel: copy the selected file, paste into its folder. */
+export function clipboardKey(
+  e: { key: string; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean; altKey: boolean },
+  mac = IS_MAC,
+): "copy" | "paste" | undefined {
+  if ((mac ? !e.metaKey || e.ctrlKey : !e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey) return undefined;
+  const key = e.key.toLowerCase();
+  return key === "c" ? "copy" : key === "v" ? "paste" : undefined;
+}
+
 /** `path` as git names it in the repo at `root` ("src/a.ts"); undefined when it is outside. */
 export function repoPath(root: string, path: string, ignoreCase = IS_WINDOWS || IS_MAC): string | undefined {
   if (!isUnder(path, root, ignoreCase)) return undefined;

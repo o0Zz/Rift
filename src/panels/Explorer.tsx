@@ -1,4 +1,5 @@
 import { createEffect, createSignal, For, on, Show } from "solid-js";
+import { Portal } from "solid-js/web";
 import { invoke } from "@tauri-apps/api/core";
 import { createMenu, type MenuItem } from "../ui/Menu";
 import { folderName } from "../tabs/layout";
@@ -6,7 +7,8 @@ import { fileBadge } from "./fileIcons";
 import { Icon } from "../ui/Icon";
 import { Loaded, PanelHead } from "../ui/Panel";
 import { PATH_DRAG_TYPE } from "../terminal/TermView";
-import { FILE_MANAGER, isDeleteKey, isUnder, joinPath as join, parentDir, TRASH_NAME, typeAhead, visibleRows, type Entry } from "./fileOps";
+import { PromptDialog } from "../ui/PromptDialog";
+import { clipboardKey, FILE_MANAGER, isDeleteKey, isUnder, joinPath as join, parentDir, TRASH_NAME, typeAhead, visibleRows, type Entry } from "./fileOps";
 
 function FileIcon(p: { name: string; dir: boolean; open: boolean }) {
   if (p.dir) {
@@ -99,6 +101,52 @@ export function Explorer(props: {
     props.onDeleted(path);
   }
 
+  /** Lists `dir` again, opened, and selects `path` in it. */
+  async function showIn(dir: string, path: string) {
+    if (dir !== props.root) setExpanded(new Set(expanded()).add(dir));
+    await load(dir);
+    select({ path, parent: dir });
+  }
+
+  /** Where Ctrl+V pastes: the selected folder, else the selected file's folder, else the root. */
+  function pasteDir(): string | undefined {
+    const sel = selected();
+    if (!sel) return props.root;
+    const list = listings().get(sel.parent);
+    const dir = Array.isArray(list) && list.some((e) => e.dir && join(sel.parent, e.name) === sel.path);
+    return dir ? sel.path : sel.parent;
+  }
+
+  /** On the OS clipboard as a file: pastes here or in File Explorer / Finder. */
+  const copy = (path: string) => invoke("fs_copy", { paths: [path] }).catch((e) => alert(`Could not copy: ${e}`));
+
+  /** The clipboard's files (copied here or in the file manager), or its image as a PNG. */
+  async function paste(dir: string) {
+    let made: string[];
+    try {
+      made = await invoke<string[]>("fs_paste", { dir });
+    } catch (e) {
+      return alert(`Could not paste: ${e}`);
+    }
+    if (made.length) await showIn(dir, made[0]);
+  }
+
+  const [naming, setNaming] = createSignal<string>();
+  async function makeDir(parent: string, name: string) {
+    setNaming(undefined);
+    try {
+      await showIn(parent, await invoke<string>("fs_mkdir", { parent, name }));
+    } catch (e) {
+      alert(`Could not create ${name}: ${e}`);
+    }
+    body.focus({ preventScroll: true });
+  }
+
+  const folderItems = (dir: string): MenuItem[] => [
+    { label: "Paste", icon: "paste", run: () => paste(dir) },
+    { label: "New folder…", icon: "newFolder", run: () => setNaming(dir) },
+  ];
+
   // Type to select: letters typed within a second of each other make one name.
   let typed = "";
   let typedAt = 0;
@@ -113,6 +161,13 @@ export function Explorer(props: {
     if (sel && isDeleteKey(e)) {
       e.preventDefault();
       return remove(sel.path, sel.parent);
+    }
+    const clip = clipboardKey(e);
+    if (clip) {
+      e.preventDefault();
+      if (clip === "copy") return sel && copy(sel.path);
+      const dir = pasteDir();
+      return dir && paste(dir);
     }
     const root = props.root;
     if (!root || e.ctrlKey || e.altKey || e.metaKey) return;
@@ -158,6 +213,7 @@ export function Explorer(props: {
       ...(dir
         ? [
             openInFileManager(path),
+            ...folderItems(path),
             { label: "Set as root", icon: "folder", run: () => props.onRoot(path) } as const,
             { label: "Use for git panel", icon: "branch", run: () => props.onUseForGit(path) } as const,
           ]
@@ -168,6 +224,8 @@ export function Explorer(props: {
             ...(props.onHistory ? [{ label: "Show history", icon: "history", run: () => props.onHistory!(path) } as const] : []),
           ] satisfies MenuItem[]),
       { label: `Reveal in ${FILE_MANAGER}`, icon: "folder", run: () => invoke("fs_reveal", { path }) },
+      { label: "Copy", icon: "copy", run: () => copy(path) },
+      ...(dir ? [] : [{ label: "Paste", icon: "paste", run: () => paste(parent) } as const]),
       { label: "Copy path", icon: "copy", run: () => navigator.clipboard.writeText(path) },
       "separator",
       { label: `Delete (move to ${TRASH_NAME})`, icon: "trash", run: () => remove(path, parent) },
@@ -235,6 +293,13 @@ export function Explorer(props: {
             <Icon name="terminal" />
           </button>
         </Show>
+        <Show when={props.root}>
+          {(root) => (
+            <button class="icon-btn" title="New folder" onClick={() => setNaming(root())}>
+              <Icon name="newFolder" />
+            </button>
+          )}
+        </Show>
         <button class="icon-btn" title="Refresh" onClick={refresh}>
           <Icon name="refresh" />
         </button>
@@ -245,7 +310,7 @@ export function Explorer(props: {
         tabIndex={-1}
         onContextMenu={(e) => {
           const root = props.root;
-          if (root && !(e.target as Element).closest(".tree-row")) menu.open(e, [openInFileManager(root)]);
+          if (root && !(e.target as Element).closest(".tree-row")) menu.open(e, [openInFileManager(root), ...folderItems(root)]);
         }}
         onKeyDown={onKey}
       >
@@ -267,6 +332,23 @@ export function Explorer(props: {
           )}
         </Show>
       </div>
+      <Show when={naming()}>
+        {(parent) => (
+          <Portal>
+            <PromptDialog
+              title="New folder"
+              placeholder="Folder name"
+              hint={`In ${parent()}`}
+              confirm="Create"
+              onSubmit={(name) => makeDir(parent(), name)}
+              onCancel={() => {
+                setNaming(undefined);
+                body.focus({ preventScroll: true });
+              }}
+            />
+          </Portal>
+        )}
+      </Show>
       <menu.Menu />
     </aside>
   );
