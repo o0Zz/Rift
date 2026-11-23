@@ -282,6 +282,7 @@ function App() {
         isAgent: () => !!shell.agent,
         imagePasteKey: () => agents().find((a) => a.id === shell.agent)?.image_paste_key ?? "\x16",
         onInterrupt: () => (shell.status = statusAfterInterrupt(shell.status)),
+        confirmLinks: () => settings().confirmLinks,
       },
       look(),
     );

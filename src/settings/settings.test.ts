@@ -133,7 +133,7 @@ describe("mergeSettings", () => {
   it("falls back to defaults for missing or invalid values", () => {
     expect(mergeSettings(null)).toEqual(DEFAULTS);
     expect(DEFAULTS.fontSize).toBe(12);
-    const s = mergeSettings({ theme: "neon", fontSize: 200, fontFamily: " ", docs: "x", editor: 3, tabSize: "huge", keys: { newTab: "oops" } });
+    const s = mergeSettings({ theme: "neon", fontSize: 200, fontFamily: " ", docs: "x", editor: 3, confirmLinks: "no", tabSize: "huge", keys: { newTab: "oops" } });
     expect(s).toEqual(DEFAULTS);
   });
 
@@ -143,6 +143,7 @@ describe("mergeSettings", () => {
       fontSize: 12,
       docs: "tabs",
       editor: " notepad++ ",
+      confirmLinks: false,
       tabSize: "large",
       keys: { newTab: ["Alt+N"], closeTab: [] },
     });
@@ -150,6 +151,7 @@ describe("mergeSettings", () => {
     expect(s.tabSize).toBe("large");
     expect(s.docs).toBe("tabs");
     expect(s.editor).toBe("notepad++");
+    expect(s.confirmLinks).toBe(false);
     expect(s.fontSize).toBe(12);
     expect(s.keys.newTab).toEqual(["Alt+N"]);
     expect(s.keys.closeTab).toEqual([]);

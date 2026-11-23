@@ -196,6 +196,24 @@ export function SettingsPage(props: {
                 </div>
                 <div class="setting">
                   <label>
+                    Hyperlinks printed by programs
+                    <span class="setting-sub">
+                      Ctrl+click opens them in the browser. Their text can differ from where they go (agents print
+                      these); plain URLs never ask.
+                    </span>
+                  </label>
+                  <div class="segmented">
+                    <For each={[[true, "Ask first"], [false, "Open directly"]] as const}>
+                      {([value, label]) => (
+                        <button classList={{ on: props.settings.confirmLinks === value }} onClick={() => set({ confirmLinks: value })}>
+                          {label}
+                        </button>
+                      )}
+                    </For>
+                  </div>
+                </div>
+                <div class="setting">
+                  <label>
                     Updates · Rift {version()}
                     <span class="setting-sub">
                       {updateNote() ??

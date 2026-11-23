@@ -40,6 +40,8 @@ export type Settings = {
   docs: "single" | "tabs";
   /** External editor: a program name on PATH or its full path; "" = automatic (Notepad++ or Notepad, TextEdit). */
   editor: string;
+  /** Ask before opening a hyperlink a program printed (its text may hide where it goes). */
+  confirmLinks: boolean;
   /** Height of a sidebar tab row. */
   tabSize: TabSize;
   /** Text scale of the sidebar, panels and documents (1 = normal); terminals use `fontSize`. Ctrl+wheel over one. */
@@ -131,6 +133,7 @@ export const DEFAULTS: Settings = {
   shell: "",
   docs: "single",
   editor: "",
+  confirmLinks: true,
   tabSize: "comfortable",
   scale: { sidebar: 1, files: 1, git: 1, prompts: 1, docs: 1 },
   keys: DEFAULT_KEYS,
@@ -152,6 +155,7 @@ export function mergeSettings(saved: unknown): Settings {
     shell: typeof s.shell === "string" ? s.shell : DEFAULTS.shell,
     docs: s.docs === "tabs" ? "tabs" : DEFAULTS.docs,
     editor: typeof s.editor === "string" ? s.editor.trim() : DEFAULTS.editor,
+    confirmLinks: typeof s.confirmLinks === "boolean" ? s.confirmLinks : DEFAULTS.confirmLinks,
     tabSize: s.tabSize && s.tabSize in TAB_ROW_HEIGHT ? s.tabSize : DEFAULTS.tabSize,
     scale: Object.fromEntries(
       SCALED.map((area) => {

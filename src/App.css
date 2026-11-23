@@ -981,6 +981,19 @@ body,
   outline: none;
 }
 
+.tree-rename {
+  flex: 1;
+  min-width: 0;
+  margin: -1px 4px -1px 0;
+  padding: 0 3px;
+  border: 1px solid var(--accent);
+  border-radius: 2px;
+  outline: none;
+  background: var(--bg);
+  color: var(--fg-strong);
+  font: inherit;
+}
+
 .tree-chev {
   flex: none;
   width: 10px;

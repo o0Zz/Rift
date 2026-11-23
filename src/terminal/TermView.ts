@@ -5,7 +5,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import "@xterm/xterm/css/xterm.css";
-import { cwdFromOsc7, cwdFromOsc9 } from "./osc";
+import { cwdFromOsc7, cwdFromOsc9, hyperlinkAction } from "./osc";
 import { quotePath } from "./paths";
 import { IS_MAC } from "../settings/settings";
 import { isInterruptKey } from "../tabs/layout";
@@ -29,6 +29,8 @@ type TermEvents = {
   imagePasteKey(): string;
   /** Esc or Ctrl+C pressed: an agent is interrupted (no hook reports it). */
   onInterrupt(): void;
+  /** Ask before opening a printed hyperlink (setting `confirmLinks`). */
+  confirmLinks(): boolean;
 };
 
 /** How a shell starts (`TermView.start`). */
@@ -57,7 +59,19 @@ export class TermView {
   private serializer = new SerializeAddon();
 
   constructor(host: HTMLElement, events: TermEvents, look: TermLook) {
-    this.term = new Terminal({ scrollback: 10000, ...look });
+    this.term = new Terminal({
+      scrollback: 10000,
+      ...look,
+      // OSC 8 hyperlinks (agents print them). xterm's own handler opened them on a plain click after a confirm.
+      linkHandler: {
+        activate: (e, uri) => {
+          const action = hyperlinkAction(e.ctrlKey, uri, events.confirmLinks());
+          if (action === "ignore") return;
+          if (action === "ask" && !confirm(`Open this link in the browser?\n\n${uri}`)) return;
+          invoke("open_url", { url: uri });
+        },
+      },
+    });
     this.pty = new Promise((resolve) => (this.attached = resolve));
     this.el.className = "term";
     host.appendChild(this.el);

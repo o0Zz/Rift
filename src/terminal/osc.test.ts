@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { cwdFromOsc7, cwdFromOsc9 } from "./osc";
+import { cwdFromOsc7, cwdFromOsc9, hyperlinkAction } from "./osc";
 
 it("reads PowerShell's OSC 9;9", () => {
   expect(cwdFromOsc9('9;"C:\\Dev\\rift"')).toBe("C:\\Dev\\rift");
@@ -20,4 +20,12 @@ it("turns Git Bash's MSYS paths into Windows paths on Windows only", () => {
   expect(cwdFromOsc7("file://pc/d", true)).toBe("D:\\");
   expect(cwdFromOsc7("file://pc/c/Dev", false)).toBe("/c/Dev");
   expect(cwdFromOsc7("file://pc/home/me", true)).toBe("/home/me"); // not a drive letter
+});
+
+it("opens a printed hyperlink on Ctrl+click only, web addresses only, asking unless turned off", () => {
+  expect(hyperlinkAction(false, "https://a.dev", false)).toBe("ignore");
+  expect(hyperlinkAction(true, "https://a.dev", true)).toBe("ask");
+  expect(hyperlinkAction(true, "HTTP://a.dev/x", false)).toBe("open");
+  expect(hyperlinkAction(true, "file:///C:/a.txt", false)).toBe("ignore");
+  expect(hyperlinkAction(true, "javascript:alert(1)", false)).toBe("ignore");
 });

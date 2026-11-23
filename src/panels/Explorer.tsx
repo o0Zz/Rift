@@ -34,6 +34,42 @@ function FileIcon(p: { name: string; dir: boolean; open: boolean }) {
 }
 
 /**
+ * A row's name being edited, as in File Explorer: the name is selected up to its extension; Enter or a click
+ * elsewhere keeps the new name (`onDone`), Escape the old one. Keys and clicks stay in the box.
+ */
+function RenameBox(p: { name: string; onDone(name: string): void }) {
+  let done = false;
+  const finish = (name: string) => {
+    if (done) return;
+    done = true;
+    p.onDone(name.trim());
+  };
+  return (
+    <input
+      class="tree-rename"
+      value={p.name}
+      spellcheck={false}
+      ref={(el) =>
+        queueMicrotask(() => {
+          el.focus();
+          const dot = p.name.lastIndexOf(".");
+          el.setSelectionRange(0, dot > 0 ? dot : p.name.length);
+        })
+      }
+      onKeyDown={(e) => {
+        e.stopPropagation();
+        if (e.key === "Enter") finish(e.currentTarget.value);
+        else if (e.key === "Escape") finish(p.name);
+      }}
+      onBlur={(e) => finish(e.currentTarget.value)}
+      onClick={(e) => e.stopPropagation()}
+      onDblClick={(e) => e.stopPropagation()}
+      onMouseDown={(e) => e.stopPropagation()}
+    />
+  );
+}
+
+/**
  * File tree of the tab's repo (or folder). Each folder is listed once, when first expanded (cached until ⟳).
  * A click opens a file in the tab (`onOpenFile`), a double-click in the external editor (`onEditFile`); a click
  * selects it: focus stays here, so Delete moves it to the trash and F2 renames it (`onDeleted` closes its documents either way). Keys as in
@@ -142,9 +178,11 @@ export function Explorer(props: {
     body.focus({ preventScroll: true });
   }
 
-  const [renaming, setRenaming] = createSignal<{ path: string; parent: string }>();
+  /** The row being renamed: its name becomes a text box (Enter or leaving it renames, Escape cancels). */
+  const [renaming, setRenaming] = createSignal<string>();
   async function rename(path: string, parent: string, name: string) {
     setRenaming(undefined);
+    if (!name || name === folderName(path)) return body.focus({ preventScroll: true });
     try {
       const to = await invoke<string>("fs_rename", { path, name });
       setExpanded(new Set([...expanded()].filter((dir) => !isUnder(dir, path))));
@@ -178,7 +216,7 @@ export function Explorer(props: {
     }
     if (sel && e.key === "F2" && !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey) {
       e.preventDefault();
-      return setRenaming(sel);
+      return setRenaming(sel.path);
     }
     const clip = clipboardKey(e);
     if (clip) {
@@ -242,7 +280,7 @@ export function Explorer(props: {
             ...(props.onHistory ? [{ label: "Show history", icon: "history", run: () => props.onHistory!(path) } as const] : []),
           ] satisfies MenuItem[]),
       { label: `Reveal in ${FILE_MANAGER}`, icon: "folder", run: () => invoke("fs_reveal", { path }) },
-      { label: "Rename… (F2)", icon: "edit", run: () => setRenaming({ path, parent }) },
+      { label: "Rename… (F2)", icon: "edit", run: () => setRenaming(path) },
       { label: "Copy", icon: "copy", run: () => copy(path) },
       ...(dir ? [] : [{ label: "Paste", icon: "paste", run: () => paste(parent) } as const]),
       { label: "Copy path", icon: "copy", run: () => navigator.clipboard.writeText(path) },
@@ -267,7 +305,7 @@ export function Explorer(props: {
                     classList={{ selected: selected()?.path === path }}
                     style={{ "padding-left": `${p.depth * 12 + 8}px` }}
                     title={path}
-                    draggable={true}
+                    draggable={renaming() !== path}
                     onDragStart={(e) => {
                       e.dataTransfer!.setData(PATH_DRAG_TYPE, path);
                       e.dataTransfer!.setData("text/plain", path);
@@ -285,7 +323,9 @@ export function Explorer(props: {
                   >
                     <span class="tree-chev">{entry.dir && <Icon name={open() ? "down" : "right"} size={12} />}</span>
                     <FileIcon name={entry.name} dir={entry.dir} open={open()} />
-                    <span classList={{ "tree-dir": entry.dir }}>{entry.name}</span>
+                    <Show when={renaming() === path} fallback={<span classList={{ "tree-dir": entry.dir }}>{entry.name}</span>}>
+                      <RenameBox name={entry.name} onDone={(name) => rename(path, p.dir, name)} />
+                    </Show>
                   </div>
                   <Show when={entry.dir && open()}>
                     <Folder dir={path} depth={p.depth + 1} />
@@ -351,22 +391,6 @@ export function Explorer(props: {
           )}
         </Show>
       </div>
-      <Show when={renaming()}>
-        {(r) => (
-          <Portal>
-            <PromptDialog
-              title={`Rename ${folderName(r().path)}`}
-              value={folderName(r().path)}
-              confirm="Rename"
-              onSubmit={(name) => rename(r().path, r().parent, name)}
-              onCancel={() => {
-                setRenaming(undefined);
-                body.focus({ preventScroll: true });
-              }}
-            />
-          </Portal>
-        )}
-      </Show>
       <Show when={naming()}>
         {(parent) => (
           <Portal>

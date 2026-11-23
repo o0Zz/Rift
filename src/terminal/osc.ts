@@ -24,3 +24,12 @@ export function cwdFromOsc7(data: string, windows = IS_WINDOWS): string | undefi
   const msys = windows && /^\/([a-zA-Z])(\/.*)?$/.exec(path);
   return msys ? `${msys[1].toUpperCase()}:${(msys[2] ?? "\\").replace(/\//g, "\\")}` : path;
 }
+
+/**
+ * A click on an OSC 8 hyperlink (agents print them; the text may hide the address): Ctrl+click only, like plain
+ * URLs, web addresses only, asking first unless the user turned that off (Settings > General).
+ */
+export function hyperlinkAction(ctrl: boolean, uri: string, confirmLinks: boolean): "ignore" | "ask" | "open" {
+  if (!ctrl || !/^https?:\/\//i.test(uri)) return "ignore";
+  return confirmLinks ? "ask" : "open";
+}
