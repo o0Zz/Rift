@@ -476,26 +476,58 @@ fn capped_diff(out: &std::process::Output) -> String {
 pub struct Branch {
     pub name: String,
     pub current: bool,
+    /// A remote branch (`origin/x`) with no local branch of that name: switching to it creates one.
+    pub remote: bool,
 }
 
-/// Local branches, most recently committed first.
+/// Local branches, then remote branches not checked out locally; each most recently committed first.
 pub fn branches(root: &Path) -> Result<Vec<Branch>> {
     let out = check(git(
         root,
         &[
-            "branch",
+            "for-each-ref",
             "--sort=-committerdate",
-            "--format=%(HEAD)%00%(refname:short)",
+            "--format=%(HEAD)%00%(symref)%00%(refname)",
+            "refs/heads",
+            "refs/remotes",
         ],
     )?)?;
-    Ok(String::from_utf8_lossy(&out.stdout)
-        .lines()
-        .filter_map(|l| l.split_once('\0'))
-        .map(|(head, name)| Branch {
-            name: name.to_string(),
-            current: head == "*",
+    let text = String::from_utf8_lossy(&out.stdout);
+    let mut local = Vec::new();
+    let mut remote = Vec::new();
+    for line in text.lines() {
+        let mut f = line.split('\0');
+        let (Some(head), Some(symref), Some(name)) = (f.next(), f.next(), f.next()) else {
+            continue;
+        };
+        if let Some(name) = name.strip_prefix("refs/heads/") {
+            local.push(Branch {
+                name: name.to_string(),
+                current: head == "*",
+                remote: false,
+            });
+        } else if let Some(name) = name.strip_prefix("refs/remotes/") {
+            // `origin/HEAD` only points at another remote branch.
+            if symref.is_empty() {
+                remote.push(name.to_string());
+            }
+        }
+    }
+    let is_local = |r: &str| {
+        r.split_once('/')
+            .is_some_and(|(_, n)| local.iter().any(|b| b.name == n))
+    };
+    let remote: Vec<_> = remote
+        .into_iter()
+        .filter(|r| !is_local(r))
+        .map(|name| Branch {
+            name,
+            current: false,
+            remote: true,
         })
-        .collect())
+        .collect();
+    local.extend(remote);
+    Ok(local)
 }
 
 fn valid_branch(root: &Path, name: &str) -> Result<()> {
@@ -507,6 +539,13 @@ fn valid_branch(root: &Path, name: &str) -> Result<()> {
 pub fn switch(root: &Path, branch: &str) -> Result<()> {
     valid_branch(root, branch)?;
     check(git(root, &["switch", branch])?)?;
+    Ok(())
+}
+
+/// Switches to remote branch `origin/x` through a new local branch `x` tracking it.
+pub fn track(root: &Path, remote_branch: &str) -> Result<()> {
+    valid_branch(root, remote_branch)?;
+    check(git(root, &["switch", "--track", remote_branch])?)?;
     Ok(())
 }
 
@@ -1359,6 +1398,36 @@ three
         assert!(create_branch(r, "bad..name").is_err());
         assert!(switch(r, "nope").is_err());
         assert!(switch(r, "-f").is_err(), "never an option");
+    }
+
+    #[test]
+    fn lists_remote_branches_not_checked_out_and_switches_to_them() {
+        let origin = repo();
+        run(origin.path(), &["branch", "feature/x"]);
+        let parent = tempfile::tempdir().unwrap();
+        let src = origin.path().to_str().unwrap();
+        run(parent.path(), &["clone", "-q", src, "clone"]);
+        let r = &parent.path().join("clone");
+        let list = |r: &Path| {
+            branches(r)
+                .unwrap()
+                .into_iter()
+                .map(|b| (b.name, b.current, b.remote))
+                .collect::<Vec<_>>()
+        };
+        // origin/main has a local main, origin/HEAD is only a pointer.
+        assert_eq!(
+            list(r),
+            [
+                ("main".into(), true, false),
+                ("origin/feature/x".into(), false, true)
+            ]
+        );
+        track(r, "origin/feature/x").unwrap();
+        assert_eq!(head(r).unwrap().branch, "feature/x");
+        assert!(list(r).iter().all(|b| !b.2), "now local: {:?}", list(r));
+        assert!(track(r, "origin/nope").is_err());
+        assert!(track(r, "-f").is_err(), "never an option");
     }
 
     #[test]

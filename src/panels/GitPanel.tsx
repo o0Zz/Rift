@@ -35,7 +35,7 @@ type Commit = {
   /** Commits it holds (itself and its ancestors): the first commit is 1; null in a very large history. */
   number: number | null;
 };
-type Branch = { name: string; current: boolean };
+type Branch = { name: string; current: boolean; remote: boolean };
 type Busy = "commit" | "generate" | "push" | "pull" | "branch" | "discard";
 
 /** Last background fetch per repo, for the whole app (the panel may be closed and reopened). */
@@ -278,10 +278,10 @@ export function GitPanel(props: {
     ]);
   }
 
-  async function changeBranch(command: "git_switch" | "git_create_branch", branch: string) {
+  async function changeBranch(command: "git_switch" | "git_track" | "git_create_branch", branch: string) {
     setNaming(false);
     if (!(await act("branch", () => invoke<void>(command, { root: props.root, branch })))) return;
-    setNote({ text: `On branch ${branch}` });
+    setNote({ text: `On branch ${command === "git_track" ? branch.slice(branch.indexOf("/") + 1) : branch}` });
     headMoved();
   }
 
@@ -291,15 +291,22 @@ export function GitPanel(props: {
       setNote({ text: String(err), error: true });
       return [] as Branch[];
     });
+    // Remote branches not checked out here: a click creates the local branch tracking it.
+    const remote = branches.filter((b) => b.remote).slice(0, 20);
     // The click's position is still readable after the await.
     menu.open(e, [
       { label: "New branch…", run: () => setNaming(true) },
       "separator",
       // Most recent first; a long list would not fit on screen.
-      ...branches.slice(0, 30).map((b) => ({
-        label: b.current ? `${b.name} (current)` : b.name,
-        run: () => !b.current && changeBranch("git_switch", b.name),
-      })),
+      ...branches
+        .filter((b) => !b.remote)
+        .slice(0, 20)
+        .map((b) => ({
+          label: b.current ? `${b.name} (current)` : b.name,
+          run: () => !b.current && changeBranch("git_switch", b.name),
+        })),
+      ...(remote.length ? ["separator" as const] : []),
+      ...remote.map((b) => ({ label: b.name, run: () => changeBranch("git_track", b.name) })),
     ]);
   }
 

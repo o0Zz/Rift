@@ -551,6 +551,11 @@ async fn git_switch(root: String, branch: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn git_track(root: String, branch: String) -> Result<(), String> {
+    git::track(root.as_ref(), branch.trim()).map_err(err)
+}
+
+#[tauri::command]
 async fn git_create_branch(root: String, branch: String) -> Result<(), String> {
     git::create_branch(root.as_ref(), branch.trim()).map_err(err)
 }
@@ -856,6 +861,7 @@ pub fn run() {
             git_diff,
             git_branches,
             git_switch,
+            git_track,
             git_create_branch,
             git_push,
             git_fetch,
