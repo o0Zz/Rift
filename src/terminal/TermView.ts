@@ -6,8 +6,8 @@ import { SerializeAddon } from "@xterm/addon-serialize";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import "@xterm/xterm/css/xterm.css";
 import { cwdFromOsc7, cwdFromOsc9, hyperlinkAction } from "./osc";
-import { quotePath, windowsPaths } from "./paths";
-import { IS_MAC, IS_WINDOWS } from "../settings/settings";
+import { fileUrlPath, printedPaths, quotePath } from "./paths";
+import { IS_MAC } from "../settings/settings";
 import { isInterruptKey } from "../tabs/layout";
 
 export type AgentSession = { harness: string; session_id: string };
@@ -31,7 +31,7 @@ type TermEvents = {
   onInterrupt(): void;
   /** Ask before opening a printed hyperlink (setting `confirmLinks`). */
   confirmLinks(): boolean;
-  /** Ctrl+click on a Windows path printed in the terminal. */
+  /** Ctrl+click on a path printed in the terminal, or a file:// link. */
   openPath(path: string): void;
 };
 
@@ -67,6 +67,9 @@ export class TermView {
       // OSC 8 hyperlinks (agents print them). xterm's own handler opened them on a plain click after a confirm.
       linkHandler: {
         activate: (e, uri) => {
+          // A file:// link opens like a printed path (never run): no question.
+          const path = fileUrlPath(uri);
+          if (path) return e.ctrlKey && events.openPath(path);
           const action = hyperlinkAction(e.ctrlKey, uri, events.confirmLinks());
           if (action === "ignore") return;
           if (action === "ask" && !confirm(`Open this link in the browser?\n\n${uri}`)) return;
@@ -82,21 +85,19 @@ export class TermView {
     this.term.loadAddon(this.serializer);
     // Ctrl+click opens a link, like VS Code and Windows Terminal: a plain click must not open pages by accident.
     this.term.loadAddon(new WebLinksAddon((e, url) => e.ctrlKey && invoke("open_url", { url })));
-    // Windows paths (`C:\x\y.ts`), the same way. xterm asks only for the line under the mouse.
-    if (IS_WINDOWS) {
-      this.term.registerLinkProvider({
-        provideLinks: (y, done) => {
-          const line = this.term.buffer.active.getLine(y - 1)?.translateToString(true) ?? "";
-          done(
-            windowsPaths(line).map((p) => ({
-              range: { start: { x: p.start + 1, y }, end: { x: p.end, y } },
-              text: p.path,
-              activate: (e) => e.ctrlKey && events.openPath(p.path),
-            })),
-          );
-        },
-      });
-    }
+    // Printed paths (`C:\x\y.ts`, `/var/x`, file://), the same way. xterm asks only for the line under the mouse.
+    this.term.registerLinkProvider({
+      provideLinks: (y, done) => {
+        const line = this.term.buffer.active.getLine(y - 1)?.translateToString(true) ?? "";
+        done(
+          printedPaths(line).map((p) => ({
+            range: { start: { x: p.start + 1, y }, end: { x: p.end, y } },
+            text: p.path,
+            activate: (e) => e.ctrlKey && events.openPath(p.path),
+          })),
+        );
+      },
+    });
     this.term.open(this.el);
     this.term.onTitleChange(events.onTitle);
     // Folder reports: OSC 9;9 from PowerShell, OSC 7 from bash/zsh.
