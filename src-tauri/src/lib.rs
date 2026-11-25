@@ -453,6 +453,11 @@ async fn fs_mtime(path: String) -> Result<u64, String> {
 }
 
 #[tauri::command]
+async fn fs_is_dir(path: String) -> bool {
+    Path::new(&path).is_dir()
+}
+
+#[tauri::command]
 async fn fs_reveal(path: String) -> Result<(), String> {
     tauri_plugin_opener::reveal_item_in_dir(path).map_err(err)
 }
@@ -850,6 +855,7 @@ pub fn run() {
             fs_read_text,
             fs_write_text,
             fs_mtime,
+            fs_is_dir,
             fs_reveal,
             fs_trash,
             fs_mkdir,

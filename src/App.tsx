@@ -283,6 +283,12 @@ function App() {
         imagePasteKey: () => agents().find((a) => a.id === shell.agent)?.image_paste_key ?? "\x16",
         onInterrupt: () => (shell.status = statusAfterInterrupt(shell.status)),
         confirmLinks: () => settings().confirmLinks,
+        // Anything may print a path: a folder opens in the file manager, a file in the tab like a Markdown link
+        // (not text = shown in the file manager, never run).
+        openPath: async (path) => {
+          if (await invoke<boolean>("fs_is_dir", { path })) invoke("fs_open", { path });
+          else docs.open(path, tab, true);
+        },
       },
       look(),
     );
